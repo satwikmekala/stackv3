@@ -1,11 +1,15 @@
 import React from 'react';
-import { View, Text, SafeAreaView, ScrollView } from 'react-native';
+import { View, Text, SafeAreaView, ScrollView, Alert } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useWorkoutStore } from '@/store/workoutStore';
+import { Button } from '@/components/Button';
 import '@/global.css';
 
 export default function Profile() {
   const profile = useWorkoutStore((state) => state.profile);
   const sessions = useWorkoutStore((state) => state.sessions);
+  const resetAllData = useWorkoutStore((state) => state.resetAllData);
+  const router = useRouter();
 
   if (!profile) {
     return null;
@@ -19,6 +23,27 @@ export default function Profile() {
     pull: completedSessions.filter((s) => s.type === 'pull').length,
     legs: completedSessions.filter((s) => s.type === 'legs').length,
     abs: completedSessions.filter((s) => s.type === 'abs').length,
+  };
+
+  const handleReset = () => {
+    Alert.alert(
+      'Reset All Data',
+      'Are you sure you want to reset all your data? This action cannot be undone and will take you back to the onboarding process.',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Reset',
+          style: 'destructive',
+          onPress: () => {
+            resetAllData();
+            router.replace('/(onboarding)/welcome');
+          },
+        },
+      ]
+    );
   };
 
   return (
@@ -71,6 +96,22 @@ export default function Profile() {
               <Text className="text-text font-semibold">{workoutBreakdown.abs}</Text>
             </View>
           </View>
+        </View>
+
+        <View className="h-8" />
+        
+        {/* Reset Button */}
+        <View className="bg-surface rounded-xl p-5 mb-6">
+          <Text className="text-text-secondary text-sm font-medium mb-3">Danger Zone</Text>
+          <Button
+            title="Reset All Data"
+            onPress={handleReset}
+            variant="secondary"
+            className="bg-red-600 active:bg-red-700"
+          />
+          <Text className="text-text-secondary text-xs mt-2 text-center">
+            This will clear all your workout data and return you to onboarding
+          </Text>
         </View>
 
         <View className="h-8" />

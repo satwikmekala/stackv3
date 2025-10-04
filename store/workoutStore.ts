@@ -51,6 +51,7 @@ interface WorkoutStore {
   getWeekStreak: () => { date: string; workouts: number }[];
 
   resetWeeklyProgress: () => void;
+  resetAllData: () => void;
 }
 
 const WORKOUT_ROTATION: WorkoutType[] = ['push', 'pull', 'legs', 'abs'];
@@ -264,6 +265,13 @@ export const useWorkoutStore = create<WorkoutStore>()(
             ? { ...state.profile, workoutsCompletedThisWeek: 0 }
             : null,
         })),
+
+      resetAllData: () =>
+        set({
+          profile: null,
+          sessions: [],
+          currentSession: null,
+        }),
     }),
     {
       name: 'workout-store',
