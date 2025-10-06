@@ -1,48 +1,88 @@
-import React, { useState } from 'react';
-import { View, Text, SafeAreaView } from 'react-native';
+import React from 'react';
+import { View, Text, SafeAreaView, TouchableOpacity, Image, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Input } from '@/components/Input';
-import { Button } from '@/components/Button';
 import '@/global.css';
 
-export default function Welcome() {
+export default function Intro() {
   const router = useRouter();
-  const [name, setName] = useState('');
 
   const handleContinue = () => {
-    if (name.trim()) {
-      router.push({
-        pathname: '/(onboarding)/goal',
-        params: { name: name.trim() },
-      });
-    }
+    router.push('/(onboarding)/whatsurname');
   };
+
+  const features = [
+    {
+      icon: require('../../assets/images/TrackYourProgress.png'),
+      title: 'Track Your Progress',
+      description: 'Log your sets, reps, and weights.\nTrain with intent. ',
+    },
+    {
+      icon: require('../../assets/images/SetWeeklyGymGoals.png'),
+      title: 'Set Weekly Gym Goals',
+      description: 'Choose your training days. Stack \nkeeps you on track..',
+    },
+    {
+      icon: require('../../assets/images/SeeYourGrowthOverTime.png'),
+      title: 'See Your journey',
+      description: 'Review past sessions and watch\nyour progress build.',
+    },
+  ];
 
   return (
     <SafeAreaView className="flex-1 bg-background">
-      <View className="flex-1 px-6 justify-center">
-        <View className="mb-12">
-          <Text className="text-4xl font-bold text-text mb-3">Welcome to Stack</Text>
-          <Text className="text-lg text-text-secondary leading-relaxed">
-            Let's get you set up. We'll keep this quick - just a few questions to personalize your experience.
-          </Text>
-        </View>
+      <ScrollView 
+        className="flex-1" 
+        contentContainerStyle={{ flexGrow: 1 }}
+        showsVerticalScrollIndicator={false}
+      >
+        <View className="flex-1 px-6">
+          {/* Top Section - Header */}
+          <View className="pt-28 pb-0">
+            <Text className="text-4xl font-bold text-text text-center">
+              Welcome to Stack
+            </Text>
+          </View>
 
-        <View className="mb-8">
-          <Input
-            label="What's your name?"
-            value={name}
-            onChangeText={setName}
-            placeholder="Enter your name"
-          />
-        </View>
+          {/* Feature List Section */}
+          <View className="flex-1 justify-center pl-4 -mt-24">
+            {features.map((feature, index) => (
+              <View key={index} className="mb-6 flex-row items-start">
+                {/* PNG Icon */}
+                <View className="mr-5 flex-shrink-0 pt-3">
+                  <Image 
+                    source={feature.icon} 
+                    style={{ width: 45, height: 45 }} 
+                    resizeMode="contain"
+                  />
+                </View>
+                
+                {/* Feature Content */}
+                <View className="flex-1">
+                  <Text className="text-xl font-bold text-text mb-0">
+                    {feature.title}
+                  </Text>
+                  <Text className="text-base text-text-secondary leading-relaxed">
+                    {feature.description}
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </View>
 
-        <Button
-          title="Continue"
-          onPress={handleContinue}
-          disabled={!name.trim()}
-        />
-      </View>
+          {/* Bottom Section - Continue Button */}
+          <View className="pb-12 pt-8">
+            <TouchableOpacity
+              onPress={handleContinue}
+              className="bg-primary rounded-2xl h-14 px-6 flex items-center justify-center"
+              activeOpacity={0.8}
+            >
+              <Text className="text-base font-semibold text-background">
+                Continue
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
