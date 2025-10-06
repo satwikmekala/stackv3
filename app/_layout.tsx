@@ -19,7 +19,7 @@ export default function RootLayout() {
     const inOnboarding = segments[0] === '(onboarding)';
 
     if (!profile.onboardingCompleted && !inOnboarding) {
-      router.replace('/(onboarding)/intro');
+      router.replace('/(onboarding)/welcome');
     } else if (profile.onboardingCompleted && inOnboarding) {
       router.replace('/(tabs)');
     }

@@ -48,5 +48,3 @@ export function Button({
   );
 }
 
-
-export { Button }
