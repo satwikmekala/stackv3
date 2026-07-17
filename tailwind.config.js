@@ -1,4 +1,5 @@
 /** @type {import('tailwindcss').Config} */
+// Color + font values mirror constants/theme.ts — keep the two in sync.
 module.exports = {
   content: [
     "./app/**/*.{js,jsx,ts,tsx}",
@@ -8,14 +9,22 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        background: '#0A0A0A',
-        surface: '#1A1A1A',
-        'surface-light': '#2A2A2A',
-        primary: '#22C55E',
-        'primary-dark': '#16A34A',
-        text: '#FAFAFA',
-        'text-secondary': '#A1A1A1',
-        'text-tertiary': '#525252',
+        ink: '#100E0C',
+        surface: '#1C1815',
+        'surface-raised': '#262019',
+        accent: '#4C6FFF',
+        bone: '#F3EDE4',
+        ash: '#A39C8F',
+        'ash-dim': '#6B6459',
+      },
+      fontFamily: {
+        heading: ['Switzer-Semibold'],
+        'heading-bold': ['Switzer-Bold'],
+        body: ['Switzer-Regular'],
+        'body-medium': ['Switzer-Medium'],
+        'body-semibold': ['Switzer-Semibold'],
+        mono: ['SpaceMono_400Regular'],
+        'mono-bold': ['SpaceMono_700Bold'],
       },
     },
   },

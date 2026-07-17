@@ -1,5 +1,11 @@
 import React from 'react';
-import { TouchableOpacity, Text, ActivityIndicator } from 'react-native';
+import { Text, ActivityIndicator, Pressable } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
+import { colors, fonts } from '@/constants/theme';
 
 interface ButtonProps {
   title: string;
@@ -10,6 +16,20 @@ interface ButtonProps {
   className?: string;
 }
 
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+const CONTAINER_STYLES = {
+  primary: { backgroundColor: colors.bone },
+  secondary: { backgroundColor: colors.surfaceRaised },
+  ghost: { backgroundColor: 'transparent' },
+} as const;
+
+const TEXT_STYLES = {
+  primary: { fontFamily: fonts.heading, color: colors.ink },
+  secondary: { fontFamily: fonts.bodySemiBold, color: colors.bone },
+  ghost: { fontFamily: fonts.bodyMedium, color: colors.ash },
+} as const;
+
 export function Button({
   title,
   onPress,
@@ -18,33 +38,37 @@ export function Button({
   loading = false,
   className = '',
 }: ButtonProps) {
-  const baseClasses = 'px-6 py-4 rounded-xl items-center justify-center';
-  const variantClasses = {
-    primary: 'bg-primary active:bg-primary-dark',
-    secondary: 'bg-surface-light active:bg-surface',
-    ghost: 'bg-transparent active:bg-surface',
-  };
+  const press = useSharedValue(0);
 
-  const textClasses = {
-    primary: 'text-background font-semibold text-base',
-    secondary: 'text-text font-semibold text-base',
-    ghost: 'text-text-secondary font-medium text-base',
-  };
-
-  const disabledClasses = disabled || loading ? 'opacity-50' : '';
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: 1 - press.value * 0.03 }],
+  }));
 
   return (
-    <TouchableOpacity
+    <AnimatedPressable
       onPress={onPress}
       disabled={disabled || loading}
-      className={`${baseClasses} ${variantClasses[variant]} ${disabledClasses} ${className}`}
+      onPressIn={() => (press.value = withTiming(1, { duration: 120 }))}
+      onPressOut={() => (press.value = withTiming(0, { duration: 120 }))}
+      className={className}
+      style={[
+        {
+          height: 54,
+          borderRadius: 16,
+          paddingHorizontal: 24,
+          alignItems: 'center',
+          justifyContent: 'center',
+          opacity: disabled || loading ? 0.45 : 1,
+        },
+        CONTAINER_STYLES[variant],
+        animatedStyle,
+      ]}
     >
       {loading ? (
-        <ActivityIndicator color={variant === 'primary' ? '#0A0A0A' : '#FAFAFA'} />
+        <ActivityIndicator color={variant === 'primary' ? colors.ink : colors.bone} />
       ) : (
-        <Text className={textClasses[variant]}>{title}</Text>
+        <Text style={[{ fontSize: 16 }, TEXT_STYLES[variant]]}>{title}</Text>
       )}
-    </TouchableOpacity>
+    </AnimatedPressable>
   );
 }
-

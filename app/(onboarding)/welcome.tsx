@@ -1,88 +1,173 @@
 import React from 'react';
-import { View, Text, SafeAreaView, TouchableOpacity, Image, ScrollView } from 'react-native';
+import { Image, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
+import { BarChart3, Target, TrendingUp } from 'lucide-react-native';
+import {
+  OnboardingNextButton,
+  OnboardingProgress,
+} from '@/components/OnboardingControls';
+import { redesignColors, redesignFonts, splitColors } from '@/constants/theme';
 import '@/global.css';
 
-export default function Intro() {
+const FEATURES = [
+  {
+    accent: splitColors.chest,
+    icon: BarChart3,
+    title: 'Track your progress',
+    description: 'Every lift, PR and streak in one place.',
+  },
+  {
+    accent: splitColors.legs,
+    icon: Target,
+    title: 'Set weekly gym goals',
+    description: 'Pick your days and hit them each week.',
+  },
+  {
+    accent: splitColors.shoulders,
+    icon: TrendingUp,
+    title: 'See your journey',
+    description: 'Watch strength climb week over week.',
+  },
+] as const;
+
+export default function Welcome() {
   const router = useRouter();
 
-  const handleContinue = () => {
-    router.push('/(onboarding)/whatsurname');
-  };
-
-  const features = [
-    {
-      icon: require('../../assets/images/TrackYourProgress.png'),
-      title: 'Track Your Progress',
-      description: 'Log your sets, reps, and weights.\nTrain with intent. ',
-    },
-    {
-      icon: require('../../assets/images/SetWeeklyGymGoals.png'),
-      title: 'Set Weekly Gym Goals',
-      description: 'Choose your training days. Stack \nkeeps you on track..',
-    },
-    {
-      icon: require('../../assets/images/SeeYourGrowthOverTime.png'),
-      title: 'See Your journey',
-      description: 'Review past sessions and watch\nyour progress build.',
-    },
-  ];
-
   return (
-    <SafeAreaView className="flex-1 bg-background">
-      <ScrollView 
-        className="flex-1" 
-        contentContainerStyle={{ flexGrow: 1 }}
-        showsVerticalScrollIndicator={false}
-      >
-        <View className="flex-1 px-6">
-          {/* Top Section - Header */}
-          <View className="pt-28 pb-0">
-            <Text className="text-4xl font-bold text-text text-center">
-              Welcome to Stack
-            </Text>
-          </View>
-
-          {/* Feature List Section */}
-          <View className="flex-1 justify-center pl-4 -mt-24">
-            {features.map((feature, index) => (
-              <View key={index} className="mb-6 flex-row items-start">
-                {/* PNG Icon */}
-                <View className="mr-5 flex-shrink-0 pt-3">
-                  <Image 
-                    source={feature.icon} 
-                    style={{ width: 45, height: 45 }} 
-                    resizeMode="contain"
-                  />
-                </View>
-                
-                {/* Feature Content */}
-                <View className="flex-1">
-                  <Text className="text-xl font-bold text-text mb-0">
-                    {feature.title}
-                  </Text>
-                  <Text className="text-base text-text-secondary leading-relaxed">
-                    {feature.description}
-                  </Text>
-                </View>
-              </View>
-            ))}
-          </View>
-
-          {/* Bottom Section - Continue Button */}
-          <View className="pb-12 pt-8">
-            <TouchableOpacity
-              onPress={handleContinue}
-              className="bg-primary rounded-2xl h-14 px-6 flex items-center justify-center"
-              activeOpacity={0.8}
-            >
-              <Text className="text-base font-semibold text-background">
-                Continue
-              </Text>
-            </TouchableOpacity>
-          </View>
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.screen}>
+        <View style={styles.progressHeader}>
+          <OnboardingProgress currentStep={1} />
         </View>
-      </ScrollView>
+
+        <View style={styles.brand}>
+          <Image
+            accessibilityLabel="Stack logo"
+            source={require('@/assets/images/stack logo.png')}
+            style={styles.brandMark}
+          />
+          <Text style={styles.brandName}>Stack</Text>
+        </View>
+
+        <View style={styles.intro}>
+          <Text style={styles.heading}>{'Strength,\nstacked daily.'}</Text>
+          <Text style={styles.subtitle}>
+            Small sessions, stacked up over weeks. {"Let's"} set up your training.
+          </Text>
+        </View>
+
+        <View style={styles.featureList}>
+          {FEATURES.map(({ accent, description, icon: Icon, title }) => (
+            <View key={title} style={styles.featureRow}>
+              <View style={[styles.featureIcon, { backgroundColor: `${accent}24` }]}>
+                <Icon color={accent} size={28} strokeWidth={2.2} />
+              </View>
+              <View style={styles.featureCopy}>
+                <Text style={styles.featureTitle}>{title}</Text>
+                <Text style={styles.featureDescription}>
+                  {description}
+                </Text>
+              </View>
+            </View>
+          ))}
+        </View>
+
+        <View pointerEvents="box-none" style={styles.footer}>
+          <OnboardingNextButton
+            onPress={() => router.push('/(onboarding)/whatsurname')}
+            size={64}
+          />
+        </View>
+      </View>
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: redesignColors.ink,
+  },
+  screen: {
+    flex: 1,
+    paddingTop: 40,
+    paddingHorizontal: 36,
+    paddingBottom: 36,
+  },
+  progressHeader: {
+    width: '100%',
+    height: 4,
+    marginBottom: 38,
+  },
+  brand: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  brandMark: {
+    width: 42,
+    height: 42,
+  },
+  brandName: {
+    color: redesignColors.bone,
+    fontFamily: redesignFonts.display,
+    fontSize: 28,
+    letterSpacing: -0.28,
+  },
+  intro: {
+    marginTop: 30,
+  },
+  heading: {
+    color: redesignColors.bone,
+    fontFamily: redesignFonts.display,
+    fontSize: 40,
+    lineHeight: 43,
+    letterSpacing: -0.4,
+  },
+  subtitle: {
+    maxWidth: 295,
+    marginTop: 16,
+    color: redesignColors.ash,
+    fontFamily: redesignFonts.ui,
+    fontSize: 16,
+    lineHeight: 24,
+  },
+  featureList: {
+    marginTop: 42,
+    gap: 20,
+  },
+  featureRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 16,
+  },
+  featureIcon: {
+    width: 54,
+    height: 54,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  featureCopy: {
+    minWidth: 0,
+    flex: 1,
+  },
+  featureTitle: {
+    color: redesignColors.bone,
+    fontFamily: redesignFonts.uiBold,
+    fontSize: 20,
+    lineHeight: 24,
+  },
+  featureDescription: {
+    marginTop: 3,
+    color: redesignColors.ash,
+    fontFamily: redesignFonts.ui,
+    fontSize: 16,
+    lineHeight: 23,
+  },
+  footer: {
+    position: 'absolute',
+    right: 36,
+    bottom: 36,
+  },
+});

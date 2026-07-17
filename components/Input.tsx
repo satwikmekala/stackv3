@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, TextInput, Text } from 'react-native';
+import { colors, fonts } from '@/constants/theme';
 
 interface InputProps {
   label: string;
@@ -10,16 +11,39 @@ interface InputProps {
 }
 
 export function Input({ label, value, onChangeText, placeholder, keyboardType = 'default' }: InputProps) {
+  const [focused, setFocused] = useState(false);
+
   return (
-    <View className="mb-4">
-      <Text className="text-text-secondary text-sm font-medium mb-2">{label}</Text>
+    <View style={{ marginBottom: 16 }}>
+      <Text
+        style={{
+          fontFamily: fonts.bodyMedium,
+          fontSize: 13,
+          color: colors.ash,
+          marginBottom: 8,
+        }}
+      >
+        {label}
+      </Text>
       <TextInput
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
-        placeholderTextColor="#525252"
+        placeholderTextColor={colors.ash}
         keyboardType={keyboardType}
-        className="bg-surface-light text-text px-4 py-4 rounded-xl text-base"
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        style={{
+          backgroundColor: colors.surfaceRaised,
+          color: colors.bone,
+          fontFamily: fonts.body,
+          fontSize: 16,
+          paddingHorizontal: 16,
+          paddingVertical: 16,
+          borderRadius: 12,
+          borderWidth: 1.5,
+          borderColor: focused ? colors.accent : 'transparent',
+        }}
       />
     </View>
   );

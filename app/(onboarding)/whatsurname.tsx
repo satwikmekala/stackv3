@@ -1,87 +1,148 @@
-import React, { useState } from 'react';
-import { View, Text, SafeAreaView, TextInput, TouchableOpacity } from 'react-native';
+import React, { useRef, useState } from 'react';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { useRouter } from 'expo-router';
-import { ArrowRight } from 'lucide-react-native';
+import {
+  OnboardingBackButton,
+  OnboardingNextButton,
+  OnboardingProgress,
+} from '@/components/OnboardingControls';
+import { redesignColors, redesignFonts, splitColors } from '@/constants/theme';
 import '@/global.css';
 
-export default function Welcome() {
+export default function WhatsYourName() {
   const router = useRouter();
+  const nameInputRef = useRef<TextInput>(null);
   const [name, setName] = useState('');
   const [isFocused, setIsFocused] = useState(false);
-  const [isFabPressed, setIsFabPressed] = useState(false);
-  const hasValue = name.trim().length > 0;
+  const trimmedName = name.trim();
+  const isActive = isFocused || trimmedName.length > 0;
 
-  const goToNext = () => {
-    router.push('/(onboarding)/goal');
+  const handleContinue = () => {
+    if (!trimmedName) {
+      return;
+    }
+
+    router.push({
+      pathname: '/(onboarding)/experience',
+      params: { name: trimmedName },
+    });
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-background relative">
-      <View className="flex-1 px-10">
-        {/* Main title with proper spacing */}
-        <View className="pt-24">
-          <Text className="text-text font-bold text-left"
-            style={{
-              fontSize: 29.5,
-              letterSpacing: -0.28,
-            }}
-          >
-            what should we call you ?
-          </Text>
+    <SafeAreaView style={styles.safeArea}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.screen}
+      >
+        <View style={styles.progressHeader}>
+          <OnboardingProgress currentStep={2} />
+        </View>
+        <View style={styles.backControl}>
+          <OnboardingBackButton />
         </View>
 
-        {/* Input section with underline style */}
-        <View className="mt-12">
+        <Text style={styles.heading}>What should we call you?</Text>
+
+        <View
+          onTouchStart={() => nameInputRef.current?.focus()}
+          style={[
+            styles.inputGlow,
+            isActive && styles.inputGlowActive,
+          ]}
+        >
           <TextInput
-            value={name}
-            onChangeText={setName}
-            placeholder="your nickname"
-            placeholderTextColor="oklch(0.7122 0 0)"
-            onFocus={() => setIsFocused(true)}
+            autoCapitalize="words"
+            autoCorrect={false}
+            editable
+            enterKeyHint="next"
             onBlur={() => setIsFocused(false)}
-            className="text-base py-4 px-4 rounded-lg"
-            style={{
-              fontSize: 16,
-              fontWeight: '400',
-              lineHeight: 20,
-              color: '#FFFFFF',
-              borderWidth: 1,
-              borderColor: hasValue
-                ? 'rgba(7, 233, 75, 0.7)'
-                : isFocused
-                ? '#555555'
-                : '#333333',
-              backgroundColor: 'transparent',
-              textAlignVertical: 'center',
-            }}
+            onChangeText={setName}
+            onFocus={() => setIsFocused(true)}
+            onSubmitEditing={handleContinue}
+            placeholder="Your name"
+            placeholderTextColor={redesignColors.ashDim}
+            returnKeyType="next"
+            ref={nameInputRef}
+            selectionColor={splitColors.chest}
+            showSoftInputOnFocus
+            style={[
+              styles.input,
+              { borderColor: isActive ? splitColors.chest : redesignColors.border },
+            ]}
+            value={name}
           />
         </View>
-      </View>
 
-      <TouchableOpacity
-        onPress={goToNext}
-        onPressIn={() => setIsFabPressed(true)}
-        onPressOut={() => setIsFabPressed(false)}
-        className="absolute bottom-24 right-10 w-16 h-16 rounded-full items-center justify-center"
-        style={{
-          backgroundColor: isFabPressed ? '#07e94b' : '#343434',
-          borderWidth: 1,
-          borderColor: isFabPressed ? '#07e94b' : '#484848',
-          shadowColor: '#000',
-          shadowOpacity: 0.25,
-          shadowRadius: 12,
-          shadowOffset: { width: 0, height: 8 },
-          elevation: 8,
-          paddingVertical: 0,
-          paddingHorizontal: 0,
-        }}
-      >
-        <ArrowRight 
-          size={28} 
-          color={isFabPressed ? '#000000' : '#FFFFFF'} 
-          strokeWidth={2.5} 
-        />
-      </TouchableOpacity>
+        <View pointerEvents="box-none" style={styles.footer}>
+          <OnboardingNextButton disabled={!trimmedName} onPress={handleContinue} size={64} />
+        </View>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: redesignColors.ink,
+  },
+  screen: {
+    flex: 1,
+    paddingTop: 40,
+    paddingHorizontal: 36,
+    paddingBottom: 36,
+  },
+  progressHeader: {
+    width: '100%',
+    height: 4,
+    marginBottom: 24,
+  },
+  backControl: {
+    alignSelf: 'flex-start',
+  },
+  heading: {
+    maxWidth: 330,
+    marginTop: 30,
+    color: redesignColors.bone,
+    fontFamily: redesignFonts.display,
+    fontSize: 32,
+    lineHeight: 34.5,
+    letterSpacing: -0.32,
+  },
+  inputGlow: {
+    marginTop: 28,
+    borderRadius: 16,
+  },
+  inputGlowActive: {
+    shadowColor: splitColors.chest,
+    shadowOpacity: 0.26,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 4,
+  },
+  input: {
+    minHeight: 58,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
+    color: redesignColors.bone,
+    backgroundColor: redesignColors.surface,
+    borderWidth: 1.5,
+    borderRadius: 16,
+    fontFamily: redesignFonts.uiSemiBold,
+    fontSize: 19,
+    lineHeight: 24,
+  },
+  footer: {
+    position: 'absolute',
+    right: 36,
+    bottom: 36,
+  },
+});

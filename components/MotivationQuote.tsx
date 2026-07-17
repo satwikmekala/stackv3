@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text } from 'react-native';
+import { colors, fonts } from '@/constants/theme';
 
 const QUOTES = [
   'Consistency beats intensity',
@@ -20,9 +21,20 @@ export function MotivationQuote() {
     setQuote(QUOTES[randomIndex]);
   }, []);
 
+  // Deliberately quiet — no card, no competition with the content around it.
   return (
-    <View className="bg-surface rounded-xl p-5">
-      <Text className="text-text-secondary text-sm italic text-center">"{quote}"</Text>
+    <View style={{ paddingVertical: 8, alignItems: 'center' }}>
+      <Text
+        style={{
+          fontFamily: fonts.body,
+          fontSize: 13,
+          fontStyle: 'italic',
+          color: colors.ash,
+          textAlign: 'center',
+        }}
+      >
+        "{quote}"
+      </Text>
     </View>
   );
 }
