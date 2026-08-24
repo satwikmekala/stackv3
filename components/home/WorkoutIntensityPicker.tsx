@@ -15,11 +15,20 @@ import { redesignColors, redesignFonts } from '@/constants/theme';
 type WorkoutIntensityPickerProps = {
   visible: boolean;
   type: WorkoutType;
-  onChoose: () => void;
+  levels?: readonly IntensityLevelOption[];
+  prompt?: string;
+  subtext?: string;
+  footerText?: string;
+  onChoose: (value: number) => void;
   onClose: () => void;
 };
 
-const LEVELS = [
+type IntensityLevelOption = {
+  value: number;
+  label: string;
+};
+
+const DEFAULT_LEVELS: readonly IntensityLevelOption[] = [
   { value: 0, label: 'CHILL' },
   { value: 0.5, label: 'BALANCED' },
   { value: 1, label: 'ALL OUT' },
@@ -36,6 +45,10 @@ function rgba(hex: string, opacity: number) {
 export function WorkoutIntensityPicker({
   visible,
   type,
+  levels = DEFAULT_LEVELS,
+  prompt = 'How hard do you want to go?',
+  subtext,
+  footerText = 'SLIDE TO START',
   onChoose,
   onClose,
 }: WorkoutIntensityPickerProps) {
@@ -45,7 +58,7 @@ export function WorkoutIntensityPicker({
   const valueRef = useRef(0.5);
   const committedRef = useRef(false);
   const meta = workoutMeta[type];
-  const nearestLevel = LEVELS.reduce((closest, level) =>
+  const nearestLevel = levels.reduce((closest, level) =>
     Math.abs(level.value - value) < Math.abs(closest.value - value) ? level : closest
   );
 
@@ -68,7 +81,7 @@ export function WorkoutIntensityPicker({
   };
 
   const snapToLevel = (nextValue: number) =>
-    LEVELS.reduce((closest, level) =>
+    levels.reduce((closest, level) =>
       Math.abs(level.value - nextValue) < Math.abs(closest.value - nextValue) ? level : closest
     ).value;
 
@@ -81,7 +94,7 @@ export function WorkoutIntensityPicker({
     }
     committedRef.current = true;
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    onChooseRef.current();
+    onChooseRef.current(snappedValue);
   };
 
   const panResponder = useRef(
@@ -100,10 +113,11 @@ export function WorkoutIntensityPicker({
   ).current;
 
   const chooseLevel = (level: number) => {
+    if (committedRef.current) return;
     updateValue(level);
     committedRef.current = true;
     void Haptics.selectionAsync();
-    onChooseRef.current();
+    onChooseRef.current(level);
   };
 
   return (
@@ -118,7 +132,8 @@ export function WorkoutIntensityPicker({
         <View style={[styles.card, { borderColor: rgba(meta.color, 0.55) }]}>
           <View style={styles.handle} />
           <Text style={[styles.eyebrow, { color: meta.color }]}>{meta.label.toUpperCase()}</Text>
-          <Text style={styles.title}>How hard do you want to go?</Text>
+          <Text style={styles.title}>{prompt}</Text>
+          {subtext ? <Text style={styles.subtext}>{subtext}</Text> : null}
 
           <View style={styles.sliderArea}>
             <View
@@ -132,7 +147,7 @@ export function WorkoutIntensityPicker({
                 if (!committedRef.current) {
                   committedRef.current = true;
                   void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                  onChooseRef.current();
+                  onChooseRef.current(snappedValue);
                 }
               }}
               onLayout={(event) => {
@@ -144,7 +159,7 @@ export function WorkoutIntensityPicker({
             >
               <View style={styles.track}>
                 <View style={[styles.trackFill, { width: `${value * 100}%`, backgroundColor: meta.color }]} />
-                {LEVELS.map((level) => (
+                {levels.map((level) => (
                   <View
                     key={level.label}
                     pointerEvents="none"
@@ -169,7 +184,7 @@ export function WorkoutIntensityPicker({
               </View>
             </View>
             <View style={styles.levelLabels}>
-              {LEVELS.map((level, index) => (
+              {levels.map((level, index) => (
                 <Pressable
                   key={level.label}
                   accessibilityRole="button"
@@ -192,7 +207,7 @@ export function WorkoutIntensityPicker({
             </View>
           </View>
 
-          <Text style={styles.hint}>SLIDE TO START</Text>
+          <Text style={styles.hint}>{footerText}</Text>
         </View>
       </View>
     </Modal>
@@ -241,6 +256,13 @@ const styles = StyleSheet.create({
     lineHeight: 37,
     letterSpacing: -0.8,
     color: redesignColors.bone,
+  },
+  subtext: {
+    marginTop: 9,
+    fontFamily: redesignFonts.ui,
+    fontSize: 14,
+    lineHeight: 19,
+    color: redesignColors.ash,
   },
   sliderArea: {
     marginTop: 31,

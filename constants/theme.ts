@@ -36,6 +36,7 @@ export const redesignColors = {
   ash: '#A99F91',
   ashDim: '#6F6558',
   border: '#3A322A',
+  accent: '#FF7A3D',
 };
 
 export const splitColors = {

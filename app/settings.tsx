@@ -19,6 +19,42 @@ import '@/global.css';
 
 // Supported weekly-goal range.
 const GOAL_OPTIONS = [1, 2, 3, 4, 5, 6];
+const WEEKDAY_INDEXES = [0, 1, 2, 3, 4, 5, 6];
+
+const circularDayDistance = (first: number, second: number) => {
+  const distance = Math.abs(first - second);
+  return Math.min(distance, 7 - distance);
+};
+
+const resizeTrainingDays = (trainingDays: number[], weeklyGoal: number) => {
+  const resizedDays = [...new Set(trainingDays)]
+    .filter((day) => Number.isInteger(day) && day >= 0 && day <= 6)
+    .sort((a, b) => a - b);
+
+  if (resizedDays.length >= weeklyGoal) {
+    return resizedDays.slice(0, weeklyGoal);
+  }
+
+  if (resizedDays.length === 0) {
+    resizedDays.push(0);
+  }
+
+  while (resizedDays.length < weeklyGoal) {
+    const remainingDays = WEEKDAY_INDEXES.filter((day) => !resizedDays.includes(day));
+    const nextDay = remainingDays.reduce((bestDay, day) => {
+      const bestSpacing = Math.min(
+        ...resizedDays.map((selectedDay) => circularDayDistance(bestDay, selectedDay))
+      );
+      const daySpacing = Math.min(
+        ...resizedDays.map((selectedDay) => circularDayDistance(day, selectedDay))
+      );
+      return daySpacing > bestSpacing ? day : bestDay;
+    });
+    resizedDays.push(nextDay);
+  }
+
+  return resizedDays.sort((a, b) => a - b);
+};
 
 // Shared pill used by both the goal stepper and the intensity selector —
 // bone border on the selected option, matching the onboarding convention.
@@ -72,6 +108,13 @@ export default function Settings() {
   if (!profile) {
     return null;
   }
+
+  const handleWeeklyGoalChange = (weeklyGoal: number) => {
+    updateProfile({
+      weeklyGoal,
+      trainingDays: resizeTrainingDays(profile.trainingDays, weeklyGoal),
+    });
+  };
 
   const handleReset = () => {
     Alert.alert(
@@ -211,7 +254,7 @@ export default function Settings() {
                 key={value}
                 label={String(value)}
                 selected={profile.weeklyGoal === value}
-                onPress={() => updateProfile({ weeklyGoal: value })}
+                onPress={() => handleWeeklyGoalChange(value)}
               />
             ))}
           </View>

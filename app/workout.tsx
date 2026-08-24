@@ -1,6 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Modal,
+  Alert,
+  BackHandler,
   Platform,
   SafeAreaView,
   Text,
@@ -8,7 +9,7 @@ import {
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Check, ChevronRight, Repeat2 } from 'lucide-react-native';
+import { Check, ChevronRight, Repeat2, X } from 'lucide-react-native';
 import Animated, {
   Easing,
   FadeIn,
@@ -20,7 +21,6 @@ import Animated, {
   interpolateColor,
   LinearTransition,
   ReduceMotion,
-  SlideInDown,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
@@ -34,11 +34,12 @@ import {
   BonusSetAcknowledgement,
   type BonusSetSelection,
 } from '@/components/BonusSet';
-import { Button } from '@/components/Button';
 import { ExerciseFinisher } from '@/components/ExerciseFinisher';
 import { RestTimer } from '@/components/RestTimer';
 import { SwapExerciseSheet } from '@/components/SwapExerciseSheet';
 import { WorkoutDayLabel } from '@/components/WorkoutDayLabel';
+import { WorkoutIntensityPicker } from '@/components/home/WorkoutIntensityPicker';
+import { ARCHETYPE_COMPOSITIONS } from '@/constants/archetypes';
 import { redesignColors, redesignFonts, workoutLoggingColors } from '@/constants/theme';
 import { workoutMeta } from '@/constants/workouts';
 import {
@@ -49,11 +50,11 @@ import {
 } from '@/store/workoutStore';
 import '@/global.css';
 
-const INTENSITY_OPTIONS: { value: IntensityLevel; label: string; emoji: string }[] = [
-  { value: 'easy', label: 'Too Easy', emoji: '😊' },
-  { value: 'medium', label: 'Just Right', emoji: '💪' },
-  { value: 'hard', label: 'Too Hard', emoji: '😰' },
-];
+const FEEDBACK_LEVELS = [
+  { value: 0, label: 'TOO EASY' },
+  { value: 0.5, label: 'JUST RIGHT' },
+  { value: 1, label: 'TOO HARD' },
+] as const;
 
 // Motion is deliberately short and directional: forward actions arrive from
 // the right, cancellations return from the left, and replacements simply fade.
@@ -82,10 +83,6 @@ const CHECK_ENTER = ZoomIn.springify()
 const UP_NEXT_EXIT = FadeOutDown.duration(150)
   .easing(Easing.in(Easing.cubic))
   .reduceMotion(ReduceMotion.System);
-const FEEDBACK_SHEET_ENTER = SlideInDown.duration(280)
-  .easing(Easing.out(Easing.cubic))
-  .reduceMotion(ReduceMotion.System);
-
 function ExerciseProgressSegment({
   state,
   accent,
@@ -142,12 +139,16 @@ function SetPip({
   reps,
   accent,
   currentLabel = 'NOW',
+  setNumber,
+  onEdit,
 }: {
   state: 'completed' | 'current' | 'upcoming';
   weight: number;
   reps: number;
   accent: string;
   currentLabel?: string;
+  setNumber: number;
+  onEdit?: () => void;
 }) {
   const glowOpacity = useSharedValue(0);
   const activeFill = useSharedValue(state === 'upcoming' ? 0 : 1);
@@ -180,8 +181,8 @@ function SetPip({
     transform: [{ scale: 0.94 + activeFill.value * 0.06 }],
   }));
 
-  return (
-    <View style={{ flex: 1, alignItems: 'center' }}>
+  const content = (
+    <>
       <View style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}>
         {state === 'current' ? (
           <Animated.View
@@ -235,7 +236,22 @@ function SetPip({
       >
         {state === 'completed' ? `${weight}·${reps}` : state === 'current' ? currentLabel : '–'}
       </Text>
-    </View>
+    </>
+  );
+
+  return state === 'completed' && onEdit ? (
+    <TouchableOpacity
+      accessibilityRole="button"
+      accessibilityLabel={`Edit completed set ${setNumber}`}
+      accessibilityHint="Reopens this set for editing"
+      activeOpacity={0.72}
+      onPress={onEdit}
+      style={{ flex: 1, alignItems: 'center' }}
+    >
+      {content}
+    </TouchableOpacity>
+  ) : (
+    <View style={{ flex: 1, alignItems: 'center' }}>{content}</View>
   );
 }
 
@@ -245,12 +261,14 @@ function SetProgress({
   accent,
   currentAccent = accent,
   currentLabel,
+  onEditCompletedSet,
 }: {
   sets: ExerciseSet[];
   currentSetIndex: number;
   accent: string;
   currentAccent?: string;
   currentLabel?: string;
+  onEditCompletedSet?: (setIndex: number) => void;
 }) {
   return (
     <View
@@ -280,6 +298,8 @@ function SetProgress({
             reps={set.reps}
             accent={index === currentSetIndex ? currentAccent : accent}
             currentLabel={currentLabel}
+            setNumber={index + 1}
+            onEdit={state === 'completed' ? () => onEditCompletedSet?.(index) : undefined}
           />
         );
       })}
@@ -322,6 +342,7 @@ export default function Workout() {
     (state) => state.swapCurrentSessionExercise
   );
   const completeWorkout = useWorkoutStore((state) => state.completeWorkout);
+  const discardWorkout = useWorkoutStore((state) => state.discardWorkout);
 
   const [exerciseIndex, setExerciseIndex] = useState(() =>
     currentSession ? getInitialExerciseIndex(currentSession.exercises) : 0
@@ -344,9 +365,41 @@ export default function Workout() {
   const renderedExerciseIdentityRef = useRef<string | null>(null);
   const exerciseIdentity = `${exerciseIndex}-${currentSession?.exercises[exerciseIndex]?.name ?? ''}`;
 
+  const confirmDiscardWorkout = useCallback(() => {
+    if (!currentSession || exitingRef.current) return;
+
+    Alert.alert(
+      'Discard workout?',
+      "Leaving now will discard this workout. Sets you've logged won't be saved.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Discard',
+          style: 'destructive',
+          onPress: () => {
+            exitingRef.current = true;
+            discardWorkout();
+            router.back();
+          },
+        },
+      ]
+    );
+  }, [currentSession, discardWorkout, router]);
+
   useEffect(() => {
     if (!currentSession && !exitingRef.current) router.back();
   }, [currentSession, router]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      confirmDiscardWorkout();
+      return true;
+    });
+
+    return () => subscription.remove();
+  }, [confirmDiscardWorkout]);
 
   useEffect(() => {
     setBonusSelection(null);
@@ -362,9 +415,21 @@ export default function Workout() {
   }, [exerciseIdentity]);
 
   if (!currentSession) return null;
+  const workoutType = currentSession.workoutTypes[0];
+  if (!workoutType) return null;
 
-  const meta = workoutMeta[currentSession.type];
-  const accent = workoutLoggingColors[currentSession.type];
+  const legacyMeta = workoutMeta[workoutType];
+  const primaryArchetype = currentSession.archetype;
+  const secondaryArchetype = currentSession.secondaryArchetype;
+  const archetypeComposition = primaryArchetype
+    ? ARCHETYPE_COMPOSITIONS[primaryArchetype]
+    : null;
+  const dayLabel = archetypeComposition
+    ? secondaryArchetype
+      ? `${archetypeComposition.shortLabel} + ${ARCHETYPE_COMPOSITIONS[secondaryArchetype].shortLabel}`
+      : archetypeComposition.shortLabel
+    : legacyMeta.label;
+  const accent = archetypeComposition?.color ?? workoutLoggingColors[workoutType];
   const exercise = currentSession.exercises[exerciseIndex];
   const firstIncompleteSetIndex = exercise.sets.findIndex((set) => !set.completed);
   const setIndex =
@@ -529,39 +594,64 @@ export default function Workout() {
             justifyContent: 'space-between',
           }}
         >
-          <WorkoutDayLabel accent={accent} label={meta.label} />
+          <WorkoutDayLabel
+            accent={accent}
+            label={dayLabel}
+            numberOfLines={archetypeComposition ? 2 : 1}
+          />
 
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel="Change exercise"
-            onPress={() => setShowSwapSheet(true)}
-            activeOpacity={0.7}
-            style={{
-              flexShrink: 0,
-              height: 42,
-              marginLeft: 10,
-              paddingHorizontal: 14,
-              borderRadius: 21,
-              flexDirection: 'row',
-              alignItems: 'center',
-              borderWidth: 1,
-              borderColor: redesignColors.border,
-              backgroundColor: redesignColors.surface,
-            }}
-          >
-            <Repeat2 color={redesignColors.ash} size={18} strokeWidth={2.2} />
-            <Text
-              allowFontScaling={false}
+          <View style={{ flexShrink: 0, flexDirection: 'row', alignItems: 'center' }}>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Change exercise"
+              onPress={() => setShowSwapSheet(true)}
+              activeOpacity={0.7}
               style={{
-                marginLeft: 8,
-                fontFamily: redesignFonts.uiSemiBold,
-                fontSize: 15,
-                color: redesignColors.ash,
+                height: 42,
+                marginLeft: 10,
+                paddingHorizontal: 14,
+                borderRadius: 21,
+                flexDirection: 'row',
+                alignItems: 'center',
+                borderWidth: 1,
+                borderColor: redesignColors.border,
+                backgroundColor: redesignColors.surface,
               }}
             >
-              Change
-            </Text>
-          </TouchableOpacity>
+              <Repeat2 color={redesignColors.ash} size={18} strokeWidth={2.2} />
+              <Text
+                allowFontScaling={false}
+                style={{
+                  marginLeft: 8,
+                  fontFamily: redesignFonts.uiSemiBold,
+                  fontSize: 15,
+                  color: redesignColors.ash,
+                }}
+              >
+                Change
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Close workout"
+              onPress={confirmDiscardWorkout}
+              activeOpacity={0.7}
+              style={{
+                width: 42,
+                height: 42,
+                marginLeft: 10,
+                borderRadius: 21,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderWidth: 1,
+                borderColor: redesignColors.border,
+                backgroundColor: redesignColors.surface,
+              }}
+            >
+              <X color={redesignColors.ash} size={20} strokeWidth={2.4} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <Animated.View
@@ -712,6 +802,10 @@ export default function Workout() {
                     sets={exercise.sets}
                     currentSetIndex={setIndex}
                     accent={accent}
+                    onEditCompletedSet={(completedSetIndex) => {
+                      setStageDirection(-1);
+                      toggleSetCompleted(exerciseIndex, completedSetIndex);
+                    }}
                   />
                   <Animated.View
                     key={`active-card-${setIndex}`}
@@ -821,8 +915,7 @@ export default function Workout() {
 
       <SwapExerciseSheet
         visible={showSwapSheet}
-        type={currentSession.type}
-        dayLabel={meta.label}
+        dayLabel={dayLabel}
         accent={accent}
         currentExerciseIndex={exerciseIndex}
         currentExerciseName={exercise.name}
@@ -833,67 +926,20 @@ export default function Workout() {
         onClose={() => setShowSwapSheet(false)}
       />
 
-      <Modal visible={showFeedbackModal} transparent animationType="fade">
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'flex-end' }}>
-          <Animated.View
-            entering={FEEDBACK_SHEET_ENTER}
-            style={{
-              backgroundColor: redesignColors.surface,
-              borderTopLeftRadius: 28,
-              borderTopRightRadius: 28,
-              padding: 24,
-            }}
-          >
-            <Text
-              style={{
-                fontFamily: redesignFonts.display,
-                fontSize: 26,
-                color: redesignColors.bone,
-                marginBottom: 8,
-              }}
-            >
-              How did it feel?
-            </Text>
-            <Text
-              style={{
-                fontFamily: redesignFonts.ui,
-                fontSize: 14,
-                color: redesignColors.ash,
-                marginBottom: 24,
-              }}
-            >
-              This helps us adjust your next workout to keep you progressing
-            </Text>
-
-            {INTENSITY_OPTIONS.map((option) => (
-              <TouchableOpacity
-                key={option.value}
-                onPress={() => handleFeedbackSelect(option.value)}
-                style={{
-                  backgroundColor: redesignColors.raised,
-                  padding: 18,
-                  borderRadius: 16,
-                  marginBottom: 10,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                }}
-              >
-                <Text style={{ fontSize: 26, marginRight: 16 }}>{option.emoji}</Text>
-                <Text
-                  style={{
-                    fontFamily: redesignFonts.uiSemiBold,
-                    fontSize: 17,
-                    color: redesignColors.bone,
-                  }}
-                >
-                  {option.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-            <Button title="Keep Training" variant="ghost" onPress={() => setShowFeedbackModal(false)} />
-          </Animated.View>
-        </View>
-      </Modal>
+      <WorkoutIntensityPicker
+        visible={showFeedbackModal}
+        type={workoutType}
+        levels={FEEDBACK_LEVELS}
+        prompt="How did it feel?"
+        subtext="This helps us adjust your next workout to keep you progressing"
+        footerText="SLIDE TO FINISH"
+        onChoose={(value) => {
+          const intensity: IntensityLevel =
+            value === 0 ? 'easy' : value === 0.5 ? 'medium' : 'hard';
+          handleFeedbackSelect(intensity);
+        }}
+        onClose={() => setShowFeedbackModal(false)}
+      />
     </SafeAreaView>
   );
 }

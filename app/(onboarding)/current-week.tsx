@@ -35,10 +35,11 @@ const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 interface WeekdayRowProps {
   weekday: Weekday;
   selected: boolean;
+  disabled: boolean;
   onToggle: (index: number) => void;
 }
 
-function WeekdayRow({ weekday, selected, onToggle }: WeekdayRowProps) {
+function WeekdayRow({ weekday, selected, disabled, onToggle }: WeekdayRowProps) {
   const selection = useSharedValue(selected ? 1 : 0);
   const press = useSharedValue(0);
 
@@ -102,11 +103,13 @@ function WeekdayRow({ weekday, selected, onToggle }: WeekdayRowProps) {
   return (
     <AnimatedPressable
       accessibilityRole="checkbox"
-      accessibilityState={{ checked: selected }}
+      accessibilityHint={disabled ? 'At least one rest day is required' : undefined}
+      accessibilityState={{ checked: selected, disabled }}
+      disabled={disabled}
       onPress={() => onToggle(weekday.index)}
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
-      style={[styles.dayRow, containerStyle]}
+      style={[styles.dayRow, disabled && styles.dayRowDisabled, containerStyle]}
     >
       <Animated.Text style={[styles.dayLabel, textStyle]}>
         {weekday.label}
@@ -130,11 +133,12 @@ export default function CurrentWeek() {
   const setProfile = useWorkoutStore((state) => state.setProfile);
 
   const toggleDay = (index: number) => {
-    setSelectedDays((current) =>
-      current.includes(index)
-        ? current.filter((item) => item !== index)
-        : [...current, index]
-    );
+    setSelectedDays((current) => {
+      if (current.includes(index)) {
+        return current.filter((item) => item !== index);
+      }
+      return current.length < 6 ? [...current, index] : current;
+    });
   };
 
   const handleFinish = () => {
@@ -170,6 +174,7 @@ export default function CurrentWeek() {
           {WEEKDAYS.map((weekday) => (
             <WeekdayRow
               key={weekday.index}
+              disabled={selectedDays.length >= 6 && !selectedDays.includes(weekday.index)}
               onToggle={toggleDay}
               selected={selectedDays.includes(weekday.index)}
               weekday={weekday}
@@ -239,6 +244,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 15,
     borderWidth: 1.5,
     borderRadius: 13,
+  },
+  dayRowDisabled: {
+    opacity: 0.42,
   },
   dayLabel: {
     flex: 1,

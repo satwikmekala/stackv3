@@ -1,639 +1,187 @@
 # Stack Design System
-## Ruthlessly minimal. Zero decisions. Just lift.
 
----
+> Live implementation reference, verified against constants/theme.ts, app/_layout.tsx, and current app/component usage on 2026-07-19.
 
-## Design Philosophy
+## Documentation status
 
-**The Core Problem Stack Solves**
-Decision fatigue kills consistency. Stack removes every choice between "open app" and "start lifting."
+This file existed before this update. Its product intent is retained: “Ruthlessly minimal. Zero decisions. Just lift.” The decision-fatigue framing, one clear next action, prefilled context, calm disciplined-coach voice, and offline-first product constraint are still useful and supported by the existing design and fully offline SQLite implementation; the app has no backend, and Supabase has been fully removed.
 
-**Design Principles**
-1. **One Clear Action** — Never present multiple equal-weight CTAs
-2. **Prefill Everything** — Show what worked last time, nudge adjustments
-3. **Celebrate Small Wins** — Immediate feedback on streaks and progress
-4. **Large & Legible** — Sweaty hands, between-set glances, one-hand use
-5. **Fast & Offline** — <2s cold start, 60fps interactions, works without network
-
-**Personality**
-Calm disciplined coach, not hype fitness influencer. Supportive without being pushy. Think: "Nice work — 2 of 4 done" not "CRUSH YOUR GOALS 💪🔥"
-
----
-
-## Color System
-
-### Core Palette
-
-**Background (Dark Only for V1)**
-- `oklch(0.1822 0 0)` — Deep graphite base
-- Usage: App background, between content
+The former implementation specifications were not retained as current rules where they conflict with live code. In particular, the former OKLCH/neon-green palette, Inter typography, fixed 4 px spacing scale, white-CTA rule, no-tabs information architecture, and most prescriptive component, motion, accessibility, and future-feature specifications are stale or aspirational. There is no root README.md or docs/ directory; the remaining project documentation corroborates the offline-first SQLite context but does not add brand language.
 
-**Surface**
-- `oklch(0.2046 0 0)` — Elevated cards
-- Usage: Workout cards, input containers, modals
+Two comments in constants/theme.ts also need an interpretation note:
 
-**Neon Green (Success & Progress)**
-- `oklch(0.8128 0.2495 145.6843)` — #00FF95 equivalent
-- Usage: **STATE ONLY** — streak tiles, focus rings, active chips, PR badges, progress fills
-- **Never for large surfaces** — keep it special for wins
-
-**Primary CTA**
-- Background: `oklch(0.9911 0 0)` — White
-- Foreground: `oklch(0 0 0)` — Black text
-- Usage: "Start Workout" button (calm, confident, not shouty green)
-
-**Text Hierarchy**
-- Primary: `oklch(1.0000 0 0)` — Pure white for titles, active text
-- Secondary: `oklch(0.7122 0 0)` — Muted gray for labels, descriptions
-- Tertiary: `oklch(0.5452 0 0)` — Very subtle for hints
-
-**Borders & Dividers**
-- `oklch(0.2809 0 0)` — Subtle separator
-- Usage: Input borders, card outlines, dividers (use sparingly)
-
-**Destructive/Warning**
-- `oklch(0.3123 0.0852 29.7877)` — Dark red
-- Usage: Delete actions, missed days (use rarely)
-
-### Semantic Color Usage
-
-**Session Difficulty Feedback** (after workout)
-- Easy: `oklch(0.7845 0.1325 181.9120)` — Cyan
-- Medium: `oklch(0.8369 0.1644 84.4286)` — Yellow  
-- Hard: `oklch(0.7090 0.1592 293.5412)` — Magenta
-- Usage: Small difficulty badges, next-workout adjustments
-
-**Streak Grid**
-- Empty day: `oklch(0.2393 0 0)` — Muted dark
-- Completed: Neon green with subtle glow
-- Today (pending): Border only, neon green ring
-
----
-
-## Typography
-
-### Font Stack
-**Primary: Inter** (`-apple-system` fallback for native feel)
-- Clean, readable, optimized for dark backgrounds
-- Available weights: 400 (Regular), 600 (Semibold), 700 (Bold)
-
-### Type Scale
-
-**Display (Big Numbers)**
-- Size: 48px / 3rem
-- Weight: 700
-- Tracking: -0.02em (tight)
-- Usage: Week progress "2/4", workout weight displays
-
-**H1 (Screen Titles)**
-- Size: 28px / 1.75rem
-- Weight: 700
-- Tracking: -0.01em
-- Usage: "Good morning, [Name]", "Upper Body A"
-
-**H2 (Section Headers)**
-- Size: 20px / 1.25rem
-- Weight: 600
-- Tracking: 0em
-- Usage: Exercise names in workout view
-
-**Body (Default Reading)**
-- Size: 16px / 1rem
-- Weight: 400
-- Line height: 1.5
-- Usage: Descriptions, secondary info, workout notes
-
-**Label (Small Caps Headers)**
-- Size: 12px / 0.75rem
-- Weight: 600
-- Tracking: 0.08em
-- Transform: Uppercase
-- Color: Secondary text
-- Usage: "THIS WEEK", "LAST SESSION", "STREAK"
-
-**Micro (Tiny Context)**
-- Size: 13px / 0.8125rem
-- Weight: 400
-- Color: Tertiary text
-- Usage: Timestamps, set counters, hints
-
-### Typography Rules
-- **Maximum line length**: 40 characters on mobile (everything is mobile-first)
-- **Never center-align body text**: Left-align for scannability
-- **Number formatting**: Use tabular figures for weights/reps to prevent jitter
-
----
-
-## Spacing & Layout
-
-### Base Unit
-`4px` — All spacing is a multiple of 4
-
-### Spacing Scale
-- `xs`: 4px — Micro gaps (icon-to-label)
-- `sm`: 8px — Tight spacing (chip padding, small gaps)
-- `md`: 16px — Default element spacing
-- `lg`: 24px — Card padding, section gaps
-- `xl`: 32px — Screen margins, major sections
-- `2xl`: 48px — Hero spacing (rare)
-
-### Layout Grid
-**Mobile-first (320px → 428px)**
-- Side margins: `lg` (24px)
-- Between sections: `xl` (32px)
-- Card padding: `lg` (24px)
-- List item padding: `md` vertical, `lg` horizontal
-
-### Touch Targets
-**Minimum 44pt × 44pt** (iOS standard, critical for gym use)
-- Primary buttons: 56px height
-- Steppers (±2.5kg): 48px × 48px minimum
-- Chip toggles: 40px height
-- Streak grid cells: 32px × 32px (tight grid, but tappable)
-
-### Safe Areas
-- iOS notch/home indicator: Use `SafeAreaView` everywhere
-- Bottom padding: 16px + safe area inset (for gesture navigation)
-
----
-
-## Components
-
-### Primary CTA (Start Workout Button)
-
-**Visual Specs**
-- Background: White
-- Text: Black, 17px, weight 600, tracking 0.02em
-- Height: 56px
-- Radius: 16px (xl)
-- Shadow: Subtle (2px blur, 10% opacity)
-- Icon: Optional 20px icon, 8px gap to text
-
-**States**
-- Default: White background
-- Pressed: Scale 0.98, opacity 0.9
-- Disabled: 40% opacity, no press effect
-
-**Usage Rules**
-- One per screen maximum
-- Always full-width or prominent
-- Reserved for "Start Workout", "Finish Workout", "Save"
-
-### Secondary Button
-
-**Visual Specs**
-- Background: Surface color (elevated dark)
-- Text: White, 16px, weight 600
-- Height: 48px
-- Radius: 12px (lg)
-- Border: 1px solid border color
-
-**States**
-- Pressed: Slight scale down
-- Active: Neon green text + border
-
-**Usage**
-- "Switch to Upper B", nav actions, less critical choices
-
-### Chip Toggle (Workout Type Selector)
-
-**Visual Specs**
-- Height: 40px
-- Padding: 12px horizontal
-- Radius: 12px
-- Background: Surface color
-- Border: 1.5px solid border color
-- Text: 15px, weight 600
-
-**States**
-- Inactive: Gray border, white text
-- Active: Neon green border + ring (2px offset), neon green text
-- Transition: 150ms ease
-
-**Layout**
-- Horizontal scroll group
-- Gap: 8px between chips
-- Never wrap to multiple lines
-
-### Set Input Row (Critical Component)
-
-**Layout**
-- 3-column grid: Exercise name | Weight stepper | Reps stepper
-- Height: 64px (generous tap area)
-- Padding: 12px vertical
-
-**Weight Stepper**
-```
-[−] [110 kg] [+]
-```
-- Buttons: 40px × 40px, subtle background
-- Value display: 20px bold, tabular nums
-- Step: ±2.5 kg (or lb)
-- Haptic: Light tap on press
-
-**Reps Stepper**
-```
-[−] [8] [+]
-```
-- Same sizing as weight
-- Step: ±1 rep
-- Visual hierarchy: Slightly smaller than weight
-
-**States**
-- Default: Prefilled from last session
-- Modified: Subtle green glow on save
-- Error (0 reps): Red border, disable save
-
-### Streak Grid
-
-**Visual Design**
-- 7 columns (Mon-Sun) × 4-6 rows (weeks)
-- Cell size: 32px × 32px
-- Gap: 4px
-- Radius: 6px per cell
-
-**Cell States**
-- Future: Invisible or very subtle outline
-- Empty past: Muted dark background
-- Completed: Neon green fill with subtle inner glow
-- Today (pending): Neon green ring, empty inside
-- Long-press: Show date tooltip
-
-**Animation**
-- On completion: Scale up 1.1 → 1.0, fade in glow (200ms)
-- Haptic: Medium bump
-
-### Progress Ring/Bar
-
-**Week Goal Meter**
-```
-2 / 4 sessions
-[████████░░░░░░░░]
-```
-- Bar height: 8px
-- Radius: Full (pill)
-- Fill: Neon green
-- Background: Muted dark
-- Label: Display number above (48px bold)
-
-**Behavior**
-- Smooth animation on increment (300ms ease-out)
-- Celebration: Subtle glow pulse when goal hit
-
-### Card Component
-
-**Standard Card**
-- Background: Surface color
-- Radius: 16px
-- Padding: 20px
-- Border: None (elevation via subtle shadow)
-- Shadow: 1px blur, 5% opacity
-
-**Last Session Preview Card**
-```
-┌─────────────────────────┐
-│ LAST SESSION            │
-│ Upper Body A            │
-│ 3 days ago • Medium     │
-│ [Bench: 80kg × 8]       │
-│ [Squat: 100kg × 6]      │
-└─────────────────────────┘
-```
-- Compact: 2-3 exercise previews max
-- Difficulty badge: Small colored chip
-- Tap: Navigate to full history (later)
-
-### Empty States
-
-**No Workouts Yet**
-- Centered content
-- Icon: Simple outline dumbbell (48px)
-- Title: "Ready to start?"
-- Subtitle: "Your first workout is waiting"
-- Action: Primary CTA button
-
-**Design Rule**: Empty states should feel encouraging, not sad
-
-### Success States
-
-**Workout Complete**
-- Full-screen moment
-- Large checkmark or streak count
-- Text: "Nice work — 2 of 4 done"
-- Haptic: Strong bump
-- Auto-dismiss: 2s → back to home
-
----
-
-## Iconography
-
-### Style
-**Outline icons only** — 2px stroke, rounded caps
-- Consistent weight across all icons
-- 24px default size (scale to 20px or 32px as needed)
-
-### Core Icon Set
-- **Dumbbell**: App icon, workout start
-- **Calendar with checkmarks**: Streak, weekly goal
-- **Trending up**: Progress, PRs
-- **Settings gear**: Settings (obvious)
-- **Clock**: Rest timer (later feature)
-- **Plus/Minus**: Steppers
-- **Checkmark**: Completion, success
-- **Arrow right**: Navigation, continue
-
-**Design Rule**: Use icons sparingly — text is faster to read
-
----
-
-## Interactions & Motion
-
-### Animation Principles
-- **Subtle, not showy**: No bounce or elastic easing
-- **Fast**: 150-250ms for most transitions
-- **GPU-accelerated**: Opacity and scale only (no width/height)
-- **Purpose-driven**: Every animation communicates state change
-
-### Key Animations
-
-**Button Press**
-```
-Scale: 1.0 → 0.98 (100ms) → 1.0 (100ms)
-Opacity: 1.0 → 0.9 → 1.0
-```
-
-**Streak Cell Complete**
-```
-Scale: 0 → 1.1 (150ms) → 1.0 (100ms)
-Opacity: 0 → 1
-Glow: Fade in (200ms)
-```
-
-**Sheet Modal (workout flow)**
-```
-Slide up from bottom: 300ms ease-out
-Backdrop fade: 200ms
-```
-
-**Set Save Feedback**
-```
-Green flash on row: 200ms opacity pulse
-Haptic: Light success tap
-```
-
-### Haptic Feedback
-
-**Light Tap**
-- Stepper press (+/−)
-- Chip toggle
-- Minor interactions
-
-**Medium Bump**
-- Set completed
-- Streak cell filled
-
-**Strong Bump**
-- Workout finished
-- Weekly goal reached
-
-**Design Rule**: Haptics must feel responsive, not laggy (trigger before animation completes)
-
----
-
-## Navigation & Information Architecture
-
-### V1 Screen Flow
-
-```
-Onboarding (First Launch)
-  ↓
-Home (Primary Hub)
-  ├→ Start Workout → Active Workout → Session Complete → Home
-  └→ Settings (Later)
-```
-
-### Navigation Pattern
-**Stack-based navigation** (no tabs in MVP)
-- Home is always the root
-- Workout is a modal sheet
-- Back gestures work everywhere
-- No hamburger menus
-
-### Home Screen Layout Priority
-1. **Greeting** (Top): "Good morning, Alex"
-2. **Week Progress** (Hero): "2 / 4 sessions" + progress bar
-3. **Primary CTA**: "Start Workout" (huge button)
-4. **Workout Type Selector**: Chip group (Upper A, Upper B, Lower A, Lower B)
-5. **Streak Grid**: Visual progress calendar
-6. **Last Session**: Collapsible preview card
-
-**Design Rule**: Everything above the fold on iPhone SE (smallest supported device)
-
----
-
-## Workout Flow UX
-
-### Pre-Workout
-1. User taps "Start Workout"
-2. Sheet slides up showing selected routine (Upper Body A)
-3. All weights/reps **prefilled from last session**
-4. Single primary action: "Begin"
-
-### During Workout
-1. Exercise list, one visible at a time (or compact list)
-2. Set-by-set row with steppers
-3. Tap checkmark to complete set → row locks, moves to next
-4. "Finish Workout" button always visible at bottom
-
-### Post-Workout
-1. "How did that feel?" → Easy / Medium / Hard chips
-2. Tap selection → auto-adjusts next session weights
-3. Success screen → animate streak grid
-4. Return to home
-
-**Design Rule**: Zero text input during workout (only steppers)
-
----
-
-## Content & Messaging
-
-### Voice & Tone
-
-**Greeting Messages** (Time-based)
-- 5am-11am: "Good morning, [Name]"
-- 11am-5pm: "Hey, [Name]"
-- 5pm-12am: "Evening, [Name]"
-
-**Progress Encouragement**
-- After workout: "Nice work — X of Y done"
-- Goal reached: "You hit your goal this week 💪"
-- Streak milestone: "7 day streak — you're on a roll"
-
-**Instructional Copy**
-- Short, direct: "Set your weekly goal" not "How many times per week would you like to train?"
-- Action-first: "Start Workout" not "Begin Your Training Session"
-
-**Error States**
-- Supportive: "Let's add at least 1 rep" not "Invalid input"
-- Rare: Most errors are prevented by prefilling/constraints
-
-### Microcopy Rules
-- No exclamation marks (except goal celebrations)
-- No fitness jargon ("hypertrophy", "periodization")
-- Use "session" or "workout" not "training"
-- Avoid negative framing ("Don't skip") → positive ("Keep the streak going")
-
----
-
-## Responsive Behavior
-
-### Device Support (iOS Primary)
-- **iPhone SE (375×667)**: Minimum supported, test everything here first
-- **iPhone 14/15 Pro (393×852)**: Primary design target
-- **iPhone 14/15 Pro Max (430×932)**: Larger, but same layout
-
-### Scaling Strategy
-- Use relative spacing (%, safe area insets)
-- Large devices: More breathing room, not more content
-- Keep single-column layout (no tablet multi-column in V1)
-
-### Landscape Mode
-- Discouraged during workout (awkward in gym)
-- If implemented: Same layout, just wider margins
-
----
-
-## Accessibility
-
-### Color Contrast
-- White on deep graphite: 17:1 (exceeds WCAG AAA)
-- Neon green on dark: 9.5:1 (safe for state indicators)
-- Muted gray on dark: 4.8:1 (meets AA for large text)
-
-### Touch Targets
-- All interactive elements: ≥44pt (iOS guideline)
-- Steppers in workout: 48pt (extra critical)
-
-### Dynamic Type
-- Support iOS Dynamic Type (accessibility text sizes)
-- Test at largest size: ensure buttons don't clip
-- Display numbers: Cap at 1.3× scale to prevent overflow
-
-### VoiceOver
-- All buttons: Clear labels ("Increase weight by 2.5 kilograms")
-- Streak grid: Date + status ("Monday January 15, completed")
-- Progress: "2 of 4 sessions completed this week"
-
-### Reduced Motion
-- Respect `prefers-reduced-motion`
-- Replace animations with instant state changes
-- Keep haptics (they're not motion)
-
----
-
-## Technical Implementation
-
-### Component Architecture
-
-**Primitives** (Build these first)
-- `<Button>` — Primary, Secondary, Ghost variants
-- `<Card>` — Elevated surface container
-- `<Chip>` — Toggle chips for workout types
-- `<Stepper>` — +/- number input
-- `<StreakGrid>` — Calendar visualization
-- `<ProgressBar>` — Week goal meter
-
-**Composite Components** (Built from primitives)
-- `<SetInputRow>` — Exercise + weight/reps steppers
-- `<SessionPreviewCard>` — Last workout summary
-- `<WorkoutHeader>` — Routine name + session count
-
-### State Management (Zustand)
-```typescript
-interface AppState {
-  user: { name: string; weeklyGoal: number };
-  workouts: Workout[];
-  currentWeek: { completed: number; goal: number };
-  streak: number;
-}
-```
-
-### Persistence (AsyncStorage)
-- Save after every workout
-- Autosave user preferences
-- No network calls in V1 (offline-first)
-
-### Performance Targets
-- **Cold start**: <2s to interactive home screen
-- **Workout start**: <500ms from tap to sheet open
-- **Save workout**: <200ms, feel instant
-- **Animations**: 60fps minimum (use Reanimated)
-
----
-
-## Future Considerations (Post-V1)
-
-### Features Not in Design System Yet
-- **History/Stats screen**: Needs chart specs, filter UI
-- **HealthKit integration**: Permission flows, data sync
-- **Cloud sync**: Login, conflict resolution UI
-- **Rest timer**: Timer component, notifications
-- **Custom exercises**: Form inputs, management UI
-- **Apple Watch**: Minimal complication design
-
-### Design Debt to Address
-- Light mode (if user demand exists)
-- Tablet layout (if making iPad version)
-- Landscape workout mode
-- Accessibility: More comprehensive VoiceOver labels
-- Localization: Number formats, date formats
-
----
-
-## Design System Governance
-
-### When to Update
-- New feature requires unsupported pattern → document it first
-- User feedback reveals confusion → revise messaging/layout
-- Performance issues → simplify animations
-
-### What's Flexible
-- Exact spacing values (adjust for rhythm)
-- Microcopy (A/B test encouragement messages)
-- Animation timing (tune for feel)
-
-### What's Fixed
-- Color palette (brand identity)
-- Touch target minimums (accessibility)
-- Neon green for success states only
-- One primary CTA per screen
-- Dark-only in V1
-
----
-
-## Quick Reference
-
-### Component Checklist
-- [ ] 44pt minimum touch target?
-- [ ] Works with sweaty hands (large, clear)?
-- [ ] Prefills intelligent defaults?
-- [ ] Haptic feedback on interaction?
-- [ ] Animates at 60fps?
-- [ ] Labels clear without context?
-- [ ] One primary action obvious?
-
-### Color Usage Checklist
-- [ ] Green used for state, not decoration?
-- [ ] Primary CTA is white, not green?
-- [ ] Text contrast ≥4.5:1?
-- [ ] Dark background consistent?
-
-### Content Checklist
-- [ ] Short, direct copy (no jargon)?
-- [ ] Positive framing?
-- [ ] Encouraging without hype?
-- [ ] No unnecessary exclamation marks?
-
----
-
-**This design system is a living document.** It will evolve as Stack grows, but the core philosophy stays: ruthlessly reduce decisions, celebrate small wins, just lift.
+- The comment describing redesign tokens as a one-screen-at-a-time migration conflicts with the confirmed product decision below. Both systems are intentional, active systems; neither is legacy, dead, or a temporary replacement for the other.
+- The comment that limits the plain cobalt accent to a suggested-workout signal, active tab, and set confirmation is stale. Current direct references are documented in the Color systems section.
+
+## Brand and product identity
+
+Stack is a gym-tracking app built to remove the decisions between opening the app and lifting: it should feel ruthlessly minimal, fast, legible between sets, and like a calm, disciplined coach rather than a hype fitness influencer. Its conceptual north star is Dropset by Fortyfour AB’s fine Scandinavian minimalism, interpreted through Stack’s own dark, tactile surfaces, compact workout context, and restrained feedback rather than visually copied. The existing brief’s priorities remain: make the next action clear, prefill useful context, recognize small wins, and support an offline-first lifting flow.
+
+## Two named, coexisting design systems
+
+Stack deliberately operates two live token systems side by side in constants/theme.ts.
+
+| System | Tokens | Type roles | Where it is used |
+|---|---|---|---|
+| **Redesign system (primary)** | **redesignColors** and **redesignFonts** | Bricolage Grotesque display, Hanken Grotesk UI, JetBrains Mono numerals/labels | Most screens and components, including onboarding, home, workout, records, and profile. |
+| **Plain system (specialized live surface)** | **colors** and **fonts** | Switzer text, Space Mono numerals | Button, Input, MotivationQuote, SetInput, VolumeChart, and app/settings.tsx. |
+
+The systems are both intentional. A screen can also compose a component from the other system; for example, app/workout.tsx directly uses the redesign tokens and includes the plain Button in its feedback modal. That is normal component composition, not a signal that either system is old or being replaced.
+
+All app/component font-family declarations resolve through one of these two token objects; no literal font-family strings were found in those directories. app/_layout.tsx registers both systems before the app is shown. tailwind.config.js mirrors the plain colors and fonts only; it does not define a third visual system.
+
+## Color systems
+
+All base-token values below are hexadecimal strings declared in constants/theme.ts; neither base object contains an RGBA value. The supporting workout palettes are contextual category/action maps, not a third base design system.
+
+### Redesign system: redesignColors
+
+| Purpose | Token | Value | Implemented role |
+|---|---|---:|---|
+| Background | **ink** | **#13110E** | Base screen background. |
+| Surface | **surface** | **#1D1915** | Standard cards and sheets. |
+| Raised surface | **raised** | **#2A231C** | Nested and raised controls. |
+| High-emphasis surface | **hi** | **#3D3228** | Selected or higher-emphasis surface. |
+| Primary text/foreground | **bone** | **#F5F0E8** | Light primary text and foreground. |
+| Secondary text | **ash** | **#A99F91** | Secondary text. |
+| Tertiary/de-emphasized text | **ashDim** | **#6F6558** | Tertiary, disabled, or lower-emphasis text. |
+| Borders/dividers | **border** | **#3A322A** | Card, control, and divider borders. |
+
+The orange **redesignColors.accent** token, **#FF7A3D**, is used for the completed/goal-met hero card state. There is no named error, success, or warning token in this base object; other redesign interfaces receive workout-specific color through the supporting category maps below.
+
+### Plain system: colors
+
+| Purpose | Token | Value | Implemented role |
+|---|---|---:|---|
+| Background | **ink** | **#100E0C** | Base screen background. |
+| Surface | **surface** | **#1C1815** | Card and container surface. |
+| Raised surface | **surfaceRaised** | **#262019** | Nested, pressed, or active surface. |
+| Primary text/foreground | **bone** | **#F3EDE4** | Light primary text and foreground. |
+| Secondary text | **ash** | **#A39C8F** | Secondary/muted text. |
+| Tertiary/de-emphasized text | **ashDim** | **#6B6459** | Disabled or lower-emphasis context. |
+| Named global accent | **accent** | **#4C6FFF** | Cool cobalt blue; Stack’s current named accent. |
+
+The plain system defines no border/divider token and no named error, success, or warning token. Component-level borders either use a surface/text token or a local literal where necessary.
+
+**Verified cobalt use.** The current global accent is cobalt blue **#4C6FFF**. Two representative direct uses are the completed-set check background in components/SetInput.tsx and the current-week bar plus “This week” label in components/VolumeChart.tsx. It is also used for focused input borders in components/Input.tsx and app/settings.tsx. A fresh source search found no direct plain-accent use for an active tab or suggested-workout signal.
+
+### Supporting workout-category palettes
+
+constants/workouts.ts maps **splitColors** to the six workout types. The active workout logging screen selects **workoutLoggingColors** by the current workout type. These values identify workout categories and contextual actions; they do not make every surface or status colorful.
+
+| Map | Token | Value |
+|---|---|---:|
+| **splitColors** | **chest** | **#FF7A3D** |
+| **splitColors** | **back** | **#4F8BFF** |
+| **splitColors** | **shoulders** | **#A76FF2** |
+| **splitColors** | **arms** | **#28C8BD** |
+| **splitColors** | **legs** | **#B5E53F** |
+| **splitColors** | **core** | **#FF5682** |
+| **workoutLoggingColors** | **chest** | **#FF7A3D** (splitColors.chest) |
+| **workoutLoggingColors** | **back** | **#4F8BFF** (splitColors.back) |
+| **workoutLoggingColors** | **shoulders** | **#F05C66** |
+| **workoutLoggingColors** | **arms** | **#28C8BD** (splitColors.arms) |
+| **workoutLoggingColors** | **legs** | **#B5E53F** (splitColors.legs) |
+| **workoutLoggingColors** | **core** | **#55C96B** |
+
+Some feature files also define local contextual colors, such as BonusSet metadata and gradients. They are not exported global design tokens and are therefore not substitutes for the two named base systems above.
+
+## Typography systems
+
+app/_layout.tsx loads every family listed here. The four Switzer faces are bundled locally; all other faces are provided through the named Expo Google Fonts packages.
+
+### Plain system: fonts
+
+| Token | Loaded family | Actual source | Verified direct consumer(s) |
+|---|---|---|---|
+| **heading** | Switzer-Semibold | assets/fonts/Switzer-Semibold.otf | components/Button.tsx |
+| **headingBold** | Switzer-Bold | assets/fonts/Switzer-Bold.otf | app/settings.tsx |
+| **body** | Switzer-Regular | assets/fonts/Switzer-Regular.otf | app/settings.tsx; Input; MotivationQuote; SetInput; VolumeChart |
+| **bodyMedium** | Switzer-Medium | assets/fonts/Switzer-Medium.otf | app/settings.tsx; Button; Input; SetInput; VolumeChart |
+| **bodySemiBold** | Switzer-Semibold | assets/fonts/Switzer-Semibold.otf | app/settings.tsx; Button |
+| **mono** | SpaceMono_400Regular | @expo-google-fonts/space-mono | Defined and loaded; no direct current consumer. |
+| **monoBold** | SpaceMono_700Bold | @expo-google-fonts/space-mono | components/SetInput.tsx |
+
+The specialized plain-system file set is exactly components/Button.tsx, components/Input.tsx, components/MotivationQuote.tsx, components/SetInput.tsx, components/VolumeChart.tsx, and app/settings.tsx. The unused **fonts.mono** token is still an intentionally available part of this live system; this inventory only records that no source currently references it directly.
+
+### Redesign system: redesignFonts
+
+| Token | Loaded family | Actual source | Verified direct consumer(s) |
+|---|---|---|---|
+| **display** | BricolageGrotesque_700Bold | @expo-google-fonts/bricolage-grotesque | app/index.tsx; app/workout.tsx; all four onboarding screens; tabs/index, profile, records; ActiveSetCard; BonusSet; RestTimer; SwapExerciseSheet; home/WorkoutHeroCard, WorkoutIntensityPicker, WorkoutPicker |
+| **ui** | HankenGrotesk_400Regular | @expo-google-fonts/hanken-grotesk | onboarding/experience and welcome; tabs/records; app/workout.tsx; BonusSet; ExerciseFinisher; SwapExerciseSheet |
+| **uiMedium** | HankenGrotesk_500Medium | @expo-google-fonts/hanken-grotesk | tabs/profile; home/ScheduleRow |
+| **uiSemiBold** | HankenGrotesk_600SemiBold | @expo-google-fonts/hanken-grotesk | onboarding/current-week and whatsurname; tabs/index and profile; app/workout.tsx; ActiveSetCard; ExerciseFinisher; RestTimer; SwapExerciseSheet; home/ScheduleRow and WorkoutPicker |
+| **uiBold** | HankenGrotesk_700Bold | @expo-google-fonts/hanken-grotesk | onboarding/current-week, experience, and welcome; tabs/profile and records; ActiveSetCard; ExerciseFinisher; SwapExerciseSheet |
+| **uiItalic** | HankenGrotesk_400Regular_Italic | @expo-google-fonts/hanken-grotesk | tabs/index |
+| **mono** | JetBrainsMono_400Regular | @expo-google-fonts/jetbrains-mono | tabs/profile; ExerciseFinisher; home/WeeklyProgressPill and WorkoutHeroCard |
+| **monoBold** | JetBrainsMono_700Bold | @expo-google-fonts/jetbrains-mono | tabs/index, profile, and records; app/workout.tsx; ActiveSetCard; BonusSet; ExerciseFinisher; RestTimer; StatusPill; SwapExerciseSheet; WorkoutDayLabel; home/ScheduleRow, WorkoutHeroCard, WorkoutIntensityPicker, WorkoutPicker |
+
+For compactness, “all four onboarding screens” means app/(onboarding)/welcome.tsx, current-week.tsx, whatsurname.tsx, and experience.tsx. “tabs/index, profile, records” means the matching files in app/(tabs)/. Every redesign-font token has at least one direct live reference.
+
+## Spacing, layout, radius, and sizing
+
+There is no formal spacing, radius, or sizing scale in constants/theme.ts or the other constants files. tailwind.config.js adds the plain colors and font families but no custom spacing, radius, or sizing extension.
+
+Spacing and layout are therefore currently component-local, expressed through inline style objects and StyleSheet declarations. The live code uses varied literal values, including fractional radii such as 3.5 and 6.5 as well as pill radii of 999; it does not implement the former document’s claimed 4 px scale. Do not infer a global spacing or corner-radius token from recurring values such as 16, 20, or 24. New layout values should be chosen in the context of the component being extended until a formal scale is introduced in code.
+
+## Component inventory
+
+| Component name | Purpose | System used | File path |
+|---|---|---|---|
+| **ActiveSetCard** | Editable active-set card for reps and weight, with log and skip actions. | Redesign | components/ActiveSetCard.tsx |
+| **BonusSet** and **BonusSetAcknowledgement** | Reuses the active-set flow for extra, drop, and PR sets, then confirms completion. | Redesign | components/BonusSet.tsx |
+| **Button** | Variant-aware, loading-capable pressable button. | Plain | components/Button.tsx |
+| **ExerciseFinisher** | Shows a completed-set summary and options for extra, drop, PR, or advancing. | Redesign | components/ExerciseFinisher.tsx |
+| **Input** | Labeled text or numeric input with a focus state. | Plain | components/Input.tsx |
+| **MotivationQuote** | Displays one intentionally quiet, randomized motivational quote. | Plain | components/MotivationQuote.tsx |
+| **OnboardingProgress**, **OnboardingBackButton**, and **OnboardingNextButton** | Shared four-step onboarding progress and navigation controls. | Redesign colors plus splitColors; no redesign-font token in this file | components/OnboardingControls.tsx |
+| **RestTimer** | Ninety-second rest overlay with adjustment, skip, and completion controls. | Redesign | components/RestTimer.tsx |
+| **SetInput** | Compact reps/weight row with completed and skipped set states. | Plain | components/SetInput.tsx |
+| **StatusPill** | Uppercase status badge with an optional semantic color prop. | Redesign | components/StatusPill.tsx |
+| **SwapExerciseSheet** | Bottom sheet for navigating and replacing an exercise with confirmation. | Redesign | components/SwapExerciseSheet.tsx |
+| **VolumeChart** | SVG weekly-volume bar chart with an empty state. | Plain | components/VolumeChart.tsx |
+| **WorkoutDayLabel** | Colored dot plus uppercase workout-day label. | Redesign | components/WorkoutDayLabel.tsx |
+| **ScheduleRow** | Row for a scheduled, rest, or completed day in the home schedule. | Redesign | components/home/ScheduleRow.tsx |
+| **WeeklyProgressPill** | Compact completed-versus-goal count with progress bars. | Redesign | components/home/WeeklyProgressPill.tsx |
+| **WorkoutHeroCard** | Animated “today’s workout” launch card. | Redesign | components/home/WorkoutHeroCard.tsx |
+| **WorkoutIntensityPicker** | Modal slider and discrete choice control for workout intensity. | Redesign | components/home/WorkoutIntensityPicker.tsx |
+| **WorkoutPicker** | Animated bottom sheet for choosing a workout split. | Redesign | components/home/WorkoutPicker.tsx |
+
+## Icon system
+
+At the application-source level, **lucide-react-native** is the only icon library in use. Source imports appear in app screens, onboarding, tabs, and the relevant components listed above. package.json also declares @expo/vector-icons, @lucide/lab, and expo-symbols, but a fresh search found no application-source imports or references to any of them. react-native-svg is used by VolumeChart to draw chart bars, not as an icon system.
+
+There is no shared icon-size token. Literal Lucide sizes range from 13 to 31 px; the common action/navigation range is 14 to 23 px, and the floating tab bar explicitly supplies 23 px. Feature icons are commonly 25–28 px, while the BonusSet acknowledgement check is 31 px. Stroke widths are usually 2–2.6, with completion checks intentionally heavier at 3–3.5. Use the existing Lucide outline vocabulary and match the local icon’s size and stroke rather than adding another icon package.
+
+## Motion
+
+**Implementation correction:** react-native-reanimated is the primary and only third-party animation package directly used, but it is not literally the only animation system in the app.
+
+- **Reanimated** is declared in package.json and configured in babel.config.js. It drives press feedback, selection states, progress, rolling values, bottom sheets, tab indication, and entering/exiting transitions across the workout, onboarding, tab/profile, and redesign component surfaces.
+- **React Native Animated** is also live. app/index.tsx uses it for the splash-card stagger/sequence, wordmark reveal, and screen fade. components/SwapExerciseSheet.tsx uses it with PanResponder for drag position, Animated.timing for dismissal, and Animated.spring for snap-back. Both use the native driver where configured.
+- **Native/framework transitions** are also present: WorkoutIntensityPicker uses Modal fade; SwapExerciseSheet uses Modal slide; the workout feedback modal uses fade; and app/_layout.tsx configures the workout route with slide_from_right and pop-on-replace. WorkoutPicker and profile detail sheets use Modal animationType none because Reanimated supplies their transitions.
+- No source imports or declared dependencies were found for Moti, Lottie, React Native Animatable, Rive, Skia, or another animation library.
+
+There is no shared motion hook, timing-token object, or central animation module. Motion configurations are local to each component or screen. Reusable patterns in practice are:
+
+- Short press-scale feedback repeated locally in Button, OnboardingControls, ActiveSetCard, ExerciseFinisher, and WorkoutHeroCard.
+- Selection/toggle interpolation in onboarding/current-week and onboarding/experience, implemented similarly but separately.
+- app/workout.tsx’s file-local cluster of directional transitions, layout transition, check spring, and feedback-sheet entrance; it explicitly uses ReduceMotion.System where applicable.
+- BonusSet’s local reduced-motion-aware acknowledgement-check spring and RestTimer’s reduced-motion-aware slide transitions.
+- ActiveSetCard’s rolling numeric value transition and app/index.tsx’s local splash reveal helpers.
+
+When changing motion, preserve reduced-motion handling where the local pattern already uses it and avoid implying that a central timing scale exists when it does not.
+
+## Durable design rules for future work
+
+1. **Keep Stack restrained and gym-functional.** Favor the calm, legible, decision-reducing experience already articulated in the original brief: one clear next action, useful prefills, compact feedback, and encouragement without hype.
+2. **Do not fall into generic “AI-app” defaults.** Avoid the warm-cream-plus-terracotta-serif treatment, near-black-plus-acid-green treatment, and broadsheet-serif treatment. Dropset is a conceptual reference for Scandinavian restraint, never a template to clone.
+3. **Use color by role, not decoration.** Keep the named cobalt accent, **#4C6FFF**, to its verified/designated plain-system state and focus roles. Keep split/workout-logging colors tied to workout identity or a contextual primary action; do not spread them across neutral surfaces or invent additional global semantic accents without adding verified tokens.
+4. **Respect the two-system boundary.** Use the active system appropriate to the component or screen. Do not rename either as old, legacy, or a migration. If a new shared component must choose, make the choice explicit and document its token usage.
+5. **Keep typography constrained within each system.** Use the established display/UI/mono families and vary their existing weights rather than introducing competing display faces. Plain-system text remains Switzer-led with Space Mono for numeric treatment; redesign text remains Bricolage/Hanken/JetBrains-led according to the tokens above.
+6. **Do not invent global scales or promises.** Spacing, radius, accessibility, performance, and motion claims belong here only after a matching token, utility, or implementation exists in code.
+
+## Maintenance source of truth
+
+For visual token changes, update constants/theme.ts first and then this document. Keep tailwind.config.js synchronized with the plain colors/fonts it mirrors. Before documenting an implementation claim, verify the current source rather than inheriting it from an earlier specification.

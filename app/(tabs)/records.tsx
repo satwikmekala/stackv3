@@ -12,17 +12,21 @@ import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { ChevronLeft } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { redesignColors, redesignFonts } from '@/constants/theme';
-import { workoutMeta } from '@/constants/workouts';
 import {
+  ARCHETYPE_COMPOSITIONS,
+  type Archetype,
+  type SessionWorkoutClassification,
+} from '@/constants/archetypes';
+import { redesignColors, redesignFonts } from '@/constants/theme';
+import {
+  parseSessionDate,
   useWorkoutStore,
   type ExerciseSet,
   type WorkoutSession,
-  type WorkoutType,
 } from '@/store/workoutStore';
 import '@/global.css';
 
-type RecordFilter = 'all' | WorkoutType;
+type RecordFilter = 'all' | Archetype;
 
 type RecordItem = {
   id: string;
@@ -30,50 +34,24 @@ type RecordItem = {
   weight: number;
   reps: number;
   date: Date;
-  type: WorkoutType;
+  session: SessionWorkoutClassification;
 };
 
-type RecordSeed = Omit<RecordItem, 'date'> & { date: string };
-
-const PREVIEW_RECORDS: RecordSeed[] = [
-  { id: '1', exercise: 'Deadlift', weight: 110, reps: 5, date: '2025-10-14', type: 'back' },
-  { id: '2', exercise: 'Bench Press', weight: 50, reps: 8, date: '2025-10-11', type: 'chest' },
-  { id: '3', exercise: 'Squat', weight: 90, reps: 5, date: '2025-10-08', type: 'legs' },
-  { id: '4', exercise: 'Overhead Press', weight: 35, reps: 6, date: '2025-10-03', type: 'shoulders' },
-  { id: '5', exercise: 'Barbell Row', weight: 70, reps: 8, date: '2025-09-26', type: 'back' },
-  { id: '6', exercise: 'Bench Press', weight: 47.5, reps: 8, date: '2025-09-20', type: 'chest' },
-  { id: '7', exercise: 'Hanging Leg Raise', weight: 0, reps: 15, date: '2025-09-12', type: 'core' },
-  { id: '8', exercise: 'Squat', weight: 85, reps: 5, date: '2025-09-05', type: 'legs' },
-  { id: '9', exercise: 'Bicep Curl', weight: 18, reps: 10, date: '2025-08-22', type: 'arms' },
-  { id: '10', exercise: 'Overhead Press', weight: 30, reps: 6, date: '2025-08-09', type: 'shoulders' },
-  { id: '11', exercise: 'Deadlift', weight: 105, reps: 5, date: '2025-07-28', type: 'back' },
-  { id: '12', exercise: 'Incline Dumbbell Press', weight: 22.5, reps: 10, date: '2025-07-20', type: 'chest' },
-  { id: '13', exercise: 'Leg Press', weight: 140, reps: 10, date: '2025-07-12', type: 'legs' },
-  { id: '14', exercise: 'Plank', weight: 0, reps: 75, date: '2025-07-05', type: 'core' },
-  { id: '15', exercise: 'Lat Pulldown', weight: 55, reps: 10, date: '2025-06-28', type: 'back' },
-  { id: '16', exercise: 'Bench Press', weight: 45, reps: 8, date: '2025-06-21', type: 'chest' },
-  { id: '17', exercise: 'Romanian Deadlift', weight: 75, reps: 8, date: '2025-06-14', type: 'legs' },
-  { id: '18', exercise: 'Tricep Pushdown', weight: 25, reps: 12, date: '2025-06-07', type: 'arms' },
-  { id: '19', exercise: 'Squat', weight: 80, reps: 5, date: '2025-05-30', type: 'legs' },
-  { id: '20', exercise: 'Seated Cable Row', weight: 60, reps: 8, date: '2025-05-23', type: 'back' },
-  { id: '21', exercise: 'Lateral Raise', weight: 10, reps: 12, date: '2025-05-16', type: 'shoulders' },
-  { id: '22', exercise: 'Bicep Curl', weight: 16, reps: 10, date: '2025-05-09', type: 'arms' },
-  { id: '23', exercise: 'Deadlift', weight: 100, reps: 5, date: '2025-04-27', type: 'back' },
-  { id: '24', exercise: 'Bench Press', weight: 42.5, reps: 8, date: '2025-04-20', type: 'chest' },
-  { id: '25', exercise: 'Leg Press', weight: 130, reps: 10, date: '2025-04-13', type: 'legs' },
-  { id: '26', exercise: 'Hanging Leg Raise', weight: 0, reps: 12, date: '2025-04-06', type: 'core' },
-  { id: '27', exercise: 'Barbell Row', weight: 65, reps: 8, date: '2025-03-28', type: 'back' },
-  { id: '28', exercise: 'Overhead Press', weight: 27.5, reps: 6, date: '2025-03-20', type: 'shoulders' },
+const RECORD_ARCHETYPES: Archetype[] = [
+  'push',
+  'pull',
+  'legs',
+  'upper',
+  'lower',
+  'full_body',
 ];
 
 const RECORD_FILTERS: { label: string; value: RecordFilter }[] = [
   { label: 'ALL', value: 'all' },
-  { label: 'CHEST', value: 'chest' },
-  { label: 'BACK', value: 'back' },
-  { label: 'LEGS', value: 'legs' },
-  { label: 'SHOULDERS', value: 'shoulders' },
-  { label: 'ARMS', value: 'arms' },
-  { label: 'CORE', value: 'core' },
+  ...RECORD_ARCHETYPES.map((archetype) => ({
+    label: ARCHETYPE_COMPOSITIONS[archetype].shortLabel.toUpperCase(),
+    value: archetype,
+  })),
 ];
 
 const MONTHS = [
@@ -102,19 +80,25 @@ const strongestSet = (sets: ExerciseSet[]) =>
 function deriveRecordHistory(sessions: WorkoutSession[]): RecordItem[] {
   const completedSessions = sessions
     .filter((session) => session.completed)
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    .sort(
+      (a, b) =>
+        parseSessionDate(a.date).getTime() - parseSessionDate(b.date).getTime()
+    );
 
   if (completedSessions.length === 0) {
-    return PREVIEW_RECORDS.map((record) => ({
-      ...record,
-      date: new Date(`${record.date}T12:00:00`),
-    }));
+    return [];
   }
 
   const bestByExercise = new Map<string, { weight: number; reps: number }>();
   const records: RecordItem[] = [];
 
   completedSessions.forEach((session) => {
+    const sessionClassification: SessionWorkoutClassification = {
+      archetype: session.archetype,
+      secondaryArchetype: session.secondaryArchetype,
+      workoutTypes: session.workoutTypes,
+    };
+
     session.exercises.forEach((exercise, exerciseIndex) => {
       const completedSets = exercise.sets.filter((set) => set.completed);
       const availableSets = completedSets.length > 0 ? completedSets : exercise.sets;
@@ -134,8 +118,8 @@ function deriveRecordHistory(sessions: WorkoutSession[]): RecordItem[] {
           exercise: exercise.name === 'Squats' ? 'Squat' : exercise.name,
           weight: bestSet.weight,
           reps: bestSet.reps,
-          date: new Date(session.date),
-          type: session.type,
+          date: parseSessionDate(session.date),
+          session: sessionClassification,
         });
       }
     });
@@ -194,14 +178,13 @@ function FilterChip({
 }
 
 function RecordRow({ record, isLast }: { record: RecordItem; isLast: boolean }) {
-  const accent = workoutMeta[record.type].color;
-
   return (
     <View style={[styles.recordRow, !isLast && styles.recordRowBorder]}>
-      <View style={[styles.recordDot, { backgroundColor: accent }]} />
-      <Text adjustsFontSizeToFit minimumFontScale={0.8} numberOfLines={2} style={styles.exerciseName}>
-        {record.exercise}
-      </Text>
+      <View style={styles.recordIdentity}>
+        <Text adjustsFontSizeToFit minimumFontScale={0.8} numberOfLines={2} style={styles.exerciseName}>
+          {record.exercise}
+        </Text>
+      </View>
       <View style={styles.performance}>
         <Text adjustsFontSizeToFit minimumFontScale={0.78} numberOfLines={1} style={styles.performanceText}>
           {record.weight === 0 ? 'BW' : `${formatNumber(record.weight)} kg`}
@@ -217,11 +200,19 @@ export default function AllRecords() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const sessions = useWorkoutStore((state) => state.sessions);
-  const [selectedFilters, setSelectedFilters] = useState<WorkoutType[]>([]);
+  const [selectedFilters, setSelectedFilters] = useState<Archetype[]>([]);
 
   const allRecords = useMemo(() => deriveRecordHistory(sessions), [sessions]);
   const visibleRecords = useMemo(
-    () => allRecords.filter((record) => selectedFilters.length === 0 || selectedFilters.includes(record.type)),
+    () => allRecords.filter((record) => {
+      if (selectedFilters.length === 0) return true;
+      if (!record.session.archetype) return false;
+      return selectedFilters.includes(record.session.archetype) ||
+        Boolean(
+          record.session.secondaryArchetype &&
+          selectedFilters.includes(record.session.secondaryArchetype)
+        );
+    }),
     [allRecords, selectedFilters]
   );
   const groups = useMemo(() => groupByMonth(visibleRecords), [visibleRecords]);
@@ -414,15 +405,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: redesignColors.border,
   },
-  recordDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginRight: 15,
-  },
-  exerciseName: {
+  recordIdentity: {
     flex: 1,
     minWidth: 0,
+  },
+  exerciseName: {
     fontFamily: redesignFonts.uiBold,
     fontSize: 17,
     lineHeight: 21,

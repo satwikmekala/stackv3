@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -7,10 +7,16 @@ import { ArrowLeftRight } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ScheduleRow } from '@/components/home/ScheduleRow';
 import { WorkoutHeroCard } from '@/components/home/WorkoutHeroCard';
-import { WorkoutPicker } from '@/components/home/WorkoutPicker';
 import { WorkoutIntensityPicker } from '@/components/home/WorkoutIntensityPicker';
+import { WorkoutPicker } from '@/components/home/WorkoutPicker';
+import { ARCHETYPE_COMPOSITIONS, type Archetype } from '@/constants/archetypes';
 import { redesignColors, redesignFonts } from '@/constants/theme';
-import { useWorkoutStore, type WorkoutType } from '@/store/workoutStore';
+import { getWeeklyQueueState } from '@/store/weeklyQueueEngine';
+import {
+  getNextArchetypeVariant,
+  readArchetypeTemplateSync,
+} from '@/store/workoutDatabase';
+import { useWorkoutStore } from '@/store/workoutStore';
 import '@/global.css';
 
 const DAY_LABELS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
@@ -39,22 +45,44 @@ export default function Home() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const profile = useWorkoutStore((state) => state.profile);
-  const sessions = useWorkoutStore((state) => state.sessions);
-  const splitTemplates = useWorkoutStore((state) => state.splitTemplates);
-  const getNextWorkoutType = useWorkoutStore((state) => state.getNextWorkoutType);
+  useWorkoutStore((state) => state.sessions);
+  const currentSession = useWorkoutStore((state) => state.currentSession);
   const getWeekSchedule = useWorkoutStore((state) => state.getWeekSchedule);
-  const startWorkout = useWorkoutStore((state) => state.startWorkout);
+  const startWorkoutFromArchetype = useWorkoutStore(
+    (state) => state.startWorkoutFromArchetype
+  );
+  const logArchetypeCompletedRetroactively = useWorkoutStore(
+    (state) => state.logArchetypeCompletedRetroactively
+  );
 
-  const nextType = useMemo(() => getNextWorkoutType(), [sessions, getNextWorkoutType]);
-  const [selectedType, setSelectedType] = useState<WorkoutType>(nextType);
-  const [pickerVisible, setPickerVisible] = useState(false);
-  const [intensityPickerType, setIntensityPickerType] = useState<WorkoutType | null>(null);
+  // The selectors above make queue state refresh whenever profile or completed
+  // sessions change; the engine itself remains the single source of truth.
+  const queueState = getWeeklyQueueState();
+  const nextUp = queueState.nextUp;
+  const schedule = getWeekSchedule();
+  const exerciseCount = nextUp.reduce(
+    (count, archetype) =>
+      count +
+      readArchetypeTemplateSync(archetype, getNextArchetypeVariant(archetype)).length,
+    0
+  );
+  const intensityPickerType = nextUp[0]
+    ? ARCHETYPE_COMPOSITIONS[nextUp[0]].workoutTypes[0]
+    : 'chest';
+  const [intensityPickerVisible, setIntensityPickerVisible] = useState(false);
+  const [pendingArchetypes, setPendingArchetypes] = useState<Archetype[]>([]);
+  const [workoutPickerVisible, setWorkoutPickerVisible] = useState(false);
+  const [retroactiveDate, setRetroactiveDate] = useState<string | null>(null);
+  const [retroactiveConfirmation, setRetroactiveConfirmation] = useState<string | null>(
+    null
+  );
+  const isLoggingRetroactiveRef = useRef(false);
 
   useEffect(() => {
-    setSelectedType(nextType);
-  }, [nextType]);
-
-  const schedule = getWeekSchedule();
+    if (!retroactiveConfirmation) return;
+    const timeout = setTimeout(() => setRetroactiveConfirmation(null), 2400);
+    return () => clearTimeout(timeout);
+  }, [retroactiveConfirmation]);
 
   const tapFeedback = () => {
     if (Platform.OS !== 'web') {
@@ -62,23 +90,62 @@ export default function Home() {
     }
   };
 
-  const handleStartWorkout = (type: WorkoutType) => {
+  const handleStartWorkout = () => {
     tapFeedback();
-    setIntensityPickerType(type);
+    if (currentSession) {
+      router.push('/workout');
+      return;
+    }
+    if (nextUp.length > 0) {
+      setPendingArchetypes(nextUp);
+      setIntensityPickerVisible(true);
+    }
   };
 
   const handleIntensityChosen = () => {
-    if (!intensityPickerType) return;
-    const type = intensityPickerType;
-    setIntensityPickerType(null);
-    startWorkout(type);
+    if (currentSession) {
+      setIntensityPickerVisible(false);
+      router.push('/workout');
+      return;
+    }
+    if (pendingArchetypes.length === 0) return;
+    setIntensityPickerVisible(false);
+    startWorkoutFromArchetype(pendingArchetypes);
+    setPendingArchetypes([]);
     router.push('/workout');
   };
 
-  const handleSelectWorkout = (type: WorkoutType) => {
+  const handleSelectWorkout = (archetype: Archetype) => {
     tapFeedback();
-    setSelectedType(type);
-    setPickerVisible(false);
+    setWorkoutPickerVisible(false);
+    setPendingArchetypes([archetype]);
+  };
+
+  const handleOpenWorkoutPicker = () => {
+    tapFeedback();
+    setWorkoutPickerVisible(true);
+  };
+
+  const handleWorkoutPickerExited = useCallback(() => {
+    if (currentSession) {
+      router.push('/workout');
+      return;
+    }
+    if (pendingArchetypes.length > 0) {
+      setIntensityPickerVisible(true);
+    }
+  }, [currentSession, pendingArchetypes.length, router]);
+
+  const handleRetroactiveWorkout = (archetype: Archetype) => {
+    if (isLoggingRetroactiveRef.current) return;
+    isLoggingRetroactiveRef.current = true;
+    if (!retroactiveDate) return;
+    tapFeedback();
+    logArchetypeCompletedRetroactively([archetype], retroactiveDate);
+    setRetroactiveDate(null);
+    setRetroactiveConfirmation(
+      `${ARCHETYPE_COMPOSITIONS[archetype].shortLabel} logged as complete`
+    );
   };
 
   if (!profile) {
@@ -121,42 +188,52 @@ export default function Home() {
 
         <View style={styles.heroWrap}>
           <WorkoutHeroCard
-            type={selectedType}
-            exerciseCount={splitTemplates[selectedType].length}
-            onPress={() => handleStartWorkout(selectedType)}
+            archetypes={nextUp}
+            exerciseCount={exerciseCount}
+            completed={nextUp.length === 0}
+            onPress={nextUp.length > 0 ? handleStartWorkout : handleOpenWorkoutPicker}
           />
         </View>
 
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Change workout"
-          onPress={() => {
-            tapFeedback();
-            setPickerVisible(true);
-          }}
+          onPress={handleOpenWorkoutPicker}
           style={styles.changeButton}
         >
           <ArrowLeftRight color={redesignColors.ash} size={18} strokeWidth={2} />
           <Text style={styles.changeButtonText}>Change workout</Text>
         </Pressable>
 
+        {retroactiveConfirmation ? (
+          <Text accessibilityLiveRegion="polite" style={styles.confirmation}>
+            {retroactiveConfirmation}
+          </Text>
+        ) : null}
+
         <Text style={styles.quote}>
           “Small sessions, stacked. That’s the whole trick.”
         </Text>
 
         <View style={styles.scheduleSection}>
-          <Text style={styles.scheduleTitle}>THIS WEEK</Text>
           <View style={styles.scheduleList}>
             {schedule.map((day, index) => {
               if (day.status === 'today') return null;
-              const type = day.completedType ?? day.projectedType;
 
               return (
                 <ScheduleRow
                   key={day.date}
                   day={day}
                   dayLabel={DAY_LABELS[index]}
-                  onPress={type ? handleStartWorkout : undefined}
+                  onPress={
+                    day.status === 'past' && !day.completedWorkout
+                      ? () => {
+                          isLoggingRetroactiveRef.current = false;
+                          tapFeedback();
+                          setRetroactiveDate(day.date);
+                        }
+                      : undefined
+                  }
                 />
               );
             })}
@@ -165,16 +242,33 @@ export default function Home() {
       </ScrollView>
 
       <WorkoutPicker
-        visible={pickerVisible}
-        selected={selectedType}
+        visible={workoutPickerVisible}
+        selected={nextUp[0]}
         onSelect={handleSelectWorkout}
-        onClose={() => setPickerVisible(false)}
+        onClose={() => setWorkoutPickerVisible(false)}
+        onExited={handleWorkoutPickerExited}
+      />
+      <WorkoutPicker
+        visible={Boolean(retroactiveDate)}
+        options={queueState.remaining}
+        eyebrow="QUICK CORRECTION"
+        title="What did you finish?"
+        onSelect={handleRetroactiveWorkout}
+        onClose={() => {
+          isLoggingRetroactiveRef.current = false;
+          setRetroactiveDate(null);
+        }}
       />
       <WorkoutIntensityPicker
-        visible={Boolean(intensityPickerType)}
-        type={intensityPickerType ?? selectedType}
+        visible={intensityPickerVisible}
+        type={pendingArchetypes[0]
+          ? ARCHETYPE_COMPOSITIONS[pendingArchetypes[0]].workoutTypes[0]
+          : intensityPickerType}
         onChoose={handleIntensityChosen}
-        onClose={() => setIntensityPickerType(null)}
+        onClose={() => {
+          setIntensityPickerVisible(false);
+          setPendingArchetypes([]);
+        }}
       />
     </View>
   );
@@ -234,6 +328,14 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: redesignColors.ash,
   },
+  confirmation: {
+    alignSelf: 'center',
+    marginTop: 8,
+    fontFamily: redesignFonts.monoBold,
+    fontSize: 11,
+    letterSpacing: 0.7,
+    color: redesignColors.ash,
+  },
   quote: {
     maxWidth: 310,
     alignSelf: 'center',
@@ -246,13 +348,6 @@ const styles = StyleSheet.create({
   },
   scheduleSection: {
     marginTop: 30,
-  },
-  scheduleTitle: {
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 12,
-    letterSpacing: 2,
-    color: redesignColors.ash,
-    marginBottom: 18,
   },
   scheduleList: {
     gap: 7,

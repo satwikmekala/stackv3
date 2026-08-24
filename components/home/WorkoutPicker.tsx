@@ -7,18 +7,36 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import type { WorkoutType } from '@/store/workoutStore';
-import { WORKOUT_ORDER, workoutMeta } from '@/constants/workouts';
+import {
+  ARCHETYPE_COMPOSITIONS,
+  type Archetype,
+} from '@/constants/archetypes';
 import { redesignColors, redesignFonts } from '@/constants/theme';
+import { getWeeklyQueueState } from '@/store/weeklyQueueEngine';
+
+const ALL_ARCHETYPES = Object.keys(ARCHETYPE_COMPOSITIONS) as Archetype[];
 
 type WorkoutPickerProps = {
   visible: boolean;
-  selected: WorkoutType;
-  onSelect: (type: WorkoutType) => void;
+  selected?: Archetype;
+  options?: Archetype[];
+  eyebrow?: string;
+  title?: string;
+  onSelect: (archetype: Archetype) => void;
   onClose: () => void;
+  onExited?: () => void;
 };
 
-export function WorkoutPicker({ visible, selected, onSelect, onClose }: WorkoutPickerProps) {
+export function WorkoutPicker({
+  visible,
+  selected,
+  options,
+  eyebrow = 'CHOOSE A SPLIT',
+  title,
+  onSelect,
+  onClose,
+  onExited,
+}: WorkoutPickerProps) {
   const { height: screenHeight } = useWindowDimensions();
   const [isMounted, setIsMounted] = useState(visible);
   const progress = useSharedValue(visible ? 1 : 0);
@@ -40,11 +58,14 @@ export function WorkoutPicker({ visible, selected, onSelect, onClose }: WorkoutP
         (finished) => {
           if (finished) {
             runOnJS(setIsMounted)(false);
+            if (onExited) {
+              runOnJS(onExited)();
+            }
           }
         }
       );
     }
-  }, [isMounted, progress, visible]);
+  }, [isMounted, onExited, progress, visible]);
 
   const backdropStyle = useAnimatedStyle(() => ({
     opacity: progress.value,
@@ -58,38 +79,70 @@ export function WorkoutPicker({ visible, selected, onSelect, onClose }: WorkoutP
     return null;
   }
 
+  const { remaining, nextUp } = getWeeklyQueueState();
+  const queuedArchetypes = [...new Set(options ?? [...nextUp, ...remaining])];
+  const isWeekComplete = queuedArchetypes.length === 0;
+  const isBonusPool = options === undefined && isWeekComplete;
+  const archetypes = isBonusPool ? ALL_ARCHETYPES : queuedArchetypes;
+  const pickerTitle = title ?? (
+    isBonusPool
+      ? 'What would you like to work out?'
+      : isWeekComplete
+        ? 'Week complete'
+        : 'Change workout'
+  );
+
   return (
     <Modal transparent visible animationType="none" onRequestClose={onClose}>
       <View style={styles.modal}>
         <Animated.View pointerEvents={visible ? 'auto' : 'none'} style={[styles.backdrop, backdropStyle]}>
-          <Pressable accessibilityLabel="Close workout picker" style={StyleSheet.absoluteFill} onPress={onClose} />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Close workout picker"
+            style={StyleSheet.absoluteFill}
+            onPress={onClose}
+          />
         </Animated.View>
         <Animated.View style={[styles.sheet, sheetStyle]}>
           <View style={styles.handle} />
-          <Text style={styles.eyebrow}>CHOOSE A SPLIT</Text>
-          <Text style={styles.title}>Change workout</Text>
+          <Text style={styles.eyebrow}>{eyebrow}</Text>
+          <Text style={styles.title}>{pickerTitle}</Text>
 
-          <View style={styles.options}>
-            {WORKOUT_ORDER.map((type) => {
-              const meta = workoutMeta[type];
-              const isSelected = selected === type;
-              return (
-                <Pressable
-                  key={type}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: isSelected }}
-                  onPress={() => onSelect(type)}
-                  style={[
-                    styles.option,
-                    isSelected && { borderColor: meta.color, backgroundColor: redesignColors.raised },
-                  ]}
-                >
-                  <View style={[styles.dot, { backgroundColor: meta.color }]} />
-                  <Text style={styles.optionLabel}>{meta.shortLabel}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
+          {isWeekComplete && !isBonusPool ? (
+            <Text style={styles.completeMessage}>
+              {"YOU'RE DONE FOR THIS WEEK"}
+            </Text>
+          ) : null}
+
+          {archetypes.length > 0 ? (
+            <View style={styles.options}>
+              {archetypes.map((archetype) => {
+                const composition = ARCHETYPE_COMPOSITIONS[archetype];
+                const isSelected = selected === archetype;
+                return (
+                  <Pressable
+                    key={archetype}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${composition.label}, select workout`}
+                    accessibilityState={{ selected: isSelected }}
+                    onPress={() => onSelect(archetype)}
+                    style={[
+                      styles.option,
+                      isSelected && {
+                        borderColor: composition.color,
+                        backgroundColor: redesignColors.raised,
+                      },
+                    ]}
+                  >
+                    <View style={[styles.dot, { backgroundColor: composition.color }]} />
+                    <View style={styles.optionContent}>
+                      <Text style={styles.optionLabel}>{composition.label}</Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null}
         </Animated.View>
       </View>
     </Modal>
@@ -164,5 +217,16 @@ const styles = StyleSheet.create({
     fontFamily: redesignFonts.uiSemiBold,
     fontSize: 15,
     color: redesignColors.bone,
+  },
+  optionContent: {
+    flex: 1,
+    alignItems: 'flex-start',
+  },
+  completeMessage: {
+    fontFamily: redesignFonts.monoBold,
+    fontSize: 12,
+    letterSpacing: 1.2,
+    color: redesignColors.ash,
+    marginBottom: 16,
   },
 });

@@ -1,48 +1,73 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { Check, ChevronRight } from 'lucide-react-native';
-import type { ScheduleDay, WorkoutType } from '@/store/workoutStore';
+import { ChevronRight } from 'lucide-react-native';
+import type { ScheduleDay } from '@/store/workoutStore';
+import { getSessionWorkoutDisplay } from '@/constants/archetypes';
 import { workoutMeta } from '@/constants/workouts';
 import { redesignColors, redesignFonts } from '@/constants/theme';
 
 type ScheduleRowProps = {
   day: ScheduleDay;
   dayLabel: string;
-  onPress?: (type: WorkoutType) => void;
+  onPress?: () => void;
 };
 
 export function ScheduleRow({ day, dayLabel, onPress }: ScheduleRowProps) {
-  const type = day.completedType ?? day.projectedType;
+  const projectedType = day.projectedWorkoutTypes?.[0];
+  const completedDisplay = day.completedWorkout
+    ? getSessionWorkoutDisplay(day.completedWorkout)
+    : null;
 
-  if (!type) {
+  if (!completedDisplay && day.status === 'future') {
     return (
-      <View style={styles.restRow} accessibilityLabel={`${dayLabel}, rest day`}>
-        <Text style={[styles.day, styles.muted]}>{dayLabel}</Text>
-        <Text style={styles.rest}>Rest</Text>
+      <View
+        style={styles.workoutRow}
+        accessibilityLabel={`${dayLabel}, open`}
+      >
+        <Text style={styles.day}>{dayLabel}</Text>
+        <View style={[styles.dot, styles.scheduledDot]} />
+        <Text numberOfLines={1} style={[styles.workoutName, styles.scheduledName]}>
+          Open
+        </Text>
       </View>
     );
   }
 
-  const meta = workoutMeta[type];
-  const completed = Boolean(day.completedType);
+  if (!completedDisplay && day.status === 'past') {
+    return (
+      <Pressable
+        accessibilityRole={onPress ? 'button' : undefined}
+        accessibilityLabel={`${dayLabel}, rest day, tap to log a workout`}
+        onPress={onPress}
+        disabled={!onPress}
+        style={styles.restRow}
+      >
+        <Text style={[styles.day, styles.muted]}>{dayLabel}</Text>
+        <Text style={styles.rest}>Rest</Text>
+      </Pressable>
+    );
+  }
+
+  const projectedMeta = projectedType ? workoutMeta[projectedType] : null;
+  const label = completedDisplay?.label ?? projectedMeta?.label ?? 'Workout';
+  const color = completedDisplay?.color ?? projectedMeta?.color ?? redesignColors.ash;
+  const completed = Boolean(completedDisplay);
 
   return (
     <Pressable
       accessibilityRole={onPress ? 'button' : undefined}
-      accessibilityLabel={`${dayLabel}, ${meta.label}${completed ? ', completed' : ''}`}
-      onPress={() => onPress?.(type)}
+      accessibilityLabel={`${dayLabel}, ${label}${completed ? ', completed' : ''}`}
+      onPress={onPress}
       disabled={!onPress}
       style={styles.workoutRow}
     >
       <Text style={styles.day}>{dayLabel}</Text>
-      <View style={[styles.dot, { backgroundColor: meta.color }]} />
+      <View style={[styles.dot, { backgroundColor: color }]} />
       <Text numberOfLines={1} style={styles.workoutName}>
-        {meta.label}
+        {label}
       </Text>
-      {completed ? (
-        <Check color={meta.color} size={23} strokeWidth={2.8} />
-      ) : (
+      {!completed ? (
         <ChevronRight color={redesignColors.ashDim} size={22} strokeWidth={2.5} />
-      )}
+      ) : null}
     </Pressable>
   );
 }
@@ -81,11 +106,18 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     marginRight: 16,
   },
+  scheduledDot: {
+    borderWidth: 1.5,
+    borderColor: redesignColors.ashDim,
+  },
   workoutName: {
     flex: 1,
     fontFamily: redesignFonts.uiSemiBold,
     fontSize: 17,
     color: redesignColors.bone,
+  },
+  scheduledName: {
+    color: redesignColors.ash,
   },
   rest: {
     fontFamily: redesignFonts.uiMedium,

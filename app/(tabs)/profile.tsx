@@ -12,7 +12,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import {
-  ArrowUp,
   Check,
   Flame,
   Settings,
@@ -29,17 +28,29 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { redesignColors, redesignFonts, splitColors } from '@/constants/theme';
-import { useWorkoutStore, type WorkoutSession } from '@/store/workoutStore';
+import {
+  getStartOfWeek,
+  parseSessionDate,
+  useWorkoutStore,
+  type WorkoutSession,
+} from '@/store/workoutStore';
 import '@/global.css';
+
+type ExerciseDefinition = {
+  key: string;
+  label: string;
+  aliases: string[];
+  color: string;
+};
 
 type StrengthMetric = {
   key: string;
   label: string;
-  aliases: string[];
-  weight: number;
-  gain: number;
-  periodWeeks: number;
   color: string;
+  weight: number;
+  startWeight: number;
+  percentageGain: number;
+  periodWeeks: number;
   weeklyPoints: StrengthWeekPoint[];
 };
 
@@ -52,119 +63,56 @@ type StrengthWeekPoint = {
   recorded: boolean;
 };
 
-type PersonalRecord = {
-  key: string;
-  label: string;
-  aliases: string[];
-  weight: number;
-  reps: number;
-  daysAgo: number;
-  color: string;
+type PersonalRecord = ExerciseDefinition & {
+  weight: number | null;
+  reps: number | null;
+  daysAgo: number | null;
 };
 
-const PREVIEW_STRENGTH: StrengthMetric[] = [
-  {
+const TRACKED_EXERCISES = {
+  bench: {
     key: 'bench',
     label: 'Bench Press',
     aliases: ['Bench Press'],
-    weight: 50,
-    gain: 7.5,
-    periodWeeks: 4,
     color: splitColors.chest,
-    weeklyPoints: [],
   },
-  {
+  deadlift: {
     key: 'deadlift',
     label: 'Deadlift',
     aliases: ['Deadlift'],
-    weight: 110,
-    gain: 12.5,
-    periodWeeks: 4,
     color: splitColors.back,
-    weeklyPoints: [],
   },
-  {
+  squat: {
     key: 'squat',
     label: 'Squat',
     aliases: ['Squat', 'Squats'],
-    weight: 90,
-    gain: 10,
-    periodWeeks: 4,
     color: splitColors.legs,
-    weeklyPoints: [],
   },
-  {
+  overheadPress: {
     key: 'overhead-press',
     label: 'Overhead Press',
     aliases: ['Overhead Press'],
-    weight: 35,
-    gain: 5,
-    periodWeeks: 4,
     color: splitColors.shoulders,
-    weeklyPoints: [],
   },
-];
+} satisfies Record<string, ExerciseDefinition>;
 
-const PREVIEW_RECORDS: PersonalRecord[] = [
-  {
-    key: 'deadlift',
-    label: 'Deadlift',
-    aliases: ['Deadlift'],
-    weight: 110,
-    reps: 5,
-    daysAgo: 3,
-    color: splitColors.back,
-  },
-  {
-    key: 'bench',
-    label: 'Bench Press',
-    aliases: ['Bench Press'],
-    weight: 50,
-    reps: 8,
-    daysAgo: 6,
-    color: splitColors.chest,
-  },
-  {
-    key: 'squat',
-    label: 'Squat',
-    aliases: ['Squat', 'Squats'],
-    weight: 90,
-    reps: 5,
-    daysAgo: 9,
-    color: splitColors.legs,
-  },
-];
-
-const PREVIEW_WEEKS = [
-  true,
-  true,
-  true,
-  true,
-  false,
-  true,
-  true,
-  true,
-  true,
-  true,
-  false,
-  true,
-  true,
-  true,
-  true,
-  true,
-  true,
-  true,
-  true,
-  true,
-  true,
-  true,
-  true,
-  true,
+const PERSONAL_RECORD_EXERCISES: ExerciseDefinition[] = [
+  TRACKED_EXERCISES.deadlift,
+  TRACKED_EXERCISES.bench,
+  TRACKED_EXERCISES.squat,
 ];
 
 const SECTION_BORDER = 'rgba(169, 159, 145, 0.18)';
 const STREAK_ORANGE = splitColors.chest;
 const STRENGTH_RANGES: StrengthRange[] = [4, 8, 12, 16];
+const STRENGTH_COLOR_PALETTE = [
+  splitColors.chest,
+  splitColors.back,
+  splitColors.legs,
+  splitColors.shoulders,
+  splitColors.arms,
+  splitColors.core,
+];
 
 const formatNumber = (value: number) =>
   value.toLocaleString('en-US', { maximumFractionDigits: 1 });
@@ -176,76 +124,29 @@ const getSessionVolume = (session: WorkoutSession) => {
   return setsToCount.reduce((sum, set) => sum + set.weight * set.reps, 0);
 };
 
-const getStartOfWeek = (date: Date) => {
-  const start = new Date(date);
-  const day = start.getDay();
-  start.setHours(0, 0, 0, 0);
-  start.setDate(start.getDate() - day + (day === 0 ? -6 : 1));
-  return start;
-};
-
 const matchingExercise = (session: WorkoutSession, aliases: string[]) =>
   session.exercises.find((exercise) => aliases.includes(exercise.name));
 
-const roundToHalf = (value: number) => Math.round(value * 2) / 2;
+type StrengthHistoryEntry = { date: Date; weight: number };
 
-const getExerciseHistory = (completedSessions: WorkoutSession[], aliases: string[]) =>
-  completedSessions
-    .map((session) => {
-      const exercise = matchingExercise(session, aliases);
-      if (!exercise) return null;
-      const completedSets = exercise.sets.filter((set) => set.completed);
-      const sets = completedSets.length > 0 ? completedSets : exercise.sets;
-      const weight = Math.max(...sets.map((set) => set.weight), 0);
-      return { date: new Date(session.date), weight };
-    })
-    .filter((entry): entry is { date: Date; weight: number } => Boolean(entry))
-    .sort((a, b) => a.date.getTime() - b.date.getTime());
-
-function buildPreviewStrengthMetric(preview: StrengthMetric, rangeWeeks: StrengthRange) {
-  const estimatedGain = Math.min(
-    preview.weight,
-    roundToHalf(preview.gain * Math.sqrt(rangeWeeks / 4))
+const getStrengthColor = (exerciseName: string) => {
+  const hash = [...exerciseName].reduce(
+    (value, character) => ((value << 5) - value + character.charCodeAt(0)) | 0,
+    0
   );
-  const startWeight = Math.max(0, preview.weight - estimatedGain);
-  const step = estimatedGain / Math.max(rangeWeeks - 1, 1);
-  let previousWeight = startWeight;
-  const weeklyPoints = Array.from({ length: rangeWeeks }, (_, index) => {
-    const weight = index === rangeWeeks - 1
-      ? preview.weight
-      : roundToHalf(startWeight + step * index);
-    const change = index === 0 ? 0 : Math.max(0, weight - previousWeight);
-    previousWeight = weight;
-    return {
-      week: index + 1,
-      weight,
-      change,
-      recorded: true,
-    };
-  });
-
-  return {
-    ...preview,
-    gain: Math.max(0, preview.weight - startWeight),
-    periodWeeks: rangeWeeks,
-    weeklyPoints,
-  };
-}
+  return STRENGTH_COLOR_PALETTE[(hash >>> 0) % STRENGTH_COLOR_PALETTE.length];
+};
 
 function buildRecordedStrengthMetric(
-  preview: StrengthMetric,
-  history: { date: Date; weight: number }[],
-  rangeWeeks: StrengthRange
+  label: string,
+  history: StrengthHistoryEntry[],
+  rangeWeeks: StrengthRange,
+  rangeStart: Date
 ) {
-  const latest = history[history.length - 1];
-  const rangeEnd = getStartOfWeek(latest.date);
-  const rangeStart = new Date(rangeEnd);
-  rangeStart.setDate(rangeEnd.getDate() - (rangeWeeks - 1) * 7);
-
-  let carriedWeight = [...history]
-    .reverse()
-    .find((entry) => entry.date < rangeStart)?.weight ?? null;
-  let previousWeight = carriedWeight;
+  const startWeight = history[0].weight;
+  const bestWeight = Math.max(...history.map((entry) => entry.weight));
+  let carriedWeight: number | null = null;
+  let previousWeight: number | null = null;
 
   const weeklyPoints = Array.from({ length: rangeWeeks }, (_, index) => {
     const weekStart = new Date(rangeStart);
@@ -255,7 +156,7 @@ function buildRecordedStrengthMetric(
     const entries = history.filter((entry) => entry.date >= weekStart && entry.date < nextWeek);
     const recorded = entries.length > 0;
 
-    if (recorded) carriedWeight = entries[entries.length - 1].weight;
+    if (recorded) carriedWeight = Math.max(...entries.map((entry) => entry.weight));
     const weight = carriedWeight;
     const change = weight !== null && previousWeight !== null
       ? weight - previousWeight
@@ -265,12 +166,13 @@ function buildRecordedStrengthMetric(
     return { week: index + 1, weight, change, recorded };
   });
 
-  const firstWeight = weeklyPoints.find((point) => point.weight !== null)?.weight ?? latest.weight;
-
   return {
-    ...preview,
-    weight: latest.weight,
-    gain: Math.max(0, latest.weight - firstWeight),
+    key: label,
+    label,
+    color: getStrengthColor(label),
+    weight: bestWeight,
+    startWeight,
+    percentageGain: startWeight > 0 ? ((bestWeight - startWeight) / startWeight) * 100 : 0,
     periodWeeks: rangeWeeks,
     weeklyPoints,
   };
@@ -280,29 +182,58 @@ function deriveStrengthMetrics(
   completedSessions: WorkoutSession[],
   rangeWeeks: StrengthRange
 ) {
-  return PREVIEW_STRENGTH.map((preview) => {
-    const history = getExerciseHistory(completedSessions, preview.aliases);
-    return history.length === 0
-      ? buildPreviewStrengthMetric(preview, rangeWeeks)
-      : buildRecordedStrengthMetric(preview, history, rangeWeeks);
+  const currentWeek = getStartOfWeek(new Date());
+  const rangeStart = new Date(currentWeek);
+  rangeStart.setDate(rangeStart.getDate() - (rangeWeeks - 1) * 7);
+  const rangeEnd = new Date(currentWeek);
+  rangeEnd.setDate(rangeEnd.getDate() + 7);
+  const histories = new Map<string, StrengthHistoryEntry[]>();
+
+  completedSessions.forEach((session) => {
+    const date = parseSessionDate(session.date);
+    if (date < rangeStart || date >= rangeEnd) return;
+
+    session.exercises.forEach((exercise) => {
+      const completedSets = exercise.sets.filter((set) => set.completed);
+      const sets = completedSets.length > 0 ? completedSets : exercise.sets;
+      if (sets.length === 0) return;
+
+      const history = histories.get(exercise.name) ?? [];
+      history.push({ date, weight: Math.max(...sets.map((set) => set.weight)) });
+      histories.set(exercise.name, history);
+    });
   });
+
+  return [...histories.entries()]
+    .map(([label, history]) => {
+      history.sort((a, b) => a.date.getTime() - b.date.getTime());
+      return buildRecordedStrengthMetric(label, history, rangeWeeks, rangeStart);
+    })
+    .sort(
+      (a, b) => b.percentageGain - a.percentageGain
+        || b.weight - a.weight
+        || a.label.localeCompare(b.label)
+    )
+    .slice(0, 4);
 }
 
 function derivePersonalRecords(completedSessions: WorkoutSession[]) {
-  return PREVIEW_RECORDS.map((preview) => {
+  return PERSONAL_RECORD_EXERCISES.map((exercise) => {
     const candidates = completedSessions.flatMap((session) => {
-      const exercise = matchingExercise(session, preview.aliases);
-      if (!exercise) return [];
-      const completedSets = exercise.sets.filter((set) => set.completed);
-      const sets = completedSets.length > 0 ? completedSets : exercise.sets;
+      const matching = matchingExercise(session, exercise.aliases);
+      if (!matching) return [];
+      const completedSets = matching.sets.filter((set) => set.completed);
+      const sets = completedSets.length > 0 ? completedSets : matching.sets;
       return sets.map((set) => ({
         weight: set.weight,
         reps: set.reps,
-        date: new Date(session.date),
+        date: parseSessionDate(session.date),
       }));
     });
 
-    if (candidates.length === 0) return preview;
+    if (candidates.length === 0) {
+      return { ...exercise, weight: null, reps: null, daysAgo: null };
+    }
 
     const best = [...candidates].sort(
       (a, b) => b.weight - a.weight || b.reps - a.reps || b.date.getTime() - a.date.getTime()
@@ -312,15 +243,11 @@ function derivePersonalRecords(completedSessions: WorkoutSession[]) {
       Math.floor((Date.now() - best.date.getTime()) / 86_400_000)
     );
 
-    return { ...preview, weight: best.weight, reps: best.reps, daysAgo };
+    return { ...exercise, weight: best.weight, reps: best.reps, daysAgo };
   });
 }
 
 function deriveConsistency(completedSessions: WorkoutSession[], weeklyGoal: number) {
-  if (completedSessions.length === 0) {
-    return { weeks: PREVIEW_WEEKS, hitWeeks: 22, streak: 6 };
-  }
-
   const currentWeek = getStartOfWeek(new Date());
   const weeks = Array.from({ length: 24 }, (_, index) => {
     const weekStart = new Date(currentWeek);
@@ -328,7 +255,7 @@ function deriveConsistency(completedSessions: WorkoutSession[], weeklyGoal: numb
     const nextWeek = new Date(weekStart);
     nextWeek.setDate(weekStart.getDate() + 7);
     const count = completedSessions.filter((session) => {
-      const date = new Date(session.date);
+      const date = parseSessionDate(session.date);
       return date >= weekStart && date < nextWeek;
     }).length;
     return count >= weeklyGoal;
@@ -501,13 +428,16 @@ function StrengthRangePicker({
 }
 
 function StrengthCard({ metric, onPress }: { metric: StrengthMetric; onPress: () => void }) {
-  const hasGain = metric.gain > 0;
+  const formattedWeight = formatNumber(metric.weight);
+  const progressionLabel = metric.percentageGain > 0
+    ? `+${formatNumber(metric.percentageGain)}%`
+    : '±0%';
 
   return (
     <View style={styles.strengthCardSlot}>
       <Pressable
         accessibilityHint={`Shows the ${metric.periodWeeks}-week progression breakdown`}
-        accessibilityLabel={`${metric.label}, ${formatNumber(metric.weight)} kilograms`}
+        accessibilityLabel={`${metric.label}, ${formattedWeight} kilograms, ${progressionLabel} progress`}
         accessibilityRole="button"
         onPress={onPress}
         style={({ pressed }) => [styles.strengthCardTapTarget, pressed && styles.strengthCardPressed]}
@@ -523,22 +453,12 @@ function StrengthCard({ metric, onPress }: { metric: StrengthMetric; onPress: ()
 
           <View style={styles.weightRow}>
             <Text adjustsFontSizeToFit minimumFontScale={0.82} numberOfLines={1} style={styles.weightValue}>
-              {formatNumber(metric.weight)}
+              {formattedWeight}
             </Text>
             <Text style={styles.weightUnit}>kg</Text>
           </View>
 
-          <View style={styles.gainRow}>
-            {hasGain ? <ArrowUp color={metric.color} size={17} strokeWidth={2.2} /> : null}
-            <Text
-              style={[styles.gainText, { color: hasGain ? metric.color : redesignColors.ash }]}
-            >
-              {hasGain ? `+${formatNumber(metric.gain)} kg` : 'No change'}
-            </Text>
-          </View>
-          <Text style={styles.periodText}>
-            in {metric.periodWeeks} {metric.periodWeeks === 1 ? 'week' : 'weeks'}
-          </Text>
+          <Text style={[styles.gainText, { color: metric.color }]}>{progressionLabel}</Text>
         </View>
       </Pressable>
     </View>
@@ -559,8 +479,10 @@ function StrengthProgressionDetail({
   onDismiss: () => void;
 }) {
   const progress = useSharedValue(0);
-  const hasGain = metric.gain > 0;
-  const weeklyChange = metric.gain / Math.max(metric.periodWeeks - 1, 1);
+  const formattedWeight = formatNumber(metric.weight);
+  const progressionLabel = metric.percentageGain > 0
+    ? `+${formatNumber(metric.percentageGain)}%`
+    : '±0%';
   const firstDataIndex = metric.weeklyPoints.findIndex((point) => point.weight !== null);
 
   useEffect(() => {
@@ -635,17 +557,14 @@ function StrengthProgressionDetail({
 
           <View style={styles.detailSummary}>
             <View>
-              <Text style={styles.detailSummaryLabel}>CURRENT WEIGHT</Text>
+              <Text style={styles.detailSummaryLabel}>BEST WEIGHT</Text>
               <View style={styles.detailWeightRow}>
-                <Text style={styles.detailWeight}>{formatNumber(metric.weight)}</Text>
+                <Text style={styles.detailWeight}>{formattedWeight}</Text>
                 <Text style={styles.detailWeightUnit}>kg</Text>
               </View>
             </View>
             <View style={[styles.detailGainPill, { backgroundColor: `${metric.color}18` }]}>
-              {hasGain ? <ArrowUp color={metric.color} size={15} strokeWidth={2.4} /> : null}
-              <Text style={[styles.detailGainText, { color: metric.color }]}>
-                {hasGain ? `+${formatNumber(metric.gain)} kg` : 'No change'}
-              </Text>
+              <Text style={[styles.detailGainText, { color: metric.color }]}>{progressionLabel}</Text>
             </View>
           </View>
 
@@ -690,79 +609,81 @@ function StrengthProgressionDetail({
             })}
           </View>
 
-          <View style={styles.breakdownHeader}>
-            <Text style={styles.breakdownTitle}>WEEKLY BREAKDOWN</Text>
-            <Text style={styles.breakdownMeta}>WEIGHT</Text>
-          </View>
+          <>
+            <View style={styles.breakdownHeader}>
+              <Text style={styles.breakdownTitle}>WEEKLY BREAKDOWN</Text>
+              <Text style={styles.breakdownMeta}>WEIGHT</Text>
+            </View>
 
-          <ScrollView
-            contentContainerStyle={styles.weekList}
-            nestedScrollEnabled
-            showsVerticalScrollIndicator={false}
-            style={styles.detailWeekScroll}
-          >
-            {metric.weeklyPoints.map((week, index) => {
-              const current = index === metric.weeklyPoints.length - 1;
-              const weeksAgo = metric.periodWeeks - index;
-              const caption = current
-                ? week.recorded ? 'This week' : 'This week · no workout'
-                : week.recorded
-                  ? `${weeksAgo} weeks ago`
-                  : 'No workout logged';
-              const changeColor = week.change > 0 ? metric.color : redesignColors.ashDim;
+            <ScrollView
+              contentContainerStyle={styles.weekList}
+              nestedScrollEnabled
+              showsVerticalScrollIndicator={false}
+              style={styles.detailWeekScroll}
+            >
+              {metric.weeklyPoints.map((week, index) => {
+                const current = index === metric.weeklyPoints.length - 1;
+                const weeksAgo = metric.periodWeeks - index;
+                const caption = current
+                  ? week.recorded ? 'This week' : 'This week · no workout'
+                  : week.recorded
+                    ? `${weeksAgo} weeks ago`
+                    : 'No workout logged';
+                const changeColor = week.change > 0 ? metric.color : redesignColors.ashDim;
 
-              return (
-                <View
-                  key={week.week}
-                  style={[styles.weekRow, current && { borderColor: `${metric.color}73` }]}
-                >
-                <View style={styles.weekMarkerColumn}>
+                return (
                   <View
-                    style={[
-                      styles.weekMarker,
-                      current && { backgroundColor: metric.color, borderColor: metric.color },
-                    ]}
+                    key={week.week}
+                    style={[styles.weekRow, current && { borderColor: `${metric.color}73` }]}
                   >
-                    {current ? (
-                      <Check color={redesignColors.ink} size={13} strokeWidth={3} />
-                    ) : (
-                      <Text style={styles.weekMarkerText}>{index + 1}</Text>
-                    )}
+                    <View style={styles.weekMarkerColumn}>
+                      <View
+                        style={[
+                          styles.weekMarker,
+                          current && { backgroundColor: metric.color, borderColor: metric.color },
+                        ]}
+                      >
+                        {current ? (
+                          <Check color={redesignColors.ink} size={13} strokeWidth={3} />
+                        ) : (
+                          <Text style={styles.weekMarkerText}>{index + 1}</Text>
+                        )}
+                      </View>
+                      {index < metric.weeklyPoints.length - 1 ? <View style={styles.weekConnector} /> : null}
+                    </View>
+                    <View style={styles.weekCopy}>
+                      <Text style={[styles.weekLabel, current && { color: metric.color }]}>WEEK {week.week}</Text>
+                      <Text style={styles.weekCaption}>{caption}</Text>
+                    </View>
+                    <View style={styles.weekValueGroup}>
+                      {week.weight === null ? (
+                        <Text style={styles.weekStart}>NO DATA</Text>
+                      ) : week.change !== 0 ? (
+                        <Text style={[styles.weekIncrease, { color: changeColor }]}>
+                          {week.change > 0 ? '+' : ''}{formatNumber(week.change)}
+                        </Text>
+                      ) : index === firstDataIndex ? (
+                        <Text style={styles.weekStart}>START</Text>
+                      ) : (
+                        <Text style={styles.weekStart}>{week.recorded ? 'HELD' : '—'}</Text>
+                      )}
+                      <Text style={styles.weekValue}>
+                        {week.weight === null ? '—' : `${formatNumber(week.weight)} kg`}
+                      </Text>
+                    </View>
                   </View>
-                  {index < metric.weeklyPoints.length - 1 ? <View style={styles.weekConnector} /> : null}
-                </View>
-                <View style={styles.weekCopy}>
-                  <Text style={[styles.weekLabel, current && { color: metric.color }]}>WEEK {week.week}</Text>
-                  <Text style={styles.weekCaption}>{caption}</Text>
-                </View>
-                <View style={styles.weekValueGroup}>
-                  {week.weight === null ? (
-                    <Text style={styles.weekStart}>NO DATA</Text>
-                  ) : week.change !== 0 ? (
-                    <Text style={[styles.weekIncrease, { color: changeColor }]}>
-                      {week.change > 0 ? '+' : ''}{formatNumber(week.change)}
-                    </Text>
-                  ) : index === firstDataIndex ? (
-                    <Text style={styles.weekStart}>START</Text>
-                  ) : (
-                    <Text style={styles.weekStart}>{week.recorded ? 'HELD' : '—'}</Text>
-                  )}
-                  <Text style={styles.weekValue}>
-                    {week.weight === null ? '—' : `${formatNumber(week.weight)} kg`}
-                  </Text>
-                </View>
-              </View>
-              );
-            })}
-          </ScrollView>
+                );
+              })}
+            </ScrollView>
 
-          <View style={[styles.detailInsight, { borderLeftColor: metric.color }]}>
-            <Text style={styles.detailInsightText}>
-              {hasGain
-                ? `You added about ${formatNumber(weeklyChange)} kg per week across this ${metric.periodWeeks}-week range.`
-                : `Your working weight stayed consistent across this ${metric.periodWeeks}-week range.`}
-            </Text>
-          </View>
+            <View style={[styles.detailInsight, { borderLeftColor: metric.color }]}>
+              <Text style={styles.detailInsightText}>
+                {metric.percentageGain > 0
+                  ? `Your best lift is ${progressionLabel} above your first logged weight in this ${metric.periodWeeks}-week range.`
+                  : `Your best lift matched your first logged weight in this ${metric.periodWeeks}-week range.`}
+              </Text>
+            </View>
+          </>
         </Animated.View>
       </View>
     </Modal>
@@ -878,6 +799,11 @@ function VolumeCard({ label, value }: { label: string; value: number }) {
 }
 
 function RecordCard({ record }: { record: PersonalRecord }) {
+  const hasRecord = record.weight !== null && record.reps !== null && record.daysAgo !== null;
+  const details = record.weight === null || record.reps === null
+    ? 'No record yet'
+    : `${formatNumber(record.weight)} kg × ${record.reps} reps`;
+
   return (
     <View style={styles.recordCard}>
       <View style={[styles.trophyTile, { backgroundColor: `${record.color}21` }]}>
@@ -886,10 +812,12 @@ function RecordCard({ record }: { record: PersonalRecord }) {
       <View style={styles.recordCopy}>
         <Text numberOfLines={1} style={styles.recordName}>{record.label}</Text>
         <Text numberOfLines={1} style={styles.recordDetails}>
-          {formatNumber(record.weight)} kg × {record.reps} reps
+          {details}
         </Text>
       </View>
-      <Text style={styles.recordAge}>{record.daysAgo === 0 ? 'today' : `${record.daysAgo}d ago`}</Text>
+      {hasRecord ? (
+        <Text style={styles.recordAge}>{record.daysAgo === 0 ? 'today' : `${record.daysAgo}d ago`}</Text>
+      ) : null}
     </View>
   );
 }
@@ -908,36 +836,37 @@ export default function Progress() {
     () => sessions.filter((session) => session.completed),
     [sessions]
   );
+  const verifiedSessions = useMemo(
+    () => completedSessions.filter((session) => !session.retroactive),
+    [completedSessions]
+  );
   const strengthMetrics = useMemo(
-    () => deriveStrengthMetrics(completedSessions, strengthRange),
-    [completedSessions, strengthRange]
+    () => deriveStrengthMetrics(verifiedSessions, strengthRange),
+    [verifiedSessions, strengthRange]
   );
   const selectedStrengthMetric = useMemo(
     () => strengthMetrics.find((metric) => metric.key === selectedStrengthKey) ?? null,
     [selectedStrengthKey, strengthMetrics]
   );
   const personalRecords = useMemo(
-    () => derivePersonalRecords(completedSessions),
-    [completedSessions]
+    () => derivePersonalRecords(verifiedSessions),
+    [verifiedSessions]
   );
   const consistency = useMemo(
     () => deriveConsistency(completedSessions, profile?.weeklyGoal ?? 4),
     [completedSessions, profile?.weeklyGoal]
   );
   const volumes = useMemo(() => {
-    if (completedSessions.length === 0) {
-      return { thisWeek: 24_500, allTime: 312_400 };
-    }
     const currentWeek = getStartOfWeek(new Date());
-    const thisWeek = completedSessions
-      .filter((session) => new Date(session.date) >= currentWeek)
+    const thisWeek = verifiedSessions
+      .filter((session) => parseSessionDate(session.date) >= currentWeek)
       .reduce((sum, session) => sum + getSessionVolume(session), 0);
-    const allTime = completedSessions.reduce(
+    const allTime = verifiedSessions.reduce(
       (sum, session) => sum + getSessionVolume(session),
       0
     );
     return { thisWeek, allTime };
-  }, [completedSessions]);
+  }, [verifiedSessions]);
   const weeklyProgress = getWeeklyProgress();
 
   if (!profile) return null;
@@ -1004,19 +933,29 @@ export default function Progress() {
               />
             )}
           />
-          <View style={styles.strengthGrid}>
-            {[strengthMetrics.slice(0, 2), strengthMetrics.slice(2, 4)].map((row, rowIndex) => (
-              <View key={`strength-row-${rowIndex}`} style={styles.strengthRow}>
-                {row.map((metric) => (
-                  <StrengthCard
-                    key={metric.key}
-                    metric={metric}
-                    onPress={() => openStrengthDetail(metric)}
-                  />
-                ))}
-              </View>
-            ))}
-          </View>
+          {strengthMetrics.length > 0 ? (
+            <View style={styles.strengthGrid}>
+              {[strengthMetrics.slice(0, 2), strengthMetrics.slice(2, 4)].map((row, rowIndex) => (
+                row.length > 0 ? (
+                  <View key={`strength-row-${rowIndex}`} style={styles.strengthRow}>
+                    {row.map((metric) => (
+                      <StrengthCard
+                        key={metric.key}
+                        metric={metric}
+                        onPress={() => openStrengthDetail(metric)}
+                      />
+                    ))}
+                  </View>
+                ) : null
+              ))}
+            </View>
+          ) : (
+            <View style={styles.strengthSectionEmpty}>
+              <Text style={styles.strengthSectionEmptyText}>
+                Log a set to start tracking your strength progression.
+              </Text>
+            </View>
+          )}
         </View>
 
         <View style={styles.section}>
@@ -1252,6 +1191,24 @@ const styles = StyleSheet.create({
   strengthRow: {
     flexDirection: 'row',
     gap: 12,
+  },
+  strengthSectionEmpty: {
+    minHeight: 112,
+    paddingHorizontal: 20,
+    paddingVertical: 22,
+    borderRadius: 24,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    borderColor: SECTION_BORDER,
+    backgroundColor: redesignColors.surface,
+    justifyContent: 'center',
+  },
+  strengthSectionEmptyText: {
+    maxWidth: 250,
+    fontFamily: redesignFonts.uiMedium,
+    fontSize: 15,
+    lineHeight: 21,
+    color: redesignColors.ash,
   },
   strengthCardSlot: {
     flex: 1,

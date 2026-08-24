@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Zap } from 'lucide-react-native';
+import { Check, Zap } from 'lucide-react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -9,14 +9,21 @@ import Animated, {
   withRepeat,
   withTiming,
 } from 'react-native-reanimated';
+import {
+  ARCHETYPE_COMPOSITIONS,
+  getSessionWorkoutDisplay,
+  type Archetype,
+} from '@/constants/archetypes';
 import type { WorkoutType } from '@/store/workoutStore';
 import { workoutMeta } from '@/constants/workouts';
 import { redesignColors, redesignFonts } from '@/constants/theme';
 
 type WorkoutHeroCardProps = {
-  type: WorkoutType;
+  type?: WorkoutType;
+  archetypes?: Archetype[];
   exerciseCount: number;
-  onPress: () => void;
+  onPress?: () => void;
+  completed?: boolean;
 };
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
@@ -29,8 +36,34 @@ function rgba(hex: string, opacity: number) {
   return `rgba(${red}, ${green}, ${blue}, ${opacity})`;
 }
 
-export function WorkoutHeroCard({ type, exerciseCount, onPress }: WorkoutHeroCardProps) {
-  const meta = workoutMeta[type];
+export function WorkoutHeroCard({
+  type,
+  archetypes,
+  exerciseCount,
+  onPress,
+  completed = false,
+}: WorkoutHeroCardProps) {
+  const primaryArchetype = archetypes?.[0];
+  const sessionDisplay = getSessionWorkoutDisplay({
+    archetype: primaryArchetype ?? null,
+    secondaryArchetype: archetypes?.length === 2 ? archetypes[1] : null,
+    workoutTypes: type ? [type] : [],
+  });
+  const color = completed
+    ? redesignColors.accent
+    : sessionDisplay.color;
+  const label = completed
+    ? 'Nice work this week'
+    : sessionDisplay.label;
+  const group = completed
+    ? 'Goal met'
+    : sessionDisplay.isMerged
+      ? 'Merged day'
+      : primaryArchetype
+        ? ARCHETYPE_COMPOSITIONS[primaryArchetype].shortLabel
+        : type
+          ? workoutMeta[type].group
+          : 'Training';
   const pressed = useSharedValue(0);
   const glow = useSharedValue(0);
 
@@ -40,7 +73,7 @@ export function WorkoutHeroCard({ type, exerciseCount, onPress }: WorkoutHeroCar
       -1,
       true
     );
-  }, [glow, type]);
+  }, [color, glow]);
 
   const cardStyle = useAnimatedStyle(() => ({
     transform: [{ scale: 1 - pressed.value * 0.012 }],
@@ -54,17 +87,22 @@ export function WorkoutHeroCard({ type, exerciseCount, onPress }: WorkoutHeroCar
 
   return (
     <AnimatedPressable
-      accessibilityRole="button"
-      accessibilityLabel={`Start ${meta.label}`}
-      accessibilityHint={`${meta.group} workout with ${exerciseCount} exercises`}
+      accessibilityRole={onPress ? 'button' : undefined}
+      accessibilityLabel={completed ? 'Add a workout' : `Start ${label}`}
+      accessibilityHint={
+        completed
+          ? 'Your weekly goal is complete'
+          : `${group} workout with ${exerciseCount} exercises`
+      }
+      disabled={!onPress}
       onPress={onPress}
       onPressIn={() => (pressed.value = withTiming(1, { duration: 90 }))}
       onPressOut={() => (pressed.value = withTiming(0, { duration: 140 }))}
-      style={[styles.card, { borderColor: rgba(meta.color, 0.72) }, cardStyle]}
+      style={[styles.card, { borderColor: rgba(color, 0.72) }, cardStyle]}
     >
       <LinearGradient
         pointerEvents="none"
-        colors={[rgba(meta.color, 0.31), rgba(meta.color, 0.13), 'rgba(29, 25, 21, 0.96)']}
+        colors={[rgba(color, 0.31), rgba(color, 0.13), 'rgba(29, 25, 21, 0.96)']}
         locations={[0, 0.5, 1]}
         start={{ x: 0.05, y: 0 }}
         end={{ x: 0.95, y: 1 }}
@@ -72,37 +110,45 @@ export function WorkoutHeroCard({ type, exerciseCount, onPress }: WorkoutHeroCar
       />
 
       <View>
-        <Text style={[styles.eyebrow, { color: meta.color }]}>TODAY</Text>
+        <Text style={[styles.eyebrow, { color }]}>{completed ? 'Goal met' : 'TODAY'}</Text>
         <Text
           adjustsFontSizeToFit
-          minimumFontScale={0.72}
-          numberOfLines={1}
+          minimumFontScale={0.65}
+          numberOfLines={2}
           style={styles.title}
         >
-          {meta.label}
+          {label}
         </Text>
         <Text style={styles.meta}>
-          {meta.group.toUpperCase()} · {exerciseCount} {exerciseCount === 1 ? 'EXERCISE' : 'EXERCISES'}
+          {completed
+            ? 'Your weekly target is complete'
+            : `${group.toUpperCase()} · ${exerciseCount} ${exerciseCount === 1 ? 'EXERCISE' : 'EXERCISES'}`}
         </Text>
       </View>
 
       <View style={styles.divider} />
 
       <View style={styles.actionRow}>
-        <Text style={[styles.tapLabel, { color: meta.color }]}>START YOUR WORKOUT</Text>
+        <Text style={[styles.tapLabel, { color }]}>
+          {completed ? 'Add a workout' : 'START YOUR WORKOUT'}
+        </Text>
         <Animated.View
           style={[
             styles.playButton,
-            { backgroundColor: meta.color, shadowColor: meta.color },
+            { backgroundColor: color, shadowColor: color },
             buttonStyle,
           ]}
         >
-          <Zap
-            color={redesignColors.ink}
-            fill={redesignColors.ink}
-            size={26}
-            strokeWidth={2.5}
-          />
+          {completed ? (
+            <Check color={redesignColors.ink} size={28} strokeWidth={3} />
+          ) : (
+            <Zap
+              color={redesignColors.ink}
+              fill={redesignColors.ink}
+              size={26}
+              strokeWidth={2.5}
+            />
+          )}
         </Animated.View>
       </View>
     </AnimatedPressable>
