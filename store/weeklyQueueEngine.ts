@@ -4,6 +4,7 @@ import {
 } from '@/constants/archetypes';
 import { readCompletedSessionsSync } from '@/store/workoutDatabase';
 import {
+  deriveDefaultSlots,
   getSessionLocalDate,
   getWeekDates,
   useWorkoutStore,
@@ -16,6 +17,11 @@ export interface WeeklyQueueState {
   remaining: Archetype[];
   trainingDaysRemaining: number;
   nextUp: Archetype[];
+  /** Local calendar date (YYYY-MM-DD) the nextUp workout is scheduled for,
+   *  or null when no training day is left in the week. */
+  nextUpDate: string | null;
+  /** True when a workout has already been completed today. */
+  completedToday: boolean;
 }
 
 export const getWeeklyQueueState = (): WeeklyQueueState => {
@@ -28,6 +34,8 @@ export const getWeeklyQueueState = (): WeeklyQueueState => {
       remaining: [],
       trainingDaysRemaining: 0,
       nextUp: [],
+      nextUpDate: null,
+      completedToday: false,
     };
   }
 
@@ -62,15 +70,36 @@ export const getWeeklyQueueState = (): WeeklyQueueState => {
   }
 
   const todayIndex = (new Date().getDay() + 6) % 7;
-  const trainingDays = new Set(profile.trainingDays);
+  const todayDate = weekDates[todayIndex];
+  const completedToday = sessionsThisWeek.some(
+    (session) => getSessionLocalDate(session.date) === todayDate
+  );
+  const trainingDays = new Set(
+    profile.trainingDays?.length
+      ? profile.trainingDays
+      : deriveDefaultSlots(profile.weeklyGoal)
+  );
+
+  // Today only still counts as an available training day if nothing has been
+  // logged for it yet — otherwise the next workout belongs to a later day.
+  const firstOpenIndex = completedToday ? todayIndex + 1 : todayIndex;
   let trainingDaysRemaining = 0;
-  for (let dayIndex = todayIndex; dayIndex < 7; dayIndex += 1) {
+  let nextTrainingIndex: number | null = null;
+  for (let dayIndex = firstOpenIndex; dayIndex < 7; dayIndex += 1) {
     if (trainingDays.has(dayIndex)) {
       trainingDaysRemaining += 1;
+      if (nextTrainingIndex === null) nextTrainingIndex = dayIndex;
     }
   }
 
   const nextUp = remaining.slice(0, 1);
+  // With work still queued but no training day scheduled ahead, fall back to
+  // the next open calendar day so the workout is still dated rather than
+  // silently presented as "today".
+  const nextUpDayIndex =
+    nextTrainingIndex ?? (firstOpenIndex < 7 ? firstOpenIndex : null);
+  const nextUpDate =
+    nextUp.length > 0 && nextUpDayIndex !== null ? weekDates[nextUpDayIndex] : null;
 
   return {
     sequence,
@@ -79,5 +108,7 @@ export const getWeeklyQueueState = (): WeeklyQueueState => {
     remaining,
     trainingDaysRemaining,
     nextUp,
+    nextUpDate,
+    completedToday,
   };
 };

@@ -24,6 +24,8 @@ type WorkoutHeroCardProps = {
   exerciseCount: number;
   onPress?: () => void;
   completed?: boolean;
+  /** When the queued workout is scheduled: "TODAY", "TOMORROW", "FRIDAY"… */
+  whenLabel?: string;
 };
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
@@ -42,6 +44,7 @@ export function WorkoutHeroCard({
   exerciseCount,
   onPress,
   completed = false,
+  whenLabel = 'TODAY',
 }: WorkoutHeroCardProps) {
   const primaryArchetype = archetypes?.[0];
   const sessionDisplay = getSessionWorkoutDisplay({
@@ -110,7 +113,7 @@ export function WorkoutHeroCard({
       />
 
       <View>
-        <Text style={[styles.eyebrow, { color }]}>{completed ? 'Goal met' : 'TODAY'}</Text>
+        <Text style={[styles.eyebrow, { color }]}>{completed ? 'Goal met' : whenLabel}</Text>
         <Text
           adjustsFontSizeToFit
           minimumFontScale={0.65}
@@ -130,7 +133,11 @@ export function WorkoutHeroCard({
 
       <View style={styles.actionRow}>
         <Text style={[styles.tapLabel, { color }]}>
-          {completed ? 'Add a workout' : 'START YOUR WORKOUT'}
+          {completed
+            ? 'Add a workout'
+            : whenLabel === 'TODAY'
+              ? 'START YOUR WORKOUT'
+              : 'START EARLY'}
         </Text>
         <Animated.View
           style={[

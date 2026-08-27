@@ -699,7 +699,7 @@ export function SwapExerciseSheet({
                     else onNavigate(index);
                   }}
                   onEdit={
-                    catalogExercise
+                    catalogExercise && !isCompleted
                       ? () => openRenameEditor(catalogExercise)
                       : undefined
                   }

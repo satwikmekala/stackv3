@@ -12,15 +12,18 @@ import Animated, {
 } from 'react-native-reanimated';
 import { StatusPill } from '@/components/StatusPill';
 import { redesignColors, redesignFonts } from '@/constants/theme';
+import { formatWeight, lbsToKg, unitLabel, type WeightUnit } from '@/store/weightUnits';
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
 interface RollingValueProps {
   value: number;
+  // Rendered text; falls back to the raw value when no unit conversion applies.
+  label?: string;
   color?: string;
 }
 
-function RollingValue({ value, color = redesignColors.bone }: RollingValueProps) {
+function RollingValue({ value, label, color = redesignColors.bone }: RollingValueProps) {
   const previousValue = useRef(value);
   const translateY = useSharedValue(0);
   const opacity = useSharedValue(1);
@@ -43,7 +46,7 @@ function RollingValue({ value, color = redesignColors.bone }: RollingValueProps)
     opacity: opacity.value,
     transform: [{ translateY: translateY.value }],
   }));
-  const valueLabel = String(value);
+  const valueLabel = label ?? String(value);
   const isCompactValue = valueLabel.length >= 4;
 
   return (
@@ -70,13 +73,15 @@ function RollingValue({ value, color = redesignColors.bone }: RollingValueProps)
 
 interface StepperProps {
   value: number;
+  // Display text for `value`; the raw number is still used for the roll direction.
+  displayValue?: string;
   step: number;
   unit: string;
   accent?: string;
   onChange: (delta: number) => void;
 }
 
-function Stepper({ value, step, unit, accent, onChange }: StepperProps) {
+function Stepper({ value, displayValue, step, unit, accent, onChange }: StepperProps) {
   return (
     <View style={{ alignItems: 'center' }}>
       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -100,7 +105,7 @@ function Stepper({ value, step, unit, accent, onChange }: StepperProps) {
           <Minus color={redesignColors.bone} size={18} strokeWidth={2.6} />
         </TouchableOpacity>
 
-        <RollingValue value={value} color={accent} />
+        <RollingValue value={value} label={displayValue} color={accent} />
 
         <TouchableOpacity
           accessibilityRole="button"
@@ -215,6 +220,11 @@ interface ActiveSetCardProps {
   reps: number;
   weight: number;
   weightDeltaLabel?: string | null;
+  // Step size for the manual weight stepper, from the user's profile — already
+  // in `weightUnit`, so it is lb-native in lbs mode rather than a converted kg.
+  weightIncrement?: number;
+  // Display/input unit. `weight` is always kg, and so is every onWeightChange delta.
+  weightUnit?: WeightUnit;
   accent: string;
   onRepsChange: (delta: number) => void;
   onWeightChange: (delta: number) => void;
@@ -231,6 +241,8 @@ export function ActiveSetCard({
   reps,
   weight,
   weightDeltaLabel,
+  weightIncrement = 2.5,
+  weightUnit = 'kg',
   accent,
   onRepsChange,
   onWeightChange,
@@ -239,6 +251,14 @@ export function ActiveSetCard({
 }: ActiveSetCardProps) {
   const primaryPressed = useSharedValue(0);
   const secondaryPressed = useSharedValue(0);
+
+  // The stepper taps produce a delta in the display unit. Storage is kg-canonical
+  // and the parent adds this delta straight onto the stored kg value, so a
+  // lb-native step is converted here. lbsToKg is purely multiplicative, so
+  // applying it to a signed delta is exact — and kg mode passes through untouched.
+  const handleWeightDelta = (delta: number) => {
+    onWeightChange(weightUnit === 'lbs' ? lbsToKg(delta) : delta);
+  };
 
   const primaryButtonStyle = useAnimatedStyle(() => ({
     transform: [{ scale: 1 - primaryPressed.value * 0.025 }],
@@ -297,11 +317,12 @@ export function ActiveSetCard({
         <MetricBlock
           label="WEIGHT"
           value={weight}
-          step={2.5}
-          unit="kg"
+          displayValue={formatWeight(weight, weightUnit)}
+          step={weightIncrement}
+          unit={unitLabel(weightUnit)}
           accent={accent}
           deltaLabel={weightDeltaLabel}
-          onChange={onWeightChange}
+          onChange={handleWeightDelta}
         />
         <MetricBlock label="REPS" value={reps} step={1} unit="reps" onChange={onRepsChange} />
       </View>

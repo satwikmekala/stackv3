@@ -9,11 +9,17 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { colors, fonts } from '@/constants/theme';
+import { formatWeight, lbsToKg, unitLabel, type WeightUnit } from '@/store/weightUnits';
 
 interface SetInputProps {
   setNumber: number;
   reps: number;
   weight: number;
+  // Step size for the manual weight stepper, from the user's profile — already
+  // in `weightUnit`, so it is lb-native in lbs mode rather than a converted kg.
+  weightIncrement?: number;
+  // Display/input unit. `weight` is always kg, and so is every onWeightChange delta.
+  weightUnit?: WeightUnit;
   completed?: boolean;
   skipped?: boolean;
   onRepsChange: (delta: number) => void;
@@ -25,11 +31,14 @@ interface SetInputProps {
 // Compact stepper pill: minus / value (Space Mono) / plus.
 function StepperPill({
   value,
+  displayValue,
   onChange,
   disabled,
   step,
 }: {
   value: number;
+  // Display text for `value`, used when the number needs unit conversion.
+  displayValue?: string;
   onChange: (delta: number) => void;
   disabled: boolean;
   step: number;
@@ -65,7 +74,7 @@ function StepperPill({
           textAlign: 'center',
         }}
       >
-        {value}
+        {displayValue ?? value}
       </Text>
       <Pressable
         onPress={() => onChange(step)}
@@ -87,6 +96,8 @@ export function SetInput({
   setNumber,
   reps,
   weight,
+  weightIncrement = 2.5,
+  weightUnit = 'kg',
   completed = false,
   skipped = false,
   onRepsChange,
@@ -96,6 +107,13 @@ export function SetInput({
 }: SetInputProps) {
   const scale = useSharedValue(1);
   const opacity = useSharedValue(1);
+
+  // The tap delta is in the display unit; the parent applies it to the stored kg
+  // value, so a lb-native step is converted here. lbsToKg is multiplicative, so
+  // it is exact on a signed delta — kg mode is passed through unchanged.
+  const handleWeightDelta = (delta: number) => {
+    onWeightChange(weightUnit === 'lbs' ? lbsToKg(delta) : delta);
+  };
 
   useEffect(() => {
     if (completed) {
@@ -210,9 +228,15 @@ export function SetInput({
         </View>
         <View style={{ alignItems: 'flex-start' }}>
           <Text style={{ fontFamily: fonts.body, fontSize: 11, color: colors.ash, marginBottom: 6 }}>
-            Weight (kg)
+            Weight ({unitLabel(weightUnit)})
           </Text>
-          <StepperPill value={weight} onChange={onWeightChange} disabled={completed} step={2.5} />
+          <StepperPill
+            value={weight}
+            displayValue={formatWeight(weight, weightUnit)}
+            onChange={handleWeightDelta}
+            disabled={completed}
+            step={weightIncrement}
+          />
         </View>
       </View>
     </Animated.View>

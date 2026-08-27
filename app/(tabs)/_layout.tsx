@@ -141,13 +141,6 @@ export default function TabLayout() {
           ),
         }}
       />
-      <Tabs.Screen
-        name="records"
-        options={{
-          href: null,
-          title: 'All Records',
-        }}
-      />
     </Tabs>
   );
 }

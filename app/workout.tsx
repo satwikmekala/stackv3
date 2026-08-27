@@ -48,6 +48,8 @@ import {
   type ExerciseSet,
   useWorkoutStore,
 } from '@/store/workoutStore';
+import { DEFAULT_WEIGHT_INCREMENT, DEFAULT_WEIGHT_UNIT } from '@/store/workoutDatabase';
+import { formatWeight, type WeightUnit } from '@/store/weightUnits';
 import '@/global.css';
 
 const FEEDBACK_LEVELS = [
@@ -137,6 +139,7 @@ function SetPip({
   state,
   weight,
   reps,
+  weightUnit,
   accent,
   currentLabel = 'NOW',
   setNumber,
@@ -145,6 +148,7 @@ function SetPip({
   state: 'completed' | 'current' | 'upcoming';
   weight: number;
   reps: number;
+  weightUnit: WeightUnit;
   accent: string;
   currentLabel?: string;
   setNumber: number;
@@ -234,7 +238,7 @@ function SetPip({
           color: state === 'current' ? accent : redesignColors.ash,
         }}
       >
-        {state === 'completed' ? `${weight}·${reps}` : state === 'current' ? currentLabel : '–'}
+        {state === 'completed' ? `${formatWeight(weight, weightUnit)}·${reps}` : state === 'current' ? currentLabel : '–'}
       </Text>
     </>
   );
@@ -258,6 +262,7 @@ function SetPip({
 function SetProgress({
   sets,
   currentSetIndex,
+  weightUnit,
   accent,
   currentAccent = accent,
   currentLabel,
@@ -265,6 +270,7 @@ function SetProgress({
 }: {
   sets: ExerciseSet[];
   currentSetIndex: number;
+  weightUnit: WeightUnit;
   accent: string;
   currentAccent?: string;
   currentLabel?: string;
@@ -296,6 +302,7 @@ function SetProgress({
             state={state}
             weight={set.weight}
             reps={set.reps}
+            weightUnit={weightUnit}
             accent={index === currentSetIndex ? currentAccent : accent}
             currentLabel={currentLabel}
             setNumber={index + 1}
@@ -334,6 +341,12 @@ const getNextIncompleteExerciseIndex = (
 export default function Workout() {
   const router = useRouter();
   const currentSession = useWorkoutStore((state) => state.currentSession);
+  const weightIncrement = useWorkoutStore(
+    (state) => state.profile?.weightIncrement ?? DEFAULT_WEIGHT_INCREMENT
+  );
+  const weightUnit = useWorkoutStore(
+    (state) => state.profile?.weightUnit ?? DEFAULT_WEIGHT_UNIT
+  );
   const updateExerciseSet = useWorkoutStore((state) => state.updateExerciseSet);
   const appendBonusSet = useWorkoutStore((state) => state.appendBonusSet);
   const toggleSetCompleted = useWorkoutStore((state) => state.toggleSetCompleted);
@@ -555,8 +568,8 @@ export default function Workout() {
   const targetWeight = activeSet.targetWeight ?? activeSet.weight;
   const weightDeltaLabel = (() => {
     if (previousWeight === null) return null;
-    if (previousWeight === 0) return targetWeight === 0 ? '+0%' : null;
-    const percentage = Math.round(((targetWeight - previousWeight) / previousWeight) * 100);
+    if (previousWeight === 0) return activeSet.weight === 0 ? '+0%' : null;
+    const percentage = Math.round(((activeSet.weight - previousWeight) / previousWeight) * 100);
     return `${percentage >= 0 ? '+' : ''}${percentage}%`;
   })();
   const stageKey = loggedBonusSet
@@ -738,6 +751,7 @@ export default function Workout() {
               {loggedBonusSet ? (
                 <BonusSetAcknowledgement
                   set={loggedBonusSet}
+                  weightUnit={weightUnit}
                   onAdvance={() => {
                     setStageDirection(1);
                     setLoggedBonusSet(null);
@@ -752,6 +766,7 @@ export default function Workout() {
                       { ...bonusSelection, completed: false, skipped: false },
                     ]}
                     currentSetIndex={exercise.sets.length}
+                    weightUnit={weightUnit}
                     accent={accent}
                     currentAccent={BONUS_SET_META[bonusSelection.type].color}
                     currentLabel={BONUS_SET_META[bonusSelection.type].shortTitle}
@@ -760,6 +775,8 @@ export default function Workout() {
                     <BonusSet
                       key={bonusSelection.type}
                       selection={bonusSelection}
+                      weightIncrement={weightIncrement}
+                      weightUnit={weightUnit}
                       onCancel={() => {
                         setStageDirection(-1);
                         setBonusSelection(null);
@@ -785,6 +802,7 @@ export default function Workout() {
                 <ExerciseFinisher
                   sets={exercise.sets}
                   nextExerciseName={nextExercise?.name}
+                  weightUnit={weightUnit}
                   onAdvance={handleAdvanceExercise}
                   onEditSet={(completedSetIndex) => {
                     setStageDirection(-1);
@@ -801,6 +819,7 @@ export default function Workout() {
                   <SetProgress
                     sets={exercise.sets}
                     currentSetIndex={setIndex}
+                    weightUnit={weightUnit}
                     accent={accent}
                     onEditCompletedSet={(completedSetIndex) => {
                       setStageDirection(-1);
@@ -818,6 +837,8 @@ export default function Workout() {
                       setNumber={setIndex + 1}
                       reps={activeSet.reps}
                       weight={activeSet.weight}
+                      weightIncrement={weightIncrement}
+                      weightUnit={weightUnit}
                       weightDeltaLabel={weightDeltaLabel}
                       accent={accent}
                       onRepsChange={handleRepsChange}

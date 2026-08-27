@@ -13,12 +13,16 @@ import { useRouter } from 'expo-router';
 import { X } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { useWorkoutStore } from '@/store/workoutStore';
+import { unitLabel, type WeightUnit } from '@/store/weightUnits';
 import { Button } from '@/components/Button';
 import { colors, fonts } from '@/constants/theme';
 import '@/global.css';
 
 // Supported weekly-goal range.
 const GOAL_OPTIONS = [1, 2, 3, 4, 5, 6];
+const WEIGHT_INCREMENT_OPTIONS = [1, 1.5, 2.5];
+const WEIGHT_INCREMENT_OPTIONS_LBS = [2.5, 5, 10];
+const WEIGHT_UNIT_OPTIONS: WeightUnit[] = ['kg', 'lbs'];
 const WEEKDAY_INDEXES = [0, 1, 2, 3, 4, 5, 6];
 
 const circularDayDistance = (first: number, second: number) => {
@@ -114,6 +118,18 @@ export default function Settings() {
       weeklyGoal,
       trainingDays: resizeTrainingDays(profile.trainingDays, weeklyGoal),
     });
+  };
+
+  const handleWeightUnitChange = (weightUnit: WeightUnit) => {
+    updateProfile({ weightUnit });
+  };
+
+  // Each unit keeps its own increment column — never cross-write, and never
+  // convert: the lb step is lb-native, not a converted kg step.
+  const handleWeightIncrementChange = (value: number) => {
+    updateProfile(
+      profile.weightUnit === 'lbs' ? { weightIncrementLbs: value } : { weightIncrement: value }
+    );
   };
 
   const handleReset = () => {
@@ -255,6 +271,95 @@ export default function Settings() {
                 label={String(value)}
                 selected={profile.weeklyGoal === value}
                 onPress={() => handleWeeklyGoalChange(value)}
+              />
+            ))}
+          </View>
+        </View>
+
+        {/* Weight unit — display/input unit; storage stays kg-canonical */}
+        <View
+          style={{
+            backgroundColor: colors.surface,
+            borderRadius: 20,
+            padding: 20,
+            marginBottom: 12,
+          }}
+        >
+          <Text
+            style={{
+              fontFamily: fonts.bodyMedium,
+              fontSize: 12,
+              color: colors.ash,
+              marginBottom: 4,
+            }}
+          >
+            Weight Unit
+          </Text>
+          <Text
+            style={{
+              fontFamily: fonts.body,
+              fontSize: 13,
+              color: colors.ash,
+              marginBottom: 12,
+            }}
+          >
+            Unit weights are shown and entered in
+          </Text>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {WEIGHT_UNIT_OPTIONS.map((value) => (
+              <OptionPill
+                key={value}
+                label={unitLabel(value)}
+                selected={profile.weightUnit === value}
+                onPress={() => handleWeightUnitChange(value)}
+              />
+            ))}
+          </View>
+        </View>
+
+        {/* Weight increment — step size for the manual +/- weight buttons */}
+        <View
+          style={{
+            backgroundColor: colors.surface,
+            borderRadius: 20,
+            padding: 20,
+            marginBottom: 12,
+          }}
+        >
+          <Text
+            style={{
+              fontFamily: fonts.bodyMedium,
+              fontSize: 12,
+              color: colors.ash,
+              marginBottom: 4,
+            }}
+          >
+            Weight Increment
+          </Text>
+          <Text
+            style={{
+              fontFamily: fonts.body,
+              fontSize: 13,
+              color: colors.ash,
+              marginBottom: 12,
+            }}
+          >
+            Amount the +/- buttons adjust weight by
+          </Text>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {(profile.weightUnit === 'lbs'
+              ? WEIGHT_INCREMENT_OPTIONS_LBS
+              : WEIGHT_INCREMENT_OPTIONS
+            ).map((value) => (
+              <OptionPill
+                key={value}
+                label={`${value} ${unitLabel(profile.weightUnit)}`}
+                selected={
+                  (profile.weightUnit === 'lbs'
+                    ? profile.weightIncrementLbs
+                    : profile.weightIncrement) === value
+                }
+                onPress={() => handleWeightIncrementChange(value)}
               />
             ))}
           </View>

@@ -12,13 +12,25 @@ import type {
   WorkoutSession,
   WorkoutType,
 } from '@/store/workoutStore';
+import type { WeightUnit } from '@/store/weightUnits';
 import {
   createCompletedSessionExercise,
   createSessionExercise,
 } from '@/store/workoutProgression';
 
 const DATABASE_NAME = 'workouts.db';
-const CURRENT_SCHEMA_VERSION = 9;
+const CURRENT_SCHEMA_VERSION = 11;
+
+// Default step for the manual weight steppers; mirrors the profile column
+// default so a fresh row and a migrated row agree.
+export const DEFAULT_WEIGHT_INCREMENT = 2.5;
+
+// Display unit for every weight surface; storage stays kg-canonical regardless.
+export const DEFAULT_WEIGHT_UNIT: WeightUnit = 'kg';
+
+// Lb-native step, independent of DEFAULT_WEIGHT_INCREMENT — it is not a
+// conversion of the kg value, it is the increment lifters expect in lbs.
+export const DEFAULT_WEIGHT_INCREMENT_LBS = 5;
 
 export interface ExerciseSeed {
   name: string;
@@ -306,7 +318,10 @@ CREATE TABLE IF NOT EXISTS profile (
   weekly_goal INTEGER NOT NULL DEFAULT 3,
   experience_level TEXT NOT NULL DEFAULT 'intermediate',
   training_days TEXT NOT NULL DEFAULT '[]',
-  onboarding_completed INTEGER NOT NULL DEFAULT 0
+  onboarding_completed INTEGER NOT NULL DEFAULT 0,
+  weight_increment REAL NOT NULL DEFAULT 2.5,
+  weight_unit TEXT NOT NULL DEFAULT 'kg',
+  weight_increment_lbs REAL NOT NULL DEFAULT 5
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS sessions_one_in_progress
@@ -329,6 +344,9 @@ interface ProfileRow {
   experience_level: ExperienceLevel;
   training_days: string;
   onboarding_completed: number;
+  weight_increment: number;
+  weight_unit: WeightUnit;
+  weight_increment_lbs: number;
 }
 
 interface SessionJoinRow {
@@ -457,6 +475,9 @@ const profileFromRow = (row: ProfileRow | null): UserProfile | null => {
     experienceLevel: row.experience_level,
     trainingDays,
     onboardingCompleted: Boolean(row.onboarding_completed),
+    weightIncrement: row.weight_increment ?? DEFAULT_WEIGHT_INCREMENT,
+    weightUnit: row.weight_unit ?? DEFAULT_WEIGHT_UNIT,
+    weightIncrementLbs: row.weight_increment_lbs ?? DEFAULT_WEIGHT_INCREMENT_LBS,
   };
 };
 
@@ -798,7 +819,7 @@ const sessionsHasSecondaryArchetypeAsync = async (
 
 const tableHasColumnAsync = async (
   db: SQLiteDatabase,
-  table: 'archetype_templates' | 'sessions',
+  table: 'archetype_templates' | 'sessions' | 'profile',
   columnName: string
 ): Promise<boolean> => {
   const columns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${table})`);
@@ -849,6 +870,36 @@ const ensureSessionRetroactiveColumnAsync = async (
   if (!(await tableHasColumnAsync(db, 'sessions', 'retroactive'))) {
     await db.execAsync(
       'ALTER TABLE sessions ADD COLUMN retroactive INTEGER NOT NULL DEFAULT 0;'
+    );
+  }
+};
+
+const ensureProfileWeightIncrementColumnAsync = async (
+  db: SQLiteDatabase
+): Promise<void> => {
+  if (!(await tableHasColumnAsync(db, 'profile', 'weight_increment'))) {
+    await db.execAsync(
+      `ALTER TABLE profile ADD COLUMN weight_increment REAL NOT NULL DEFAULT ${DEFAULT_WEIGHT_INCREMENT};`
+    );
+  }
+};
+
+const ensureProfileWeightUnitColumnAsync = async (
+  db: SQLiteDatabase
+): Promise<void> => {
+  if (!(await tableHasColumnAsync(db, 'profile', 'weight_unit'))) {
+    await db.execAsync(
+      `ALTER TABLE profile ADD COLUMN weight_unit TEXT NOT NULL DEFAULT '${DEFAULT_WEIGHT_UNIT}';`
+    );
+  }
+};
+
+const ensureProfileWeightIncrementLbsColumnAsync = async (
+  db: SQLiteDatabase
+): Promise<void> => {
+  if (!(await tableHasColumnAsync(db, 'profile', 'weight_increment_lbs'))) {
+    await db.execAsync(
+      `ALTER TABLE profile ADD COLUMN weight_increment_lbs REAL NOT NULL DEFAULT ${DEFAULT_WEIGHT_INCREMENT_LBS};`
     );
   }
 };
@@ -1098,6 +1149,21 @@ export const initializeWorkoutDatabase = async (): Promise<SQLiteDatabase> => {
     await ensureSessionRetroactiveColumnAsync(opened);
     // [BOOT] 4 — after ensureSessionRetroactiveColumnAsync
     console.log('[BOOT] initializeWorkoutDatabase: ensureSessionRetroactiveColumnAsync done');
+    // [BOOT] 4 — before ensureProfileWeightIncrementColumnAsync (always runs)
+    console.log('[BOOT] initializeWorkoutDatabase: calling ensureProfileWeightIncrementColumnAsync');
+    await ensureProfileWeightIncrementColumnAsync(opened);
+    // [BOOT] 4 — after ensureProfileWeightIncrementColumnAsync
+    console.log('[BOOT] initializeWorkoutDatabase: ensureProfileWeightIncrementColumnAsync done');
+    // [BOOT] 4 — before ensureProfileWeightUnitColumnAsync (always runs)
+    console.log('[BOOT] initializeWorkoutDatabase: calling ensureProfileWeightUnitColumnAsync');
+    await ensureProfileWeightUnitColumnAsync(opened);
+    // [BOOT] 4 — after ensureProfileWeightUnitColumnAsync
+    console.log('[BOOT] initializeWorkoutDatabase: ensureProfileWeightUnitColumnAsync done');
+    // [BOOT] 4 — before ensureProfileWeightIncrementLbsColumnAsync (always runs)
+    console.log('[BOOT] initializeWorkoutDatabase: calling ensureProfileWeightIncrementLbsColumnAsync');
+    await ensureProfileWeightIncrementLbsColumnAsync(opened);
+    // [BOOT] 4 — after ensureProfileWeightIncrementLbsColumnAsync
+    console.log('[BOOT] initializeWorkoutDatabase: ensureProfileWeightIncrementLbsColumnAsync done');
     if (!hasLegacyWorkoutType && version > 0 && version < CURRENT_SCHEMA_VERSION) {
       console.log('[BOOT] initializeWorkoutDatabase: bumping user_version to', CURRENT_SCHEMA_VERSION);
       await opened.execAsync(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION}`);
@@ -1280,19 +1346,26 @@ export const readInitialWorkoutSnapshot = async (): Promise<WorkoutDatabaseSnaps
 export const writeProfile = (profile: UserProfile): void => {
   getDatabase().runSync(
     `INSERT INTO profile
-      (id, name, weekly_goal, experience_level, training_days, onboarding_completed)
-     VALUES (1, ?, ?, ?, ?, ?)
+      (id, name, weekly_goal, experience_level, training_days, onboarding_completed,
+       weight_increment, weight_unit, weight_increment_lbs)
+     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        name = excluded.name,
        weekly_goal = excluded.weekly_goal,
        experience_level = excluded.experience_level,
        training_days = excluded.training_days,
-       onboarding_completed = excluded.onboarding_completed`,
+       onboarding_completed = excluded.onboarding_completed,
+       weight_increment = excluded.weight_increment,
+       weight_unit = excluded.weight_unit,
+       weight_increment_lbs = excluded.weight_increment_lbs`,
     profile.name,
     profile.weeklyGoal,
     profile.experienceLevel,
     JSON.stringify(profile.trainingDays),
-    profile.onboardingCompleted ? 1 : 0
+    profile.onboardingCompleted ? 1 : 0,
+    profile.weightIncrement,
+    profile.weightUnit,
+    profile.weightIncrementLbs
   );
 };
 
@@ -1746,6 +1819,9 @@ export const renameExercise = (
   if (!exercise) {
     throw new Error('Exercise not found.');
   }
+  if (hasExerciseHistoryInDatabase(db, id)) {
+    throw new Error('This exercise has logged history and cannot be renamed.');
+  }
 
   const conflict = db.getFirstSync<ExerciseIdRow>(
     'SELECT id FROM exercises WHERE name = ? COLLATE NOCASE AND id != ?',
@@ -1771,8 +1847,8 @@ export const renameExercise = (
   return { oldName: exercise.name, newName: name };
 };
 
-const hasExerciseHistoryInDatabase = (db: SQLiteDatabase, exerciseId: number): boolean =>
-  Boolean(
+function hasExerciseHistoryInDatabase(db: SQLiteDatabase, exerciseId: number): boolean {
+  return Boolean(
     db.getFirstSync<{ has_history: number }>(
       `SELECT EXISTS(
         SELECT 1
@@ -1783,6 +1859,7 @@ const hasExerciseHistoryInDatabase = (db: SQLiteDatabase, exerciseId: number): b
       exerciseId
     )?.has_history
   );
+}
 
 export const hasExerciseHistory = (exerciseId: number): boolean =>
   hasExerciseHistoryInDatabase(getDatabase(), exerciseId);

@@ -35,6 +35,7 @@ import {
   writeProfile,
 } from '@/store/workoutDatabase';
 import { createSessionExercise } from '@/store/workoutProgression';
+import { lbsToKg, type WeightUnit } from '@/store/weightUnits';
 
 export type { ExerciseCatalogItem };
 
@@ -78,6 +79,9 @@ export interface UserProfile {
   experienceLevel: ExperienceLevel;
   trainingDays: number[];
   onboardingCompleted: boolean;
+  weightIncrement: number;
+  weightUnit: WeightUnit;
+  weightIncrementLbs: number;
 }
 
 // Kept only at the setProfile call boundary so the existing onboarding caller
@@ -225,7 +229,7 @@ export const getWeekDates = (): string[] => {
   return dates;
 };
 
-const deriveDefaultSlots = (goal: number): number[] => {
+export const deriveDefaultSlots = (goal: number): number[] => {
   const slots: number[] = [];
   for (let i = 0; i < Math.min(goal, 7); i++) {
     slots.push(Math.round((i * 7) / goal));
@@ -239,6 +243,9 @@ const normalizeProfile = (profile: UserProfileInput): UserProfile => ({
   experienceLevel: profile.experienceLevel,
   trainingDays: profile.trainingDays,
   onboardingCompleted: profile.onboardingCompleted,
+  weightIncrement: profile.weightIncrement,
+  weightUnit: profile.weightUnit,
+  weightIncrementLbs: profile.weightIncrementLbs,
 });
 
 const runGuardedAction = <T>(actionName: string, action: () => T): T | undefined => {
@@ -353,6 +360,18 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 
     updateCurrentSet(exerciseIndex, setIndex, updated);
     exercises[exerciseIndex].sets[setIndex] = updated;
+    const nextSet = exercises[exerciseIndex].sets[setIndex + 1];
+    if (nowCompleted && nextSet && !nextSet.completed && !nextSet.skipped) {
+      // Bump is unit-native (2.5 kg / 5 lbs) but stored in kg-canonical terms.
+      const bumpKg = get().profile?.weightUnit === 'lbs' ? lbsToKg(5) : 2.5;
+      const nextUpdated = {
+        ...nextSet,
+        weight: target.weight + bumpKg,
+        targetWeight: target.weight + bumpKg,
+      };
+      updateCurrentSet(exerciseIndex, setIndex + 1, nextUpdated);
+      exercises[exerciseIndex].sets[setIndex + 1] = nextUpdated;
+    }
     set({ currentSession: { ...session, exercises } });
   }),
 

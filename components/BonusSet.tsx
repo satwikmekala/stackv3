@@ -4,6 +4,7 @@ import { Check } from 'lucide-react-native';
 import Animated, { ReduceMotion, ZoomIn } from 'react-native-reanimated';
 import { ActiveSetCard } from '@/components/ActiveSetCard';
 import { redesignColors, redesignFonts } from '@/constants/theme';
+import { formatWeight, unitLabel, type WeightUnit } from '@/store/weightUnits';
 import type { BonusSetType } from '@/store/workoutStore';
 
 export type BonusSetSelection = {
@@ -23,15 +24,16 @@ const ACKNOWLEDGEMENT_CHECK_ENTER = ZoomIn.springify()
   .stiffness(240)
   .reduceMotion(ReduceMotion.System);
 
-const formatWeight = (weight: number) =>
-  Number.isInteger(weight) ? weight.toString() : weight.toFixed(1).replace(/\.0$/, '');
-
 export function BonusSet({
   selection,
+  weightIncrement,
+  weightUnit,
   onDone,
   onCancel,
 }: {
   selection: BonusSetSelection;
+  weightIncrement?: number;
+  weightUnit?: WeightUnit;
   onDone: (set: BonusSetSelection) => void;
   onCancel: () => void;
 }) {
@@ -45,6 +47,8 @@ export function BonusSet({
       badgeLabel="Bonus set"
       reps={reps}
       weight={weight}
+      weightIncrement={weightIncrement}
+      weightUnit={weightUnit}
       accent={meta.color}
       primaryLabel="Done"
       secondaryLabel="Cancel"
@@ -58,9 +62,11 @@ export function BonusSet({
 
 export function BonusSetAcknowledgement({
   set,
+  weightUnit = 'kg',
   onAdvance,
 }: {
   set: BonusSetSelection;
+  weightUnit?: WeightUnit;
   onAdvance: () => void;
 }) {
   const meta = BONUS_SET_META[set.type];
@@ -80,7 +86,7 @@ export function BonusSetAcknowledgement({
   return (
     <TouchableOpacity
       accessibilityRole="button"
-      accessibilityLabel={`Well done. ${formatWeight(set.weight)} kilograms by ${set.reps}. Continue.`}
+      accessibilityLabel={`Well done. ${formatWeight(set.weight, weightUnit)} ${unitLabel(weightUnit)} by ${set.reps}. Continue.`}
       activeOpacity={0.92}
       onPress={advanceOnce}
       style={{
@@ -134,7 +140,7 @@ export function BonusSetAcknowledgement({
           color: meta.color,
         }}
       >
-        {formatWeight(set.weight)} kg × {set.reps}
+        {formatWeight(set.weight, weightUnit)} {unitLabel(weightUnit)} × {set.reps}
       </Text>
       <Text
         allowFontScaling={false}

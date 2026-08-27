@@ -24,6 +24,8 @@ import {
   type ExerciseSet,
   type WorkoutSession,
 } from '@/store/workoutStore';
+import { formatWeight, unitLabel, type WeightUnit } from '@/store/weightUnits';
+import { DEFAULT_WEIGHT_UNIT } from '@/store/workoutDatabase';
 import '@/global.css';
 
 type RecordFilter = 'all' | Archetype;
@@ -71,8 +73,10 @@ const MONTHS = [
 
 const CARD_BORDER = 'rgba(169, 159, 145, 0.22)';
 
-const formatNumber = (value: number) =>
-  value.toLocaleString('en-US', { maximumFractionDigits: 1 });
+// Display unit lives on the profile; records.tsx is a screen, so it reads the
+// store directly rather than threading a prop the way the set components do.
+const useWeightUnit = (): WeightUnit =>
+  useWorkoutStore((state) => state.profile?.weightUnit ?? DEFAULT_WEIGHT_UNIT);
 
 const strongestSet = (sets: ExerciseSet[]) =>
   [...sets].sort((a, b) => b.weight - a.weight || b.reps - a.reps)[0];
@@ -178,6 +182,8 @@ function FilterChip({
 }
 
 function RecordRow({ record, isLast }: { record: RecordItem; isLast: boolean }) {
+  const weightUnit = useWeightUnit();
+
   return (
     <View style={[styles.recordRow, !isLast && styles.recordRowBorder]}>
       <View style={styles.recordIdentity}>
@@ -187,7 +193,7 @@ function RecordRow({ record, isLast }: { record: RecordItem; isLast: boolean }) 
       </View>
       <View style={styles.performance}>
         <Text adjustsFontSizeToFit minimumFontScale={0.78} numberOfLines={1} style={styles.performanceText}>
-          {record.weight === 0 ? 'BW' : `${formatNumber(record.weight)} kg`}
+          {record.weight === 0 ? 'BW' : `${formatWeight(record.weight, weightUnit)} ${unitLabel(weightUnit)}`}
           <Text style={styles.multiply}> × </Text>
           <Text style={styles.reps}>{record.reps}</Text>
         </Text>
@@ -249,7 +255,7 @@ export default function AllRecords() {
       <ScrollView
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: insets.top + 25, paddingBottom: insets.bottom + 132 },
+          { paddingTop: insets.top + 25, paddingBottom: insets.bottom + 32 },
         ]}
         showsVerticalScrollIndicator={false}
       >

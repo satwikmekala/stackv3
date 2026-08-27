@@ -34,6 +34,8 @@ import {
   useWorkoutStore,
   type WorkoutSession,
 } from '@/store/workoutStore';
+import { formatWeight, kgToLbs, unitLabel, type WeightUnit } from '@/store/weightUnits';
+import { DEFAULT_WEIGHT_UNIT } from '@/store/workoutDatabase';
 import '@/global.css';
 
 type ExerciseDefinition = {
@@ -113,6 +115,11 @@ const STRENGTH_COLOR_PALETTE = [
   splitColors.arms,
   splitColors.core,
 ];
+
+// Display unit lives on the profile; this is a screen, so its cards read the
+// store directly rather than threading a prop the way the set components do.
+const useWeightUnit = (): WeightUnit =>
+  useWorkoutStore((state) => state.profile?.weightUnit ?? DEFAULT_WEIGHT_UNIT);
 
 const formatNumber = (value: number) =>
   value.toLocaleString('en-US', { maximumFractionDigits: 1 });
@@ -428,7 +435,8 @@ function StrengthRangePicker({
 }
 
 function StrengthCard({ metric, onPress }: { metric: StrengthMetric; onPress: () => void }) {
-  const formattedWeight = formatNumber(metric.weight);
+  const weightUnit = useWeightUnit();
+  const formattedWeight = formatWeight(metric.weight, weightUnit);
   const progressionLabel = metric.percentageGain > 0
     ? `+${formatNumber(metric.percentageGain)}%`
     : '±0%';
@@ -437,7 +445,7 @@ function StrengthCard({ metric, onPress }: { metric: StrengthMetric; onPress: ()
     <View style={styles.strengthCardSlot}>
       <Pressable
         accessibilityHint={`Shows the ${metric.periodWeeks}-week progression breakdown`}
-        accessibilityLabel={`${metric.label}, ${formattedWeight} kilograms, ${progressionLabel} progress`}
+        accessibilityLabel={`${metric.label}, ${formattedWeight} ${unitLabel(weightUnit)}, ${progressionLabel} progress`}
         accessibilityRole="button"
         onPress={onPress}
         style={({ pressed }) => [styles.strengthCardTapTarget, pressed && styles.strengthCardPressed]}
@@ -455,7 +463,7 @@ function StrengthCard({ metric, onPress }: { metric: StrengthMetric; onPress: ()
             <Text adjustsFontSizeToFit minimumFontScale={0.82} numberOfLines={1} style={styles.weightValue}>
               {formattedWeight}
             </Text>
-            <Text style={styles.weightUnit}>kg</Text>
+            <Text style={styles.weightUnit}>{unitLabel(weightUnit)}</Text>
           </View>
 
           <Text style={[styles.gainText, { color: metric.color }]}>{progressionLabel}</Text>
@@ -479,7 +487,8 @@ function StrengthProgressionDetail({
   onDismiss: () => void;
 }) {
   const progress = useSharedValue(0);
-  const formattedWeight = formatNumber(metric.weight);
+  const weightUnit = useWeightUnit();
+  const formattedWeight = formatWeight(metric.weight, weightUnit);
   const progressionLabel = metric.percentageGain > 0
     ? `+${formatNumber(metric.percentageGain)}%`
     : '±0%';
@@ -560,7 +569,7 @@ function StrengthProgressionDetail({
               <Text style={styles.detailSummaryLabel}>BEST WEIGHT</Text>
               <View style={styles.detailWeightRow}>
                 <Text style={styles.detailWeight}>{formattedWeight}</Text>
-                <Text style={styles.detailWeightUnit}>kg</Text>
+                <Text style={styles.detailWeightUnit}>{unitLabel(weightUnit)}</Text>
               </View>
             </View>
             <View style={[styles.detailGainPill, { backgroundColor: `${metric.color}18` }]}>
@@ -660,7 +669,7 @@ function StrengthProgressionDetail({
                         <Text style={styles.weekStart}>NO DATA</Text>
                       ) : week.change !== 0 ? (
                         <Text style={[styles.weekIncrease, { color: changeColor }]}>
-                          {week.change > 0 ? '+' : ''}{formatNumber(week.change)}
+                          {week.change > 0 ? '+' : ''}{formatWeight(week.change, weightUnit)}
                         </Text>
                       ) : index === firstDataIndex ? (
                         <Text style={styles.weekStart}>START</Text>
@@ -668,7 +677,7 @@ function StrengthProgressionDetail({
                         <Text style={styles.weekStart}>{week.recorded ? 'HELD' : '—'}</Text>
                       )}
                       <Text style={styles.weekValue}>
-                        {week.weight === null ? '—' : `${formatNumber(week.weight)} kg`}
+                        {week.weight === null ? '—' : `${formatWeight(week.weight, weightUnit)} ${unitLabel(weightUnit)}`}
                       </Text>
                     </View>
                   </View>
@@ -787,22 +796,25 @@ function WeeklyGoalCard({ completed, goal }: { completed: number; goal: number }
 }
 
 function VolumeCard({ label, value }: { label: string; value: number }) {
+  const weightUnit = useWeightUnit();
+
   return (
     <View style={styles.volumeCard}>
       <Text style={styles.volumeLabel}>{label}</Text>
       <Text adjustsFontSizeToFit minimumFontScale={0.74} numberOfLines={1} style={styles.volumeValue}>
-        {formatNumber(value)}
+        {formatNumber(weightUnit === 'lbs' ? kgToLbs(value) : value)}
       </Text>
-      <Text style={styles.volumeUnit}>kg lifted</Text>
+      <Text style={styles.volumeUnit}>{unitLabel(weightUnit)} lifted</Text>
     </View>
   );
 }
 
 function RecordCard({ record }: { record: PersonalRecord }) {
+  const weightUnit = useWeightUnit();
   const hasRecord = record.weight !== null && record.reps !== null && record.daysAgo !== null;
   const details = record.weight === null || record.reps === null
     ? 'No record yet'
-    : `${formatNumber(record.weight)} kg × ${record.reps} reps`;
+    : `${formatWeight(record.weight, weightUnit)} ${unitLabel(weightUnit)} × ${record.reps} reps`;
 
   return (
     <View style={styles.recordCard}>

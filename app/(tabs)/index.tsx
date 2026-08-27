@@ -16,7 +16,7 @@ import {
   getNextArchetypeVariant,
   readArchetypeTemplateSync,
 } from '@/store/workoutDatabase';
-import { useWorkoutStore } from '@/store/workoutStore';
+import { toLocalCalendarDate, useWorkoutStore } from '@/store/workoutStore';
 import '@/global.css';
 
 const DAY_LABELS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
@@ -34,6 +34,33 @@ const MONTH_LABELS = [
   'NOV',
   'DEC',
 ];
+
+const FULL_DAY_LABELS = [
+  'MONDAY',
+  'TUESDAY',
+  'WEDNESDAY',
+  'THURSDAY',
+  'FRIDAY',
+  'SATURDAY',
+  'SUNDAY',
+];
+
+/** Eyebrow for the hero card: which day the queued workout actually belongs to. */
+function scheduleEyebrow(nextUpDate: string | null) {
+  if (!nextUpDate) return 'NEXT UP';
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (nextUpDate === toLocalCalendarDate(today)) return 'TODAY';
+
+  const tomorrow = new Date(today);
+  tomorrow.setDate(today.getDate() + 1);
+  if (nextUpDate === toLocalCalendarDate(tomorrow)) return 'TOMORROW';
+
+  const [year, month, day] = nextUpDate.split('-').map(Number);
+  const target = new Date(year, month - 1, day);
+  return FULL_DAY_LABELS[(target.getDay() + 6) % 7];
+}
 
 function todayLabel() {
   const today = new Date();
@@ -60,6 +87,7 @@ export default function Home() {
   const queueState = getWeeklyQueueState();
   const nextUp = queueState.nextUp;
   const schedule = getWeekSchedule();
+  const heroEyebrow = scheduleEyebrow(queueState.nextUpDate);
   const exerciseCount = nextUp.reduce(
     (count, archetype) =>
       count +
@@ -190,6 +218,7 @@ export default function Home() {
           <WorkoutHeroCard
             archetypes={nextUp}
             exerciseCount={exerciseCount}
+            whenLabel={heroEyebrow}
             completed={nextUp.length === 0}
             onPress={nextUp.length > 0 ? handleStartWorkout : handleOpenWorkoutPicker}
           />
@@ -218,7 +247,9 @@ export default function Home() {
         <View style={styles.scheduleSection}>
           <View style={styles.scheduleList}>
             {schedule.map((day, index) => {
-              if (day.status === 'today') return null;
+              // Today lives in the hero card until it's logged; once it's done
+              // the hero moves on to the next day, so show it in the list.
+              if (day.status === 'today' && !day.completedWorkout) return null;
 
               return (
                 <ScheduleRow

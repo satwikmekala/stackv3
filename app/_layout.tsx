@@ -122,6 +122,10 @@ export default function RootLayout() {
             animationTypeForReplace: 'pop',
           }}
         />
+        <Stack.Screen
+          name="records"
+          options={{ headerShown: false, animation: 'slide_from_right' }}
+        />
         <Stack.Screen name="settings" options={{ headerShown: false, presentation: 'modal' }} />
         <Stack.Screen name="+not-found" />
       </Stack>

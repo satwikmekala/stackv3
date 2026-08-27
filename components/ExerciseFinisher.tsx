@@ -11,11 +11,9 @@ import Animated, {
 import { BONUS_SET_META, type BonusSetSelection } from '@/components/BonusSet';
 import { redesignColors, redesignFonts } from '@/constants/theme';
 import type { ExerciseSet } from '@/store/workoutStore';
+import { formatWeight, unitLabel, type WeightUnit } from '@/store/weightUnits';
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
-
-const formatWeight = (weight: number) =>
-  Number.isInteger(weight) ? weight.toString() : weight.toFixed(1).replace(/\.0$/, '');
 
 const roundToPlate = (weight: number) => Math.round(weight / 2.5) * 2.5;
 
@@ -121,9 +119,12 @@ export function ExerciseFinisher({
   onAdvance,
   onEditSet,
   onSelectBonus,
+  weightUnit = 'kg',
 }: {
   sets: ExerciseSet[];
   nextExerciseName?: string;
+  // Display unit only — the plate/PR math below stays kg-based.
+  weightUnit?: WeightUnit;
   onAdvance: () => void;
   onEditSet: (setIndex: number) => void;
   onSelectBonus: (selection: BonusSetSelection) => void;
@@ -184,7 +185,7 @@ export function ExerciseFinisher({
                 color: redesignColors.bone,
               }}
             >
-              {formatWeight(set.weight)} kg
+              {formatWeight(set.weight, weightUnit)} {unitLabel(weightUnit)}
             </Text>
             <Text
               allowFontScaling={false}
@@ -217,21 +218,21 @@ export function ExerciseFinisher({
       <View style={{ flexDirection: 'row', gap: 9 }}>
         <FinisherOption
           title="Extra Set"
-          metric={`${formatWeight(lastWeight)} kg × ${lastReps}`}
+          metric={`${formatWeight(lastWeight, weightUnit)} ${unitLabel(weightUnit)} × ${lastReps}`}
           color={BONUS_SET_META.extra.color}
           icon={<Plus color={BONUS_SET_META.extra.color} size={25} strokeWidth={2.6} />}
           onPress={() => onSelectBonus({ type: 'extra', reps: lastReps, weight: lastWeight })}
         />
         <FinisherOption
           title="Drop Set"
-          metric={`${formatWeight(dropWeight)} kg × ${lastReps}`}
+          metric={`${formatWeight(dropWeight, weightUnit)} ${unitLabel(weightUnit)} × ${lastReps}`}
           color={BONUS_SET_META.dropset.color}
           icon={<ArrowDown color={BONUS_SET_META.dropset.color} size={25} strokeWidth={2.6} />}
           onPress={() => onSelectBonus({ type: 'dropset', reps: lastReps, weight: dropWeight })}
         />
         <FinisherOption
           title="PR Attempt"
-          metric={`${formatWeight(prWeight)} kg × ${prReps}`}
+          metric={`${formatWeight(prWeight, weightUnit)} ${unitLabel(weightUnit)} × ${prReps}`}
           color={BONUS_SET_META.pr.color}
           icon={<Trophy color={BONUS_SET_META.pr.color} size={23} strokeWidth={2.4} />}
           onPress={() => onSelectBonus({ type: 'pr', reps: prReps, weight: prWeight })}
