@@ -559,13 +559,19 @@ export default function Workout() {
 
   const handleFeedbackSelect = (intensity: IntensityLevel) => {
     exitingRef.current = true;
-    completeWorkout(intensity);
+    const completedSession = completeWorkout(intensity);
+    if (!completedSession) {
+      exitingRef.current = false;
+      return;
+    }
     setShowFeedbackModal(false);
-    router.replace('/(tabs)');
+    router.replace({
+      pathname: '/workout-summary',
+      params: { sessionId: completedSession.id },
+    } as Parameters<typeof router.replace>[0]);
   };
 
   const previousWeight = setIndex > 0 ? exercise.sets[setIndex - 1].weight : null;
-  const targetWeight = activeSet.targetWeight ?? activeSet.weight;
   const weightDeltaLabel = (() => {
     if (previousWeight === null) return null;
     if (previousWeight === 0) return activeSet.weight === 0 ? '+0%' : null;

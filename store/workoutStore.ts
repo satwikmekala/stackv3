@@ -123,7 +123,7 @@ interface WorkoutStore {
   toggleSetCompleted: (exerciseIndex: number, setIndex: number) => void;
   toggleSetSkipped: (exerciseIndex: number, setIndex: number) => void;
   swapCurrentSessionExercise: (exerciseIndex: number, name: string) => void;
-  completeWorkout: (intensity: IntensityLevel) => void;
+  completeWorkout: (intensity: IntensityLevel) => WorkoutSession | undefined;
   discardWorkout: () => void;
 
   addExerciseToSplit: (type: WorkoutType, name: string, primaryMuscle: string) => void;
@@ -434,7 +434,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 
   completeWorkout: (intensity) => runGuardedAction('completeWorkout', () => {
     const session = get().currentSession;
-    if (!session) return;
+    if (!session) return undefined;
     completeCurrentSession(intensity);
     const completedSession = {
       ...session,
@@ -446,6 +446,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
       sessions: [...get().sessions, completedSession],
       currentSession: null,
     });
+    return completedSession;
   }),
 
   discardWorkout: () => runGuardedAction('discardWorkout', () => {

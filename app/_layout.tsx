@@ -123,6 +123,15 @@ export default function RootLayout() {
           }}
         />
         <Stack.Screen
+          name="workout-summary"
+          options={{
+            headerShown: false,
+            gestureEnabled: false,
+            animation: 'fade',
+            animationTypeForReplace: 'push',
+          }}
+        />
+        <Stack.Screen
           name="records"
           options={{ headerShown: false, animation: 'slide_from_right' }}
         />
