@@ -383,7 +383,7 @@ export default function Settings() {
           >
             Danger Zone
           </Text>
-          <Button title="Reset All Data" onPress={handleReset} variant="secondary" />
+          <Button title="Reset All Data" onPress={handleReset} variant="destructive" />
           <Text
             style={{
               fontFamily: fonts.body,

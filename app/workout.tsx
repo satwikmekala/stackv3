@@ -35,11 +35,11 @@ import {
   type BonusSetSelection,
 } from '@/components/BonusSet';
 import { ExerciseFinisher } from '@/components/ExerciseFinisher';
-import { RestTimer } from '@/components/RestTimer';
 import { SwapExerciseSheet } from '@/components/SwapExerciseSheet';
 import { WorkoutDayLabel } from '@/components/WorkoutDayLabel';
 import { WorkoutIntensityPicker } from '@/components/home/WorkoutIntensityPicker';
 import { ARCHETYPE_COMPOSITIONS } from '@/constants/archetypes';
+import { motionDuration, motionEasing } from '@/constants/motion';
 import { redesignColors, redesignFonts, workoutLoggingColors } from '@/constants/theme';
 import { workoutMeta } from '@/constants/workouts';
 import {
@@ -62,8 +62,8 @@ const FEEDBACK_LEVELS = [
 // the right, cancellations return from the left, and replacements simply fade.
 // Reanimated's reduced-motion mode collapses these automatically when requested
 // by the device accessibility settings.
-const FORWARD_ENTER = FadeInRight.duration(240)
-  .easing(Easing.out(Easing.cubic))
+const FORWARD_ENTER = FadeInRight.duration(motionDuration.transition)
+  .easing(motionEasing.decelerate)
   .reduceMotion(ReduceMotion.System);
 const BACKWARD_ENTER = FadeInLeft.duration(220)
   .easing(Easing.out(Easing.cubic))
@@ -85,6 +85,8 @@ const CHECK_ENTER = ZoomIn.springify()
 const UP_NEXT_EXIT = FadeOutDown.duration(150)
   .easing(Easing.in(Easing.cubic))
   .reduceMotion(ReduceMotion.System);
+const LOG_SUBMISSION_GUARD_MS = motionDuration.transition + motionDuration.feedback;
+
 function ExerciseProgressSegment({
   state,
   accent,
@@ -368,11 +370,7 @@ export default function Workout() {
   const [exerciseMotion, setExerciseMotion] = useState<'forward' | 'backward' | 'replace'>(
     'forward'
   );
-  const [restContext, setRestContext] = useState<{
-    id: number;
-    exerciseIndex: number;
-    setIndex: number;
-  } | null>(null);
+  const loggingSetRef = useRef(false);
   const exitingRef = useRef(false);
   const hasRenderedRef = useRef(false);
   const renderedExerciseIdentityRef = useRef<string | null>(null);
@@ -469,29 +467,40 @@ export default function Workout() {
   };
 
   const handleToggleSet = () => {
+    if (loggingSetRef.current) return;
+
     const wasCompleted = activeSet.completed;
     const completesExercise = exercise.sets.every(
       (set, index) => index === setIndex || set.completed
     );
+    loggingSetRef.current = true;
     setStageDirection(1);
     toggleSetCompleted(exerciseIndex, setIndex);
 
-    if (!wasCompleted && !completesExercise) {
-      if (Platform.OS !== 'web') void Haptics.selectionAsync();
-      setRestContext((previous) => ({
-        id: (previous?.id ?? 0) + 1,
-        exerciseIndex,
-        setIndex,
-      }));
-    } else if (!wasCompleted && completesExercise) {
-      if (Platform.OS !== 'web') {
+    // The store writes to SQLite before publishing the updated session. Read
+    // that published state back before moving the UI so a failed write keeps
+    // the user on the current exercise and uses the store's existing alert.
+    const committedSet = useWorkoutStore.getState().currentSession
+      ?.exercises[exerciseIndex]?.sets[setIndex];
+    if (!committedSet?.completed) {
+      loggingSetRef.current = false;
+      return;
+    }
+
+    setTimeout(() => {
+      loggingSetRef.current = false;
+    }, LOG_SUBMISSION_GUARD_MS);
+
+    if (Platform.OS !== 'web') {
+      if (!wasCompleted && completesExercise) {
         void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      } else if (!wasCompleted) {
+        void Haptics.selectionAsync();
       }
-    } else if (
-      restContext?.exerciseIndex === exerciseIndex &&
-      restContext.setIndex === setIndex
-    ) {
-      setRestContext(null);
+    }
+
+    if (!wasCompleted && completesExercise) {
+      handleAdvanceExercise();
     }
   };
 
@@ -502,24 +511,9 @@ export default function Workout() {
     );
     setStageDirection(1);
     toggleSetSkipped(exerciseIndex, setIndex);
-
-    if (!wasCompleted && !completesExercise) {
-      if (Platform.OS !== 'web') void Haptics.selectionAsync();
-      setRestContext((previous) => ({
-        id: (previous?.id ?? 0) + 1,
-        exerciseIndex,
-        setIndex,
-      }));
-    } else if (
-      restContext?.exerciseIndex === exerciseIndex &&
-      restContext.setIndex === setIndex
-    ) {
-      setRestContext(null);
+    if (!wasCompleted && !completesExercise && Platform.OS !== 'web') {
+      void Haptics.selectionAsync();
     }
-  };
-
-  const dismissRest = () => {
-    setRestContext(null);
   };
 
   const navigateToExercise = (
@@ -530,7 +524,6 @@ export default function Workout() {
     setExerciseMotion(direction);
     setStageDirection(direction === 'forward' ? 1 : -1);
     setExerciseIndex(targetIndex);
-    setRestContext(null);
   };
 
   const handleAdvanceExercise = () => {
@@ -546,15 +539,12 @@ export default function Workout() {
   const handleNavigateExercise = (targetIndex: number) => {
     navigateToExercise(targetIndex);
     setShowSwapSheet(false);
-    if (Platform.OS !== 'web') void Haptics.selectionAsync();
   };
 
   const handleSwapExercise = (name: string) => {
     setExerciseMotion('replace');
     swapCurrentSessionExercise(exerciseIndex, name);
-    setRestContext(null);
     setShowSwapSheet(false);
-    if (Platform.OS !== 'web') void Haptics.selectionAsync();
   };
 
   const handleFeedbackSelect = (intensity: IntensityLevel) => {
@@ -811,6 +801,7 @@ export default function Workout() {
                   weightUnit={weightUnit}
                   onAdvance={handleAdvanceExercise}
                   onEditSet={(completedSetIndex) => {
+                    loggingSetRef.current = false;
                     setStageDirection(-1);
                     toggleSetCompleted(exerciseIndex, completedSetIndex);
                   }}
@@ -828,6 +819,7 @@ export default function Workout() {
                     weightUnit={weightUnit}
                     accent={accent}
                     onEditCompletedSet={(completedSetIndex) => {
+                      loggingSetRef.current = false;
                       setStageDirection(-1);
                       toggleSetCompleted(exerciseIndex, completedSetIndex);
                     }}
@@ -930,15 +922,6 @@ export default function Workout() {
           ) : null}
         </Animated.View>
       </View>
-
-      {restContext ? (
-        <RestTimer
-          key={restContext.id}
-          accent={accent}
-          onFinish={dismissRest}
-          onDismiss={dismissRest}
-        />
-      ) : null}
 
       <SwapExerciseSheet
         visible={showSwapSheet}

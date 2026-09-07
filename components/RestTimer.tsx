@@ -11,6 +11,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
+import { motionDuration, motionEasing } from '@/constants/motion';
 import { redesignColors, redesignFonts } from '@/constants/theme';
 
 const DEFAULT_REST_SECONDS = 90;
@@ -86,8 +87,12 @@ export function RestTimer({ accent, onFinish, onDismiss }: RestTimerProps) {
 
   return (
     <Animated.View
-      entering={SlideInDown.duration(250).reduceMotion(ReduceMotion.System)}
-      exiting={SlideOutDown.duration(200).reduceMotion(ReduceMotion.System)}
+      entering={SlideInDown.duration(motionDuration.transition)
+        .easing(motionEasing.decelerate)
+        .reduceMotion(ReduceMotion.System)}
+      exiting={SlideOutDown.duration(motionDuration.transition)
+        .easing(motionEasing.accelerate)
+        .reduceMotion(ReduceMotion.System)}
       style={{
         position: 'absolute',
         top: 0,

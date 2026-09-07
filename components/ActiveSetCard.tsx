@@ -3,8 +3,6 @@ import { Text, TouchableOpacity, View } from 'react-native';
 import { Check, Minus, Plus } from 'lucide-react-native';
 import Animated, {
   Easing,
-  ReduceMotion,
-  type SharedValue,
   useAnimatedStyle,
   useSharedValue,
   withSequence,
@@ -12,6 +10,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { StatusPill } from '@/components/StatusPill';
 import { redesignColors, redesignFonts } from '@/constants/theme';
+import { usePressScale } from '@/hooks/usePressScale';
 import { formatWeight, lbsToKg, unitLabel, type WeightUnit } from '@/store/weightUnits';
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
@@ -236,7 +235,7 @@ export function ActiveSetCard({
   setNumber,
   heading,
   badgeLabel = 'Recommended',
-  primaryLabel = 'Log',
+  primaryLabel = 'Log it',
   secondaryLabel = 'Skip',
   reps,
   weight,
@@ -249,8 +248,8 @@ export function ActiveSetCard({
   onLog,
   onSkip,
 }: ActiveSetCardProps) {
-  const primaryPressed = useSharedValue(0);
-  const secondaryPressed = useSharedValue(0);
+  const primaryPressScale = usePressScale();
+  const secondaryPressScale = usePressScale();
 
   // The stepper taps produce a delta in the display unit. Storage is kg-canonical
   // and the parent adds this delta straight onto the stored kg value, so a
@@ -258,21 +257,6 @@ export function ActiveSetCard({
   // applying it to a signed delta is exact — and kg mode passes through untouched.
   const handleWeightDelta = (delta: number) => {
     onWeightChange(weightUnit === 'lbs' ? lbsToKg(delta) : delta);
-  };
-
-  const primaryButtonStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: 1 - primaryPressed.value * 0.025 }],
-  }));
-  const secondaryButtonStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: 1 - secondaryPressed.value * 0.025 }],
-  }));
-
-  const setPressed = (pressed: SharedValue<number>, value: number) => {
-    pressed.value = withTiming(value, {
-      duration: value ? 80 : 140,
-      easing: Easing.out(Easing.cubic),
-      reduceMotion: ReduceMotion.System,
-    });
   };
 
   return (
@@ -332,8 +316,8 @@ export function ActiveSetCard({
           accessibilityRole="button"
           accessibilityLabel={`${primaryLabel} ${heading ?? `set ${setNumber}`}`}
           onPress={onLog}
-          onPressIn={() => setPressed(primaryPressed, 1)}
-          onPressOut={() => setPressed(primaryPressed, 0)}
+          onPressIn={primaryPressScale.onPressIn}
+          onPressOut={primaryPressScale.onPressOut}
           activeOpacity={0.78}
           style={[
             {
@@ -346,7 +330,7 @@ export function ActiveSetCard({
               justifyContent: 'center',
               backgroundColor: accent,
             },
-            primaryButtonStyle,
+            primaryPressScale.animatedStyle,
           ]}
         >
           <Check color={redesignColors.ink} size={22} strokeWidth={3.2} />
@@ -368,8 +352,8 @@ export function ActiveSetCard({
           accessibilityRole="button"
           accessibilityLabel={`${secondaryLabel} ${heading ?? `set ${setNumber}`}`}
           onPress={onSkip}
-          onPressIn={() => setPressed(secondaryPressed, 1)}
-          onPressOut={() => setPressed(secondaryPressed, 0)}
+          onPressIn={secondaryPressScale.onPressIn}
+          onPressOut={secondaryPressScale.onPressOut}
           activeOpacity={0.7}
           style={[
             {
@@ -383,7 +367,7 @@ export function ActiveSetCard({
               borderColor: redesignColors.border,
               backgroundColor: 'transparent',
             },
-            secondaryButtonStyle,
+            secondaryPressScale.animatedStyle,
           ]}
         >
           <Text

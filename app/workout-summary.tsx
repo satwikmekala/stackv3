@@ -21,12 +21,12 @@ import {
 } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
-  Easing,
   FadeInDown,
   ReduceMotion,
   ZoomIn,
 } from 'react-native-reanimated';
 import { ShareSheet } from '@/components/ShareSheet';
+import { motionDuration, motionEasing } from '@/constants/motion';
 import { redesignColors, redesignFonts } from '@/constants/theme';
 import { DEFAULT_WEIGHT_UNIT } from '@/store/workoutDatabase';
 import {
@@ -39,15 +39,16 @@ import {
   type WorkoutSummary,
 } from '@/store/workoutSummary';
 import { unitLabel, type WeightUnit } from '@/store/weightUnits';
+import { getWorkoutLetter } from '@/store/customSplitDraft';
 import { useWorkoutStore } from '@/store/workoutStore';
 import '@/global.css';
 
-const HERO_ENTER = FadeInDown.duration(520)
-  .easing(Easing.out(Easing.cubic))
+const HERO_ENTER = FadeInDown.duration(motionDuration.entrance)
+  .easing(motionEasing.decelerate)
   .reduceMotion(ReduceMotion.System);
 const CONTENT_ENTER = FadeInDown.delay(130)
-  .duration(480)
-  .easing(Easing.out(Easing.cubic))
+  .duration(motionDuration.entrance)
+  .easing(motionEasing.decelerate)
   .reduceMotion(ReduceMotion.System);
 const CHECK_ENTER = ZoomIn.delay(260)
   .springify()
@@ -279,10 +280,23 @@ export default function WorkoutSummaryScreen() {
     (state) => state.profile?.weightUnit ?? DEFAULT_WEIGHT_UNIT
   );
   const getWeeklyProgress = useWorkoutStore((state) => state.getWeeklyProgress);
+  const getCustomWorkoutLabel = useWorkoutStore(
+    (state) => state.getCustomWorkoutLabel
+  );
   const session = sessions.find((item) => item.id === sessionId);
+  // A Custom Split session has no archetype to name, so the hero title comes
+  // from the saved workout it was started from; a workout that has since been
+  // removed falls back to the existing archetype/muscle title.
+  const customWorkoutId = session?.customSplitWorkoutId ?? null;
+  const customTitle = useMemo(() => {
+    if (customWorkoutId === null) return null;
+    const label = getCustomWorkoutLabel(customWorkoutId);
+    if (!label) return null;
+    return label.name.trim() || `Workout ${getWorkoutLetter(label.position)}`;
+  }, [customWorkoutId, getCustomWorkoutLabel]);
   const summary = useMemo(
-    () => session ? deriveWorkoutSummary(session) : null,
-    [session]
+    () => session ? deriveWorkoutSummary(session, customTitle) : null,
+    [customTitle, session]
   );
   const weeklyProgress = getWeeklyProgress();
   const compact = width < 375;
@@ -428,6 +442,18 @@ export default function WorkoutSummaryScreen() {
             />
 
             <ExerciseRecap summary={summary} weightUnit={weightUnit} />
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Done. Return home"
+              onPress={() => finish('/(tabs)')}
+              style={[
+                styles.doneButton,
+                { backgroundColor: summary.accent },
+              ]}
+            >
+              <Text allowFontScaling={false} style={styles.doneButtonText}>Done</Text>
+            </Pressable>
           </Animated.View>
         </View>
       </ScrollView>
@@ -453,19 +479,6 @@ export default function WorkoutSummaryScreen() {
           style={StyleSheet.absoluteFill}
         />
         <View style={styles.actionColumn}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Done. Return home"
-            onPress={() => finish('/(tabs)')}
-            style={({ pressed }) => [
-              styles.doneButton,
-              { backgroundColor: summary.accent },
-              pressed && styles.buttonPressed,
-            ]}
-          >
-            <Text allowFontScaling={false} style={styles.doneButtonText}>Done</Text>
-          </Pressable>
-
           <View style={styles.actionRow}>
             <Pressable
               accessibilityRole="button"
@@ -793,6 +806,7 @@ const styles = StyleSheet.create({
   },
   doneButton: {
     height: 58,
+    marginTop: 18,
     borderRadius: 18,
     borderCurve: 'continuous',
     alignItems: 'center',
@@ -827,7 +841,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    paddingTop: 30,
+    paddingTop: 22,
   },
   actionColumn: {
     width: '100%',

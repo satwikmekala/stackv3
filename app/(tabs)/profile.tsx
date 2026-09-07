@@ -21,12 +21,11 @@ import {
 } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
-  Easing,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
-  withTiming,
 } from 'react-native-reanimated';
+import { withMotionTiming } from '@/constants/motion';
 import { redesignColors, redesignFonts, splitColors } from '@/constants/theme';
 import {
   getStartOfWeek,
@@ -329,10 +328,7 @@ function StrengthRangePicker({
   const progress = useSharedValue(0);
 
   useEffect(() => {
-    progress.value = withTiming(1, {
-      duration: 280,
-      easing: Easing.out(Easing.cubic),
-    });
+    progress.value = withMotionTiming(1);
   }, [progress]);
 
   const backdropStyle = useAnimatedStyle(() => ({ opacity: progress.value }));
@@ -342,10 +338,11 @@ function StrengthRangePicker({
   }));
 
   const close = () => {
-    progress.value = withTiming(
+    progress.value = withMotionTiming(
       0,
-      { duration: 190, easing: Easing.in(Easing.cubic) },
+      { easing: 'accelerate' },
       (finished) => {
+        'worklet';
         if (finished) runOnJS(onDismiss)();
       }
     );
@@ -495,10 +492,7 @@ function StrengthProgressionDetail({
   const firstDataIndex = metric.weeklyPoints.findIndex((point) => point.weight !== null);
 
   useEffect(() => {
-    progress.value = withTiming(1, {
-      duration: 320,
-      easing: Easing.out(Easing.cubic),
-    });
+    progress.value = withMotionTiming(1);
   }, [progress]);
 
   const backdropStyle = useAnimatedStyle(() => ({
@@ -513,10 +507,11 @@ function StrengthProgressionDetail({
   }));
 
   const close = () => {
-    progress.value = withTiming(
+    progress.value = withMotionTiming(
       0,
-      { duration: 220, easing: Easing.in(Easing.cubic) },
+      { easing: 'accelerate' },
       (finished) => {
+        'worklet';
         if (finished) runOnJS(onDismiss)();
       }
     );

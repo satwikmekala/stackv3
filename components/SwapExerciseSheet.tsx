@@ -4,6 +4,7 @@ import {
   Alert,
   Modal,
   PanResponder,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,7 +14,9 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import { Check, Pencil, Plus, Repeat2, X } from 'lucide-react-native';
+import Reanimated from 'react-native-reanimated';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import Swipeable, {
   type SwipeableMethods,
@@ -23,10 +26,17 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusPill } from '@/components/StatusPill';
 import { WorkoutDayLabel } from '@/components/WorkoutDayLabel';
 import { redesignColors, redesignFonts } from '@/constants/theme';
+import { usePressScale } from '@/hooks/usePressScale';
+import {
+  CUSTOM_SPLIT_MUSCLE_GROUPS,
+  getMuscleGroupForExercise,
+  getWorkoutTypeForMuscleGroup,
+  type CustomSplitMuscleGroup,
+} from '@/store/customSplitDraft';
+import { readExerciseCatalogSync } from '@/store/workoutDatabase';
 import {
   type Exercise,
   type ExerciseCatalogItem,
-  type WorkoutType,
   useWorkoutStore,
 } from '@/store/workoutStore';
 
@@ -64,6 +74,13 @@ type ExerciseEditor =
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : 'Something went wrong. Please try again.';
 
+const ReanimatedPressable = Reanimated.createAnimatedComponent(Pressable);
+const ReanimatedTouchableOpacity = Reanimated.createAnimatedComponent(TouchableOpacity);
+
+function selectionFeedback() {
+  if (Platform.OS !== 'web') void Haptics.selectionAsync();
+}
+
 function ExerciseSwapRow({
   name,
   accent,
@@ -76,6 +93,13 @@ function ExerciseSwapRow({
   onDelete,
   isSwipeable = false,
 }: ExerciseSwapRowProps) {
+  const pressScale = usePressScale('surface');
+
+  const handlePress = () => {
+    selectionFeedback();
+    onPress();
+  };
+
   return (
     <View
       style={[
@@ -89,7 +113,7 @@ function ExerciseSwapRow({
       ]}
     >
       <View style={styles.rowContent}>
-        <TouchableOpacity
+        <ReanimatedTouchableOpacity
           accessibilityRole="button"
           accessibilityLabel={
             action === 'replace'
@@ -100,19 +124,28 @@ function ExerciseSwapRow({
           }
           accessibilityState={{ selected: isCurrent }}
           accessibilityHint={
-            onDelete
-              ? 'Swipe left to reveal Delete, or use the Delete accessibility action.'
-              : undefined
+            onEdit
+              ? 'Swipe left to reveal Rename, or use the Rename accessibility action.'
+              : onDelete
+                ? 'Swipe left to reveal Delete, or use the Delete accessibility action.'
+                : undefined
           }
           accessibilityActions={
-            onDelete ? [{ name: 'delete', label: `Delete ${name}` }] : undefined
+            onEdit
+              ? [{ name: 'rename', label: `Rename ${name}` }]
+              : onDelete
+                ? [{ name: 'delete', label: `Delete ${name}` }]
+                : undefined
           }
           onAccessibilityAction={(event) => {
+            if (event.nativeEvent.actionName === 'rename') onEdit?.();
             if (event.nativeEvent.actionName === 'delete') onDelete?.();
           }}
           activeOpacity={0.72}
-          onPress={onPress}
-          style={styles.rowMain}
+          onPress={handlePress}
+          onPressIn={pressScale.onPressIn}
+          onPressOut={pressScale.onPressOut}
+          style={[styles.rowMain, pressScale.animatedStyle]}
         >
           <View style={styles.nameGroup}>
             <Text
@@ -144,59 +177,99 @@ function ExerciseSwapRow({
               </View>
             ) : null}
           </View>
-        </TouchableOpacity>
-
-        {onEdit ? (
-          <View style={styles.editButtonSlot}>
-            <TouchableOpacity
-              accessibilityRole="button"
-              accessibilityLabel={`Rename ${name}`}
-              activeOpacity={0.7}
-              onPress={onEdit}
-              style={styles.editButton}
-            >
-              <Pencil color={redesignColors.ash} size={16} strokeWidth={2.2} />
-            </TouchableOpacity>
-          </View>
-        ) : null}
+        </ReanimatedTouchableOpacity>
       </View>
     </View>
   );
 }
 
-type SwipeableExerciseRowProps = Omit<ExerciseSwapRowProps, 'onDelete' | 'isSwipeable'> & {
-  onDelete: (close: () => void) => void;
+type SwipeableExerciseRowProps = Omit<
+  ExerciseSwapRowProps,
+  'onDelete' | 'onEdit' | 'isSwipeable'
+> & {
+  swipeAction: 'delete' | 'rename';
+  onAction: (close: () => void) => void;
+  onOpen?: (swipeable: SwipeableMethods) => void;
+  onClose?: (swipeable: SwipeableMethods) => void;
 };
 
-function SwipeableExerciseRow({ onDelete, ...rowProps }: SwipeableExerciseRowProps) {
+function SwipeableExerciseRow({
+  swipeAction,
+  onAction,
+  onOpen,
+  onClose,
+  ...rowProps
+}: SwipeableExerciseRowProps) {
   const swipeableRef = useRef<SwipeableMethods>(null);
+  const isOpenRef = useRef(false);
+  const suppressPressUntilRef = useRef(0);
   const close = useCallback(() => swipeableRef.current?.close(), []);
+  const isRename = swipeAction === 'rename';
+
+  const suppressRowPress = useCallback(() => {
+    suppressPressUntilRef.current = Date.now() + 450;
+  }, []);
+
+  const handleRowPress = useCallback(() => {
+    if (Date.now() < suppressPressUntilRef.current) return;
+    if (isOpenRef.current) {
+      close();
+      return;
+    }
+    rowProps.onPress();
+  }, [close, rowProps]);
 
   return (
     <Swipeable
       ref={swipeableRef}
-      friction={2}
-      rightThreshold={56}
+      friction={isRename ? 1 : 2}
+      rightThreshold={isRename ? 28 : 56}
+      dragOffsetFromRightEdge={isRename ? 6 : 10}
       overshootRight={false}
-      activeOffsetX={[-12, 12]}
-      failOffsetY={[-15, 15]}
+      onSwipeableOpenStartDrag={suppressRowPress}
+      onSwipeableCloseStartDrag={suppressRowPress}
+      onSwipeableWillOpen={() => {
+        isOpenRef.current = true;
+        if (swipeableRef.current) onOpen?.(swipeableRef.current);
+      }}
+      onSwipeableClose={() => {
+        isOpenRef.current = false;
+        if (swipeableRef.current) onClose?.(swipeableRef.current);
+      }}
       renderRightActions={() => (
         <TouchableOpacity
           accessibilityRole="button"
-          accessibilityLabel={`Delete ${rowProps.name}`}
-          accessibilityHint="Deletes this exercise permanently"
+          accessibilityLabel={`${isRename ? 'Rename' : 'Delete'} ${rowProps.name}`}
+          accessibilityHint={
+            isRename ? 'Opens the exercise name editor' : 'Deletes this exercise permanently'
+          }
           activeOpacity={0.78}
-          onPress={() => onDelete(close)}
-          style={styles.deleteAction}
+          onPress={() => onAction(close)}
+          style={[
+            styles.swipeAction,
+            isRename ? { backgroundColor: rowProps.accent } : styles.deleteAction,
+          ]}
         >
-          <Text allowFontScaling={false} style={styles.deleteActionLabel}>
-            Delete
+          {isRename ? (
+            <Pencil color={redesignColors.ink} size={16} strokeWidth={2.3} />
+          ) : null}
+          <Text
+            allowFontScaling={false}
+            style={[styles.swipeActionLabel, isRename && styles.renameActionLabel]}
+          >
+            {isRename ? 'Rename' : 'Delete'}
           </Text>
         </TouchableOpacity>
       )}
       containerStyle={[styles.swipeableContainer, rowProps.isLast && styles.lastRow]}
     >
-      <ExerciseSwapRow {...rowProps} isSwipeable onDelete={() => onDelete(close)} />
+      <ExerciseSwapRow
+        {...rowProps}
+        isSwipeable
+        onPress={handleRowPress}
+        onEdit={isRename ? () => onAction(close) : undefined}
+        onDelete={isRename ? undefined : () => onAction(close)}
+      />
     </Swipeable>
   );
 }
@@ -216,70 +289,110 @@ export function SwapExerciseSheet({
   const insets = useSafeAreaInsets();
   const { height: screenHeight } = useWindowDimensions();
   const translateY = useRef(new Animated.Value(0)).current;
+  const confirmPressScale = usePressScale();
   const onCloseRef = useRef(onClose);
   const scrollOffsetRef = useRef(0);
+  const openSwipeableRef = useRef<SwipeableMethods | null>(null);
   const getExercisesForWorkoutType = useWorkoutStore(
     (state) => state.getExercisesForWorkoutType
   );
   const getExerciseWorkoutType = useWorkoutStore((state) => state.getExerciseWorkoutType);
-  const getPrimaryMusclesForWorkoutType = useWorkoutStore(
-    (state) => state.getPrimaryMusclesForWorkoutType
-  );
   const addExerciseToSplit = useWorkoutStore((state) => state.addExerciseToSplit);
   const renameExercise = useWorkoutStore((state) => state.renameExercise);
   const hasExerciseHistory = useWorkoutStore((state) => state.hasExerciseHistory);
   const deleteExercise = useWorkoutStore((state) => state.deleteExercise);
 
   const [exerciseCatalog, setExerciseCatalog] = useState<ExerciseCatalogItem[]>([]);
-  const [workoutType, setWorkoutType] = useState<WorkoutType | null>(null);
-  const [primaryMuscles, setPrimaryMuscles] = useState<string[]>([]);
+  const [addCatalog, setAddCatalog] = useState<ExerciseCatalogItem[]>([]);
+  const [addMuscleGroup, setAddMuscleGroup] = useState<CustomSplitMuscleGroup | null>(null);
   const [pendingExerciseName, setPendingExerciseName] = useState<string | null>(null);
+  // Exercises added from this sheet land in Other Exercises, not the session —
+  // the user picks one to swap in when they choose to.
+  const [addedExerciseNames, setAddedExerciseNames] = useState<string[]>([]);
   const [editor, setEditor] = useState<ExerciseEditor>(null);
   const [exerciseName, setExerciseName] = useState('');
-  const [selectedMuscles, setSelectedMuscles] = useState<string[]>([]);
   const [nameFocused, setNameFocused] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
+  const closeOpenSwipeable = useCallback(() => {
+    openSwipeableRef.current?.close();
+    openSwipeableRef.current = null;
+  }, []);
+
+  const handleSwipeableOpen = useCallback((swipeable: SwipeableMethods) => {
+    if (openSwipeableRef.current !== swipeable) {
+      openSwipeableRef.current?.close();
+      openSwipeableRef.current = swipeable;
+    }
+  }, []);
+
+  const handleSwipeableClose = useCallback((swipeable: SwipeableMethods) => {
+    if (openSwipeableRef.current === swipeable) openSwipeableRef.current = null;
+  }, []);
+
   const refreshCatalog = useCallback(() => {
     const type = getExerciseWorkoutType(currentExerciseName);
-    setWorkoutType(type ?? null);
     setExerciseCatalog(type ? getExercisesForWorkoutType(type) : []);
-    setPrimaryMuscles(type ? getPrimaryMusclesForWorkoutType(type) : []);
-  }, [
-    currentExerciseName,
-    getExerciseWorkoutType,
-    getExercisesForWorkoutType,
-    getPrimaryMusclesForWorkoutType,
-  ]);
+    // The Add Exercise catalog is intentionally independent of the currently
+    // viewed exercise — it always covers every muscle group, unlike Swap's
+    // same-type-only suggestions.
+    setAddCatalog(readExerciseCatalogSync());
+  }, [currentExerciseName, getExerciseWorkoutType, getExercisesForWorkoutType]);
 
   const scheduledNames = useMemo(
     () => new Set(sessionExercises.map((exercise) => exercise.name)),
     [sessionExercises]
   );
   const catalogByName = useMemo(
-    () => new Map(exerciseCatalog.map((exercise) => [exercise.name, exercise])),
-    [exerciseCatalog]
+    () => new Map(addCatalog.map((exercise) => [exercise.name, exercise])),
+    [addCatalog]
   );
-  const otherExercises = useMemo(
-    () => exerciseCatalog.filter((exercise) => !scheduledNames.has(exercise.name)),
-    [exerciseCatalog, scheduledNames]
+  const otherExercises = useMemo(() => {
+    const listed = new Set(exerciseCatalog.map((exercise) => exercise.name));
+    const added = addedExerciseNames
+      .filter((name) => !listed.has(name))
+      .map((name) => catalogByName.get(name))
+      .filter((exercise): exercise is ExerciseCatalogItem => Boolean(exercise));
+    return [...exerciseCatalog, ...added].filter(
+      (exercise) => !scheduledNames.has(exercise.name)
+    );
+  }, [addedExerciseNames, catalogByName, exerciseCatalog, scheduledNames]);
+  const normalizedExerciseQuery = exerciseName.trim().toLowerCase();
+  const addMatches = useMemo(
+    () =>
+      addMuscleGroup
+        ? addCatalog.filter(
+            (exercise) =>
+              getMuscleGroupForExercise(exercise) === addMuscleGroup &&
+              !scheduledNames.has(exercise.name) &&
+              exercise.name.toLowerCase().includes(normalizedExerciseQuery)
+          )
+        : [],
+    [addCatalog, addMuscleGroup, normalizedExerciseQuery, scheduledNames]
   );
 
   useEffect(() => {
-    onCloseRef.current = onClose;
-  }, [onClose]);
+    onCloseRef.current = () => {
+      closeOpenSwipeable();
+      onClose();
+    };
+  }, [closeOpenSwipeable, onClose]);
 
   useEffect(() => {
-    if (!visible) return;
+    if (!visible) {
+      closeOpenSwipeable();
+      return;
+    }
 
     translateY.setValue(0);
     setPendingExerciseName(null);
     setEditor(null);
     setExerciseName('');
-    setSelectedMuscles([]);
+    setAddMuscleGroup(null);
     setFormError(null);
+    setAddedExerciseNames([]);
     refreshCatalog();
-  }, [currentExerciseName, refreshCatalog, translateY, visible]);
+  }, [closeOpenSwipeable, currentExerciseName, refreshCatalog, translateY, visible]);
 
   const finishDrag = (distance: number, velocity: number) => {
     if (distance > 80 || velocity > 0.85) {
@@ -319,24 +432,42 @@ export function SwapExerciseSheet({
   const closeEditor = () => {
     setEditor(null);
     setExerciseName('');
-    setSelectedMuscles([]);
+    setAddMuscleGroup(null);
     setFormError(null);
   };
 
   const openAddEditor = () => {
+    closeOpenSwipeable();
     setPendingExerciseName(null);
     setEditor({ kind: 'add' });
     setExerciseName('');
-    setSelectedMuscles([]);
+    setAddMuscleGroup(null);
     setFormError(null);
   };
 
   const openRenameEditor = (exercise: ExerciseCatalogItem) => {
+    closeOpenSwipeable();
     setPendingExerciseName(null);
     setEditor({ kind: 'rename', exercise });
     setExerciseName(exercise.name);
-    setSelectedMuscles([]);
+    setAddMuscleGroup(null);
     setFormError(null);
+  };
+
+  const chooseRenameExercise = (exercise: ExerciseCatalogItem, close: () => void) => {
+    close();
+    selectionFeedback();
+    openRenameEditor(exercise);
+  };
+
+  const rememberAddedExercise = (name: string) => {
+    setAddedExerciseNames((names) => (names.includes(name) ? names : [...names, name]));
+  };
+
+  const chooseAddExercise = (name: string) => {
+    selectionFeedback();
+    rememberAddedExercise(name);
+    closeEditor();
   };
 
   const submitEditor = () => {
@@ -347,20 +478,38 @@ export function SwapExerciseSheet({
       setFormError('Exercise name cannot be empty.');
       return;
     }
-    if (editor.kind === 'add' && selectedMuscles.length === 0) {
-      setFormError('Choose at least one primary muscle.');
+
+    if (editor.kind === 'rename') {
+      try {
+        renameExercise(editor.exercise.id, name);
+        refreshCatalog();
+        closeEditor();
+      } catch (error) {
+        setFormError(errorMessage(error));
+      }
+      return;
+    }
+
+    // Typing the name of an exercise that already exists just adds that
+    // exercise — it never creates a duplicate catalog row.
+    const existingMatch = addCatalog.find(
+      (exercise) => exercise.name.toLowerCase() === name.toLowerCase()
+    );
+    if (existingMatch) {
+      rememberAddedExercise(existingMatch.name);
+      closeEditor();
+      return;
+    }
+
+    if (!addMuscleGroup) {
+      setFormError('Choose a muscle group.');
       return;
     }
 
     try {
-      if (editor.kind === 'rename') {
-        renameExercise(editor.exercise.id, name);
-      } else if (workoutType) {
-        addExerciseToSplit(workoutType, name, selectedMuscles.join(', '));
-      } else {
-        setFormError('Could not determine the current exercise type.');
-        return;
-      }
+      const newExerciseType = getWorkoutTypeForMuscleGroup(addMuscleGroup);
+      addExerciseToSplit(newExerciseType, name, addMuscleGroup);
+      rememberAddedExercise(name);
       refreshCatalog();
       closeEditor();
     } catch (error) {
@@ -369,6 +518,7 @@ export function SwapExerciseSheet({
   };
 
   const chooseExercise = (name: string) => {
+    closeOpenSwipeable();
     if (name === currentExerciseName) {
       onClose();
       return;
@@ -383,7 +533,10 @@ export function SwapExerciseSheet({
   };
 
   const confirmSwap = () => {
-    if (pendingExerciseName) onReplace(pendingExerciseName);
+    if (pendingExerciseName) {
+      selectionFeedback();
+      onReplace(pendingExerciseName);
+    }
   };
 
   const requestDeleteExercise = (exercise: ExerciseCatalogItem, close: () => void) => {
@@ -428,14 +581,14 @@ export function SwapExerciseSheet({
       visible={visible}
       animationType="slide"
       statusBarTranslucent
-      onRequestClose={onClose}
+      onRequestClose={() => onCloseRef.current()}
     >
       <GestureHandlerRootView style={styles.modal}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Close exercises"
           style={styles.backdrop}
-          onPress={onClose}
+          onPress={() => onCloseRef.current()}
         />
 
         <Animated.View
@@ -459,7 +612,7 @@ export function SwapExerciseSheet({
                 accessibilityRole="button"
                 accessibilityLabel="Close exercises"
                 hitSlop={10}
-                onPress={onClose}
+                onPress={() => onCloseRef.current()}
                 style={({ pressed }) => [
                   styles.closeButton,
                   pressed && styles.closeButtonPressed,
@@ -497,7 +650,7 @@ export function SwapExerciseSheet({
             <View style={styles.editor}>
               <View style={styles.editorTitleRow}>
                 <Text allowFontScaling={false} style={styles.editorTitle}>
-                  {editor.kind === 'rename' ? 'Rename exercise' : 'Add custom exercise'}
+                  {editor.kind === 'rename' ? 'Rename exercise' : 'Add exercise'}
                 </Text>
                 <Pressable
                   accessibilityRole="button"
@@ -524,7 +677,7 @@ export function SwapExerciseSheet({
                 }}
                 onFocus={() => setNameFocused(true)}
                 onBlur={() => setNameFocused(false)}
-                onSubmitEditing={editor.kind === 'rename' ? submitEditor : undefined}
+                onSubmitEditing={submitEditor}
                 placeholder="Exercise name"
                 placeholderTextColor={redesignColors.ashDim}
                 style={[
@@ -537,28 +690,24 @@ export function SwapExerciseSheet({
                 <>
                   <View style={styles.muscleLabelRow}>
                     <Text allowFontScaling={false} style={[styles.fieldLabel, styles.muscleLabel]}>
-                      PRIMARY MUSCLES
+                      MUSCLE GROUP
                     </Text>
                     <Text allowFontScaling={false} style={styles.muscleHint}>
-                      Select all that apply
+                      Choose one
                     </Text>
                   </View>
                   <View style={styles.muscleTags}>
-                    {primaryMuscles.map((muscle) => {
-                      const isSelected = selectedMuscles.includes(muscle);
+                    {CUSTOM_SPLIT_MUSCLE_GROUPS.map((group) => {
+                      const isSelected = addMuscleGroup === group;
                       return (
                         <TouchableOpacity
-                          key={muscle}
-                          accessibilityRole="checkbox"
-                          accessibilityLabel={muscle}
+                          key={group}
+                          accessibilityRole="radio"
+                          accessibilityLabel={group}
                           accessibilityState={{ checked: isSelected }}
                           activeOpacity={0.72}
                           onPress={() => {
-                            setSelectedMuscles((current) =>
-                              current.includes(muscle)
-                                ? current.filter((item) => item !== muscle)
-                                : [...current, muscle]
-                            );
+                            setAddMuscleGroup(group);
                             setFormError(null);
                           }}
                           style={[
@@ -581,12 +730,37 @@ export function SwapExerciseSheet({
                               isSelected && styles.muscleTagLabelSelected,
                             ]}
                           >
-                            {muscle}
+                            {group}
                           </Text>
                         </TouchableOpacity>
                       );
                     })}
                   </View>
+
+                  {addMuscleGroup ? (
+                    <View style={styles.addMatches}>
+                      <Text allowFontScaling={false} style={styles.muscleHint}>
+                        {addMatches.length
+                          ? `Existing ${addMuscleGroup.toLowerCase()} exercises`
+                          : `No existing ${addMuscleGroup.toLowerCase()} exercises — create one below.`}
+                      </Text>
+                      {addMatches.map((exercise) => (
+                        <TouchableOpacity
+                          key={exercise.id}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Add ${exercise.name} to today's workout`}
+                          activeOpacity={0.72}
+                          onPress={() => chooseAddExercise(exercise.name)}
+                          style={styles.addMatchRow}
+                        >
+                          <Text allowFontScaling={false} style={styles.addMatchName}>
+                            {exercise.name}
+                          </Text>
+                          <Plus color={accent} size={15} strokeWidth={2.5} />
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  ) : null}
                 </>
               ) : null}
 
@@ -613,7 +787,7 @@ export function SwapExerciseSheet({
                 <TouchableOpacity
                   accessibilityRole="button"
                   accessibilityLabel={
-                    editor.kind === 'rename' ? 'Save exercise name' : 'Add custom exercise'
+                    editor.kind === 'rename' ? 'Save exercise name' : 'Create new exercise'
                   }
                   activeOpacity={0.78}
                   onPress={submitEditor}
@@ -627,7 +801,7 @@ export function SwapExerciseSheet({
                     <Plus color={redesignColors.ink} size={15} strokeWidth={2.8} />
                   ) : null}
                   <Text allowFontScaling={false} style={styles.continueLabel}>
-                    {editor.kind === 'rename' ? 'Save' : 'Add exercise'}
+                    {editor.kind === 'rename' ? 'Save' : 'Create exercise'}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -644,21 +818,31 @@ export function SwapExerciseSheet({
                 <Pressable
                   accessibilityRole="button"
                   onPress={() => setPendingExerciseName(null)}
-                  style={styles.cancelButton}
+                  style={({ pressed }) => [
+                    styles.cancelButton,
+                    pressed && styles.actionButtonPressed,
+                  ]}
                 >
                   <Text allowFontScaling={false} style={styles.cancelLabel}>
                     Cancel
                   </Text>
                 </Pressable>
-                <Pressable
+                <ReanimatedPressable
                   accessibilityRole="button"
+                  accessibilityLabel="Confirm exercise replacement"
                   onPress={confirmSwap}
-                  style={[styles.continueButton, { backgroundColor: accent }]}
+                  onPressIn={confirmPressScale.onPressIn}
+                  onPressOut={confirmPressScale.onPressOut}
+                  style={[
+                    styles.continueButton,
+                    { backgroundColor: accent },
+                    confirmPressScale.animatedStyle,
+                  ]}
                 >
                   <Text allowFontScaling={false} style={styles.continueLabel}>
                     Continue
                   </Text>
-                </Pressable>
+                </ReanimatedPressable>
               </View>
             </View>
           ) : null}
@@ -686,24 +870,34 @@ export function SwapExerciseSheet({
               const isCurrent = index === currentExerciseIndex;
               const isCompleted = exercise.sets.every((set) => set.completed);
               const catalogExercise = catalogByName.get(exercise.name);
-              return (
-                <ExerciseSwapRow
+              const canRename =
+                catalogExercise !== undefined &&
+                !isCompleted &&
+                !hasExerciseHistory(catalogExercise.id);
+              const rowProps = {
+                name: exercise.name,
+                accent,
+                isCurrent,
+                isCompleted,
+                isLast: index === sessionExercises.length - 1,
+                onPress: () => {
+                  closeOpenSwipeable();
+                  if (isCurrent) onClose();
+                  else onNavigate(index);
+                },
+              };
+
+              return canRename && catalogExercise ? (
+                <SwipeableExerciseRow
+                  {...rowProps}
                   key={`${exercise.name}-${index}`}
-                  name={exercise.name}
-                  accent={accent}
-                  isCurrent={isCurrent}
-                  isCompleted={isCompleted}
-                  isLast={index === sessionExercises.length - 1}
-                  onPress={() => {
-                    if (isCurrent) onClose();
-                    else onNavigate(index);
-                  }}
-                  onEdit={
-                    catalogExercise && !isCompleted
-                      ? () => openRenameEditor(catalogExercise)
-                      : undefined
-                  }
+                  swipeAction="rename"
+                  onAction={(close) => chooseRenameExercise(catalogExercise, close)}
+                  onOpen={handleSwipeableOpen}
+                  onClose={handleSwipeableClose}
                 />
+              ) : (
+                <ExerciseSwapRow {...rowProps} key={`${exercise.name}-${index}`} />
               );
             })}
 
@@ -726,7 +920,10 @@ export function SwapExerciseSheet({
                     action="replace"
                     isLast={index === otherExercises.length - 1}
                     onPress={() => chooseExercise(exercise.name)}
-                    onDelete={(close) => requestDeleteExercise(exercise, close)}
+                    swipeAction="delete"
+                    onAction={(close) => requestDeleteExercise(exercise, close)}
+                    onOpen={handleSwipeableOpen}
+                    onClose={handleSwipeableClose}
                   />
                 ))}
               </>
@@ -911,6 +1108,28 @@ const styles = StyleSheet.create({
   muscleTagLabelSelected: {
     color: redesignColors.bone,
   },
+  addMatches: {
+    marginTop: 16,
+  },
+  addMatchRow: {
+    minHeight: 46,
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    borderRadius: 13,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    borderColor: redesignColors.border,
+    backgroundColor: redesignColors.surface,
+  },
+  addMatchName: {
+    flexShrink: 1,
+    fontFamily: redesignFonts.uiSemiBold,
+    fontSize: 14,
+    color: redesignColors.bone,
+  },
   formError: {
     marginTop: 10,
     fontFamily: redesignFonts.ui,
@@ -1022,18 +1241,26 @@ const styles = StyleSheet.create({
     borderWidth: 0,
     borderRadius: 0,
   },
+  swipeAction: {
+    width: 106,
+    minHeight: 60,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingRight: 18,
+    flexDirection: 'row',
+    gap: 7,
+  },
   deleteAction: {
     width: 94,
-    minHeight: 60,
-    alignItems: 'flex-end',
-    justifyContent: 'center',
-    paddingRight: 18,
     backgroundColor: '#E5484D',
   },
-  deleteActionLabel: {
+  swipeActionLabel: {
     fontFamily: redesignFonts.uiBold,
     fontSize: 15,
     color: redesignColors.bone,
+  },
+  renameActionLabel: {
+    color: redesignColors.ink,
   },
   rowContent: {
     minHeight: 58,
@@ -1079,24 +1306,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-  },
-  editButtonSlot: {
-    width: 60,
-    alignSelf: 'stretch',
-    flexShrink: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  editButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 15,
-    borderCurve: 'continuous',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: redesignColors.border,
-    backgroundColor: redesignColors.raised,
   },
   completedIcon: {
     width: 25,

@@ -81,6 +81,7 @@ export default function WhatsYourName() {
           />
         </View>
 
+        <View style={{ flex: 1 }} />
         <View pointerEvents="box-none" style={styles.footer}>
           <OnboardingNextButton disabled={!trimmedName} onPress={handleContinue} size={64} />
         </View>
@@ -141,8 +142,7 @@ const styles = StyleSheet.create({
     lineHeight: 24,
   },
   footer: {
-    position: 'absolute',
-    right: 36,
-    bottom: 36,
+    alignItems: 'flex-end',
+    marginBottom: 36,
   },
 });

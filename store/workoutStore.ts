@@ -3,20 +3,44 @@ import { create } from 'zustand';
 
 import type { Archetype } from '@/constants/archetypes';
 
+import type {
+  CustomSplit,
+  CustomSplitSummary,
+} from '@/store/customSplits';
+import type {
+  CustomSplitDraftWorkoutInput,
+  CustomSplitWorkoutLabel,
+  SaveCustomSplitDraftOptions,
+} from '@/store/workoutDatabase';
+
 import {
   EXERCISE_SEEDS,
   SPLIT_TEMPLATE_SEEDS,
   type ExerciseCatalogItem,
+  addExerciseToWorkoutSync,
   addExerciseToSplitRecords,
+  addWorkoutToSplitSync,
   appendCurrentBonusSet,
+  appendCurrentSessionExercise,
   completeCurrentSession,
+  createCustomExerciseSync,
+  createCustomSplitSync,
+  deleteCustomSplitSync,
+  deleteWorkoutSync,
   deleteExercise as deleteExerciseRecord,
   discardCurrentSession,
+  duplicateWorkoutSync,
+  getCustomSplitDetailAsync,
+  getCustomSplitsAsync,
+  getNextCustomSplitNameAsync,
   hasExerciseHistory as hasExerciseHistoryRecord,
   logArchetypeCompletedRetroactively as persistRetroactiveArchetypeWorkout,
   moveExerciseInSplitRecords,
+  moveWorkoutSync,
   readCompletedSessionsSync,
+  readCustomSplitWorkoutLabelSync,
   readExerciseWorkoutTypeSync,
+  readLastCompletedCustomWorkoutIdSync,
   readInitialWorkoutSnapshot,
   readLastExerciseSync,
   readLastWorkoutOfTypeSync,
@@ -26,18 +50,34 @@ import {
   readProfileSync,
   readSplitTemplatesSync,
   removeExerciseFromSplitRecords,
+  removeExerciseFromWorkoutSync,
+  renameCustomSplitSync,
+  saveCustomSplitDraftSync,
+  updateCustomSplitDraftSync,
+  renameWorkoutSync,
   renameExercise as renameExerciseRecord,
   replaceCurrentSession,
   replaceCurrentSessionExercise,
   resetWorkoutDatabase,
   startWorkoutFromArchetype as persistWorkoutFromArchetype,
+  startWorkoutFromCustomWorkout as persistWorkoutFromCustomWorkout,
+  setActiveSplitSync,
   updateCurrentSet,
   writeProfile,
 } from '@/store/workoutDatabase';
-import { createSessionExercise } from '@/store/workoutProgression';
+import {
+  createSessionExercise,
+  makeDefaultExercise,
+} from '@/store/workoutProgression';
 import { lbsToKg, type WeightUnit } from '@/store/weightUnits';
 
 export type { ExerciseCatalogItem };
+export type {
+  CustomSplit,
+  CustomSplitExercise,
+  CustomSplitSummary,
+  CustomSplitWorkout,
+} from '@/store/customSplits';
 
 export type WorkoutType = 'chest' | 'back' | 'shoulders' | 'arms' | 'legs' | 'core';
 export type IntensityLevel = 'easy' | 'medium' | 'hard';
@@ -71,6 +111,9 @@ export interface WorkoutSession {
   intensity?: IntensityLevel;
   completed: boolean;
   retroactive: boolean;
+  /** Set only for sessions started from a saved Custom Split workout. */
+  customSplitId?: number | null;
+  customSplitWorkoutId?: number | null;
 }
 
 export interface UserProfile {
@@ -82,6 +125,7 @@ export interface UserProfile {
   weightIncrement: number;
   weightUnit: WeightUnit;
   weightIncrementLbs: number;
+  activeSplitId: number | null;
 }
 
 // Kept only at the setProfile call boundary so the existing onboarding caller
@@ -104,14 +148,50 @@ interface WorkoutStore {
   sessions: WorkoutSession[];
   currentSession: WorkoutSession | null;
   splitTemplates: Record<WorkoutType, Exercise[]>;
+  customSplits: CustomSplitSummary[];
+  currentCustomSplit: CustomSplit | null;
   isHydrated: boolean;
   hydrationError: string | null;
 
   setProfile: (profile: UserProfileInput) => void;
   updateProfile: (updates: Partial<UserProfile>) => void;
 
+  refreshCustomSplits: () => Promise<void>;
+  loadCustomSplit: (splitId: number) => Promise<CustomSplit | null | undefined>;
+  createSplit: (name?: string) => Promise<number | undefined>;
+  renameSplit: (splitId: number, name: string) => Promise<void>;
+  deleteSplit: (splitId: number) => Promise<void>;
+  addWorkout: (splitId: number, name: string) => Promise<number | undefined>;
+  renameWorkout: (workoutId: number, name: string) => Promise<void>;
+  deleteWorkout: (workoutId: number) => Promise<void>;
+  moveWorkout: (workoutId: number, toIndex: number) => Promise<void>;
+  duplicateWorkout: (workoutId: number) => Promise<number | undefined>;
+  addExerciseToWorkout: (
+    workoutId: number,
+    exerciseId: number
+  ) => Promise<number | undefined>;
+  removeExerciseFromWorkout: (workoutExerciseId: number) => Promise<void>;
+  createCustomExercise: (
+    name: string,
+    workoutType: WorkoutType,
+    primaryMuscle: string,
+    equipment: string
+  ) => number | undefined;
+  setActiveSplit: (splitId: number | null) => void;
+  saveCustomSplitDraft: (
+    name: string,
+    workouts: CustomSplitDraftWorkoutInput[],
+    options?: SaveCustomSplitDraftOptions
+  ) => Promise<number | undefined>;
+  updateCustomSplitDraft: (
+    splitId: number,
+    name: string,
+    workouts: CustomSplitDraftWorkoutInput[]
+  ) => Promise<boolean>;
+
   startWorkout: (workoutTypes: WorkoutType[]) => void;
   startWorkoutFromArchetype: (archetypes: Archetype[]) => void;
+  startWorkoutFromCustomWorkout: (splitId: number, workoutId: number) => void;
   logArchetypeCompletedRetroactively: (archetypes: Archetype[], date: string) => void;
   updateExerciseSet: (exerciseIndex: number, setIndex: number, reps: number, weight: number) => void;
   appendBonusSet: (
@@ -123,6 +203,7 @@ interface WorkoutStore {
   toggleSetCompleted: (exerciseIndex: number, setIndex: number) => void;
   toggleSetSkipped: (exerciseIndex: number, setIndex: number) => void;
   swapCurrentSessionExercise: (exerciseIndex: number, name: string) => void;
+  appendExerciseToSession: (name: string) => void;
   completeWorkout: (intensity: IntensityLevel) => WorkoutSession | undefined;
   discardWorkout: () => void;
 
@@ -136,6 +217,9 @@ interface WorkoutStore {
   removeExerciseFromSplit: (type: WorkoutType, exerciseIndex: number) => void;
   moveExerciseInSplit: (type: WorkoutType, fromIndex: number, toIndex: number) => void;
 
+  getLastCompletedCustomWorkoutId: (splitId: number) => number | null;
+  getCustomWorkoutLabel: (workoutId: number) => CustomSplitWorkoutLabel | null;
+
   getNextWorkoutType: () => WorkoutType;
   getLastWorkoutOfType: (type: WorkoutType) => WorkoutSession | undefined;
   getWeeklyProgress: () => { completed: number; goal: number };
@@ -148,15 +232,6 @@ interface WorkoutStore {
 }
 
 const WORKOUT_ROTATION: WorkoutType[] = ['chest', 'back', 'shoulders', 'arms', 'legs', 'core'];
-
-const makeDefaultExercise = (name: string): Exercise => ({
-  name,
-  sets: [
-    { reps: 8, weight: 0 },
-    { reps: 8, weight: 0 },
-    { reps: 8, weight: 0 },
-  ],
-});
 
 const cloneExercises = (exercises: Exercise[]): Exercise[] =>
   JSON.parse(JSON.stringify(exercises));
@@ -246,6 +321,7 @@ const normalizeProfile = (profile: UserProfileInput): UserProfile => ({
   weightIncrement: profile.weightIncrement,
   weightUnit: profile.weightUnit,
   weightIncrementLbs: profile.weightIncrementLbs,
+  activeSplitId: profile.activeSplitId ?? null,
 });
 
 const runGuardedAction = <T>(actionName: string, action: () => T): T | undefined => {
@@ -258,11 +334,44 @@ const runGuardedAction = <T>(actionName: string, action: () => T): T | undefined
   }
 };
 
+const runGuardedAsyncAction = async <T>(
+  actionName: string,
+  action: () => Promise<T>
+): Promise<T | undefined> => {
+  try {
+    return await action();
+  } catch (error) {
+    console.error(`[workoutStore] ${actionName} failed`, error);
+    Alert.alert("Couldn't save", 'Something went wrong. Please try again.');
+    return undefined;
+  }
+};
+
+const readCustomSplitState = async (
+  currentSplitId: number | null
+): Promise<{
+  customSplits: CustomSplitSummary[];
+  currentCustomSplit: CustomSplit | null;
+}> => {
+  const [customSplits, currentCustomSplit] = await Promise.all([
+    getCustomSplitsAsync(),
+    currentSplitId === null
+      ? Promise.resolve(null)
+      : getCustomSplitDetailAsync(currentSplitId),
+  ]);
+  return { customSplits, currentCustomSplit };
+};
+
+const customSplitStateEqual = (left: unknown, right: unknown): boolean =>
+  left === right || JSON.stringify(left) === JSON.stringify(right);
+
 export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
   profile: null,
   sessions: [],
   currentSession: null,
   splitTemplates: seedSplitTemplates(),
+  customSplits: [],
+  currentCustomSplit: null,
   isHydrated: false,
   hydrationError: null,
 
@@ -279,6 +388,162 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
     writeProfile(nextProfile);
     set({ profile: nextProfile });
   }),
+
+  refreshCustomSplits: async () => {
+    await runGuardedAsyncAction('refreshCustomSplits', async () => {
+      const requestedActiveSplitId = get().profile?.activeSplitId ?? null;
+      const refreshed = await readCustomSplitState(requestedActiveSplitId);
+      const state = get();
+      const customSplits = customSplitStateEqual(state.customSplits, refreshed.customSplits)
+        ? state.customSplits
+        : refreshed.customSplits;
+      // A rapid activation can finish while the focus read is in flight. Never
+      // let that stale read replace the newly requested program's detail.
+      const refreshedDetail = state.profile?.activeSplitId === requestedActiveSplitId
+        ? refreshed.currentCustomSplit
+        : state.currentCustomSplit;
+      const currentCustomSplit = customSplitStateEqual(
+        state.currentCustomSplit,
+        refreshedDetail
+      )
+        ? state.currentCustomSplit
+        : refreshedDetail;
+
+      if (
+        customSplits !== state.customSplits ||
+        currentCustomSplit !== state.currentCustomSplit
+      ) {
+        set({ customSplits, currentCustomSplit });
+      }
+    });
+  },
+
+  loadCustomSplit: (splitId) =>
+    runGuardedAsyncAction('loadCustomSplit', async () => {
+      const currentCustomSplit = await getCustomSplitDetailAsync(splitId);
+      const state = get();
+      if (!customSplitStateEqual(state.currentCustomSplit, currentCustomSplit)) {
+        set({ currentCustomSplit });
+      }
+      return currentCustomSplit;
+    }),
+
+  createSplit: (name) =>
+    runGuardedAsyncAction('createSplit', async () => {
+      const splitName = name ?? (await getNextCustomSplitNameAsync());
+      const splitId = createCustomSplitSync(splitName);
+      set(await readCustomSplitState(splitId));
+      return splitId;
+    }),
+
+  renameSplit: async (splitId, name) => {
+    await runGuardedAsyncAction('renameSplit', async () => {
+      renameCustomSplitSync(splitId, name);
+      const currentSplitId = get().currentCustomSplit?.id ?? null;
+      set(await readCustomSplitState(currentSplitId));
+    });
+  },
+
+  deleteSplit: async (splitId) => {
+    await runGuardedAsyncAction('deleteSplit', async () => {
+      deleteCustomSplitSync(splitId);
+      const currentSplitId = get().currentCustomSplit?.id === splitId
+        ? null
+        : get().currentCustomSplit?.id ?? null;
+      const customSplitState = await readCustomSplitState(currentSplitId);
+      set({ ...customSplitState, profile: readProfileSync() });
+    });
+  },
+
+  addWorkout: (splitId, name) =>
+    runGuardedAsyncAction('addWorkout', async () => {
+      const workoutId = addWorkoutToSplitSync(splitId, name);
+      set(await readCustomSplitState(splitId));
+      return workoutId;
+    }),
+
+  renameWorkout: async (workoutId, name) => {
+    await runGuardedAsyncAction('renameWorkout', async () => {
+      renameWorkoutSync(workoutId, name);
+      const currentSplitId = get().currentCustomSplit?.id ?? null;
+      set(await readCustomSplitState(currentSplitId));
+    });
+  },
+
+  deleteWorkout: async (workoutId) => {
+    await runGuardedAsyncAction('deleteWorkout', async () => {
+      deleteWorkoutSync(workoutId);
+      const currentSplitId = get().currentCustomSplit?.id ?? null;
+      set(await readCustomSplitState(currentSplitId));
+    });
+  },
+
+  moveWorkout: async (workoutId, toIndex) => {
+    await runGuardedAsyncAction('moveWorkout', async () => {
+      moveWorkoutSync(workoutId, toIndex);
+      const currentSplitId = get().currentCustomSplit?.id ?? null;
+      set(await readCustomSplitState(currentSplitId));
+    });
+  },
+
+  duplicateWorkout: (workoutId) =>
+    runGuardedAsyncAction('duplicateWorkout', async () => {
+      const duplicateId = duplicateWorkoutSync(workoutId);
+      const currentSplitId = get().currentCustomSplit?.id ?? null;
+      set(await readCustomSplitState(currentSplitId));
+      return duplicateId;
+    }),
+
+  addExerciseToWorkout: (workoutId, exerciseId) =>
+    runGuardedAsyncAction('addExerciseToWorkout', async () => {
+      const workoutExerciseId = addExerciseToWorkoutSync(workoutId, exerciseId);
+      const currentSplitId = get().currentCustomSplit?.id ?? null;
+      set(await readCustomSplitState(currentSplitId));
+      return workoutExerciseId;
+    }),
+
+  removeExerciseFromWorkout: async (workoutExerciseId) => {
+    await runGuardedAsyncAction('removeExerciseFromWorkout', async () => {
+      removeExerciseFromWorkoutSync(workoutExerciseId);
+      const currentSplitId = get().currentCustomSplit?.id ?? null;
+      set(await readCustomSplitState(currentSplitId));
+    });
+  },
+
+  createCustomExercise: (name, workoutType, primaryMuscle, equipment) =>
+    runGuardedAction('createCustomExercise', () =>
+      createCustomExerciseSync(name, workoutType, primaryMuscle, equipment)
+    ),
+
+  setActiveSplit: (splitId) => runGuardedAction('setActiveSplit', () => {
+    setActiveSplitSync(splitId);
+    set({ profile: readProfileSync() });
+  }),
+
+  saveCustomSplitDraft: (name, workouts, options) =>
+    runGuardedAsyncAction('saveCustomSplitDraft', async () => {
+      const splitId = saveCustomSplitDraftSync(name, workouts, options);
+      const customSplitState = await readCustomSplitState(splitId);
+      set({ ...customSplitState, profile: readProfileSync() });
+      return splitId;
+    }),
+
+  updateCustomSplitDraft: async (splitId, name, workouts) => {
+    const result = await runGuardedAsyncAction(
+      'updateCustomSplitDraft',
+      async () => {
+        updateCustomSplitDraftSync(splitId, name, workouts);
+        // Activation is untouched by the update, so the profile only needs
+        // re-reading to stay in step with any concurrent write.
+        const customSplitState = await readCustomSplitState(
+          get().currentCustomSplit?.id ?? null
+        );
+        set({ ...customSplitState, profile: readProfileSync() });
+        return true;
+      }
+    );
+    return result === true;
+  },
 
   startWorkout: (workoutTypes) => {
     const type = workoutTypes[0];
@@ -316,6 +581,12 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
     const newSession = persistWorkoutFromArchetype(archetypes);
     set({ currentSession: newSession });
   }),
+
+  startWorkoutFromCustomWorkout: (splitId, workoutId) =>
+    runGuardedAction('startWorkoutFromCustomWorkout', () => {
+      const newSession = persistWorkoutFromCustomWorkout(splitId, workoutId);
+      set({ currentSession: newSession });
+    }),
 
   logArchetypeCompletedRetroactively: (archetypes, date) =>
     runGuardedAction('logArchetypeCompletedRetroactively', () => {
@@ -430,6 +701,35 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
     const exercises = [...session.exercises];
     exercises[exerciseIndex] = replacement;
     set({ currentSession: { ...session, exercises } });
+  }),
+
+  appendExerciseToSession: (name) => runGuardedAction('appendExerciseToSession', () => {
+    const session = get().currentSession;
+    const type = readExerciseWorkoutTypeSync(name);
+    if (!session || !type) return;
+    if (session.exercises.some((exercise) => exercise.name === name)) return;
+
+    const lastExercise = readLastExerciseSync(type, name);
+    const templateExercise =
+      readSplitTemplatesSync()[type].find((exercise) => exercise.name === name) ??
+      lastExercise ??
+      makeDefaultExercise(name);
+    const newExercise = createSessionExercise(
+      { ...templateExercise, name },
+      lastExercise,
+      readProfileSync()?.experienceLevel
+    );
+
+    appendCurrentSessionExercise(newExercise);
+    set({
+      currentSession: {
+        ...session,
+        workoutTypes: session.workoutTypes.includes(type)
+          ? session.workoutTypes
+          : [...session.workoutTypes, type],
+        exercises: [...session.exercises, newExercise],
+      },
+    });
   }),
 
   completeWorkout: (intensity) => runGuardedAction('completeWorkout', () => {
@@ -567,6 +867,14 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
     set({ splitTemplates, currentSession });
   },
 
+  // Rotation state for Custom Splits lives in completed session history, so
+  // both getters read straight through to SQLite rather than mirroring a
+  // cursor in memory.
+  getLastCompletedCustomWorkoutId: (splitId) =>
+    readLastCompletedCustomWorkoutIdSync(splitId),
+
+  getCustomWorkoutLabel: (workoutId) => readCustomSplitWorkoutLabelSync(workoutId),
+
   getNextWorkoutType: () => {
     return readMostOverdueTypeSync();
   },
@@ -665,7 +973,12 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 
   resetAllData: () => runGuardedAction('resetAllData', () => {
     const snapshot = resetWorkoutDatabase();
-    set({ ...snapshot, isHydrated: true, hydrationError: null });
+    set({
+      ...snapshot,
+      currentCustomSplit: null,
+      isHydrated: true,
+      hydrationError: null,
+    });
   }),
 }));
 
@@ -677,13 +990,9 @@ export const initializeWorkoutStore = (): Promise<void> => {
 
   initializationPromise = readInitialWorkoutSnapshot()
     .then((snapshot) => {
-      // [BOOT] 7 — right before setState({ isHydrated: true })
-      console.log('[BOOT] initializeWorkoutStore: snapshot received, about to setState isHydrated=true');
       useWorkoutStore.setState({ ...snapshot, isHydrated: true, hydrationError: null });
     })
     .catch((error) => {
-      // [BOOT] 7 — inside .catch block
-      console.log('[BOOT] initializeWorkoutStore: .catch fired, error:', error);
       initializationPromise = null;
       useWorkoutStore.setState({
         hydrationError: error instanceof Error ? error.message : String(error),
@@ -698,7 +1007,7 @@ export const initializeWorkoutStore = (): Promise<void> => {
 // runtime pool contract. This expression is tree-shakeable and has no I/O.
 if (__DEV__) {
   const uniqueSeedNames = new Set(EXERCISE_SEEDS.map((exercise) => exercise.name));
-  if (uniqueSeedNames.size !== 60 || SPLIT_TEMPLATE_SEEDS.length !== 24) {
-    throw new Error('Workout seed data must contain 60 exercises and 24 templates');
+  if (uniqueSeedNames.size !== 158 || SPLIT_TEMPLATE_SEEDS.length !== 24) {
+    throw new Error('Workout seed data must contain 158 exercises and 24 templates');
   }
 }

@@ -21,8 +21,6 @@ import '@/global.css';
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
-  // [BOOT] RootLayout render — component is mounting/re-rendering
-  console.log('[BOOT] _layout.tsx: RootLayout render');
   useFrameworkReady();
   const hasHiddenSplashRef = useRef(false);
   const lastRedirectRef = useRef<string | null>(null);
@@ -33,9 +31,14 @@ export default function RootLayout() {
   const isHydrated = useWorkoutStore((state) => state.isHydrated);
   const hydrationError = useWorkoutStore((state) => state.hydrationError);
   const inOnboarding = segments[0] === '(onboarding)';
+  const inCustomSplitFlow = segments[0] === 'custom-split';
   const onSplash = pathname === '/' && segments[0] !== '(tabs)';
   const needsOnboardingRedirect =
-    isHydrated && !profile?.onboardingCompleted && !inOnboarding && !onSplash;
+    isHydrated &&
+    !profile?.onboardingCompleted &&
+    !inOnboarding &&
+    !inCustomSplitFlow &&
+    !onSplash;
   const needsAppRedirect =
     isHydrated &&
     Boolean(profile?.onboardingCompleted) &&
@@ -114,6 +117,10 @@ export default function RootLayout() {
         <Stack.Screen name="(onboarding)" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen
+          name="custom-split"
+          options={{ headerShown: false, animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
           name="workout"
           options={{
             headerShown: false,
@@ -133,6 +140,10 @@ export default function RootLayout() {
         />
         <Stack.Screen
           name="records"
+          options={{ headerShown: false, animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="your-splits"
           options={{ headerShown: false, animation: 'slide_from_right' }}
         />
         <Stack.Screen name="settings" options={{ headerShown: false, presentation: 'modal' }} />

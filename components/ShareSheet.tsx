@@ -14,11 +14,9 @@ import { File } from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
 import { Check, Copy } from 'lucide-react-native';
 import Animated, {
-  Easing,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
-  withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { captureRef } from 'react-native-view-shot';
@@ -29,6 +27,7 @@ import {
   StatStripCard,
   type StatStripCardProps,
 } from '@/components/StatStripCard';
+import { withMotionTiming } from '@/constants/motion';
 import { redesignColors, redesignFonts } from '@/constants/theme';
 
 const CAPTURE_OPTIONS = {
@@ -75,10 +74,11 @@ export function ShareSheet({
       setIsMounted(true);
       setFeedback('idle');
       setCaptureReady(false);
-      progress.value = withTiming(
+      progress.value = withMotionTiming(
         1,
-        { duration: 280, easing: Easing.out(Easing.cubic) },
+        undefined,
         (finished) => {
+          'worklet';
           if (finished) runOnJS(setCaptureReady)(true);
         }
       );
@@ -87,10 +87,11 @@ export function ShareSheet({
 
     if (isMounted) {
       setCaptureReady(false);
-      progress.value = withTiming(
+      progress.value = withMotionTiming(
         0,
-        { duration: 220, easing: Easing.in(Easing.cubic) },
+        { easing: 'accelerate' },
         (finished) => {
+          'worklet';
           if (finished) runOnJS(setIsMounted)(false);
         }
       );

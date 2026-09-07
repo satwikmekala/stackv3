@@ -1,9 +1,14 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import { ChevronRight } from 'lucide-react-native';
+import Animated from 'react-native-reanimated';
 import type { ScheduleDay } from '@/store/workoutStore';
 import { getSessionWorkoutDisplay } from '@/constants/archetypes';
 import { workoutMeta } from '@/constants/workouts';
 import { redesignColors, redesignFonts } from '@/constants/theme';
+import { usePressScale } from '@/hooks/usePressScale';
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 type ScheduleRowProps = {
   day: ScheduleDay;
@@ -12,10 +17,20 @@ type ScheduleRowProps = {
 };
 
 export function ScheduleRow({ day, dayLabel, onPress }: ScheduleRowProps) {
+  const pressScale = usePressScale('surface');
   const projectedType = day.projectedWorkoutTypes?.[0];
   const completedDisplay = day.completedWorkout
     ? getSessionWorkoutDisplay(day.completedWorkout)
     : null;
+  const isActionable = Boolean(onPress) && !completedDisplay;
+
+  const handlePress = () => {
+    if (!onPress || !isActionable) return;
+    if (Platform.OS !== 'web') {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    onPress();
+  };
 
   if (!completedDisplay && day.status === 'future') {
     return (
@@ -34,16 +49,22 @@ export function ScheduleRow({ day, dayLabel, onPress }: ScheduleRowProps) {
 
   if (!completedDisplay && day.status === 'past') {
     return (
-      <Pressable
-        accessibilityRole={onPress ? 'button' : undefined}
-        accessibilityLabel={`${dayLabel}, rest day, tap to log a workout`}
-        onPress={onPress}
-        disabled={!onPress}
-        style={styles.restRow}
+      <AnimatedPressable
+        accessibilityRole={isActionable ? 'button' : undefined}
+        accessibilityLabel={
+          isActionable
+            ? `${dayLabel}, rest day, tap to log a workout`
+            : `${dayLabel}, rest day`
+        }
+        onPress={handlePress}
+        onPressIn={isActionable ? pressScale.onPressIn : undefined}
+        onPressOut={isActionable ? pressScale.onPressOut : undefined}
+        disabled={!isActionable}
+        style={[styles.restRow, pressScale.animatedStyle]}
       >
         <Text style={[styles.day, styles.muted]}>{dayLabel}</Text>
         <Text style={styles.rest}>Rest</Text>
-      </Pressable>
+      </AnimatedPressable>
     );
   }
 
@@ -53,12 +74,14 @@ export function ScheduleRow({ day, dayLabel, onPress }: ScheduleRowProps) {
   const completed = Boolean(completedDisplay);
 
   return (
-    <Pressable
-      accessibilityRole={onPress ? 'button' : undefined}
+    <AnimatedPressable
+      accessibilityRole={isActionable ? 'button' : undefined}
       accessibilityLabel={`${dayLabel}, ${label}${completed ? ', completed' : ''}`}
-      onPress={onPress}
-      disabled={!onPress}
-      style={styles.workoutRow}
+      onPress={handlePress}
+      onPressIn={isActionable ? pressScale.onPressIn : undefined}
+      onPressOut={isActionable ? pressScale.onPressOut : undefined}
+      disabled={!isActionable}
+      style={[styles.workoutRow, pressScale.animatedStyle]}
     >
       <Text style={styles.day}>{dayLabel}</Text>
       <View style={[styles.dot, { backgroundColor: color }]} />
@@ -68,7 +91,7 @@ export function ScheduleRow({ day, dayLabel, onPress }: ScheduleRowProps) {
       {!completed ? (
         <ChevronRight color={redesignColors.ashDim} size={22} strokeWidth={2.5} />
       ) : null}
-    </Pressable>
+    </AnimatedPressable>
   );
 }
 
@@ -85,7 +108,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   restRow: {
-    height: 48,
+    height: 60,
+    // Transparent border keeps the day label on the exact same x as the
+    // bordered workout rows above and below it.
+    borderWidth: 1,
+    borderColor: 'transparent',
     paddingHorizontal: 20,
     flexDirection: 'row',
     alignItems: 'center',

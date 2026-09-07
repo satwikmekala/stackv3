@@ -7,6 +7,7 @@ export default function OnboardingLayout() {
       <Stack.Screen name="whatsurname" />
       <Stack.Screen name="experience" />
       <Stack.Screen name="current-week" />
+      <Stack.Screen name="split-choice" />
     </Stack>
   );
 }

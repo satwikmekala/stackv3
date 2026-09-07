@@ -1,20 +1,39 @@
-import { useEffect, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { memo, useEffect, useState } from 'react';
+import {
+  Modal,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
+import * as Haptics from 'expo-haptics';
 import Animated, {
-  Easing,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
-  withTiming,
 } from 'react-native-reanimated';
 import {
   ARCHETYPE_COMPOSITIONS,
   type Archetype,
 } from '@/constants/archetypes';
+import { withMotionTiming } from '@/constants/motion';
 import { redesignColors, redesignFonts } from '@/constants/theme';
+import { usePressScale } from '@/hooks/usePressScale';
 import { getWeeklyQueueState } from '@/store/weeklyQueueEngine';
 
 const ALL_ARCHETYPES = Object.keys(ARCHETYPE_COMPOSITIONS) as Archetype[];
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+/** A workout belonging to the active Custom Split, in saved order. */
+export type CustomWorkoutOption = {
+  id: number;
+  letter: string;
+  name: string;
+  color: string;
+  exerciseCount: number;
+};
 
 type WorkoutPickerProps = {
   visible: boolean;
@@ -25,7 +44,104 @@ type WorkoutPickerProps = {
   onSelect: (archetype: Archetype) => void;
   onClose: () => void;
   onExited?: () => void;
+  /** Custom mode: the workouts of the active split replace the archetype
+   *  queue entirely. Stack archetypes are never mixed in. */
+  customOptions?: CustomWorkoutOption[];
+  selectedCustomId?: number | null;
+  onSelectCustom?: (workoutId: number) => void;
 };
+
+function WorkoutOption({
+  archetype,
+  isSelected,
+  onSelect,
+}: {
+  archetype: Archetype;
+  isSelected: boolean;
+  onSelect: (archetype: Archetype) => void;
+}) {
+  const pressScale = usePressScale('surface');
+  const composition = ARCHETYPE_COMPOSITIONS[archetype];
+
+  const handlePress = () => {
+    if (Platform.OS !== 'web') void Haptics.selectionAsync();
+    onSelect(archetype);
+  };
+
+  return (
+    <AnimatedPressable
+      accessibilityRole="button"
+      accessibilityLabel={`${composition.label}, select workout`}
+      accessibilityState={{ selected: isSelected }}
+      onPress={handlePress}
+      onPressIn={pressScale.onPressIn}
+      onPressOut={pressScale.onPressOut}
+      style={[
+        styles.option,
+        isSelected && {
+          borderColor: composition.color,
+          backgroundColor: redesignColors.raised,
+        },
+        pressScale.animatedStyle,
+      ]}
+    >
+      <View style={[styles.dot, { backgroundColor: composition.color }]} />
+      <View style={styles.optionContent}>
+        <Text style={styles.optionLabel}>{composition.label}</Text>
+      </View>
+    </AnimatedPressable>
+  );
+}
+
+const CustomWorkoutOptionRow = memo(function CustomWorkoutOptionRow({
+  option,
+  isSelected,
+  onSelect,
+}: {
+  option: CustomWorkoutOption;
+  isSelected: boolean;
+  onSelect: (workoutId: number) => void;
+}) {
+  const pressScale = usePressScale('surface');
+
+  const handlePress = () => {
+    if (Platform.OS !== 'web') void Haptics.selectionAsync();
+    onSelect(option.id);
+  };
+
+  return (
+    <AnimatedPressable
+      accessibilityRole="button"
+      accessibilityLabel={`Workout ${option.letter}, ${option.name}, select workout`}
+      accessibilityState={{ selected: isSelected }}
+      onPress={handlePress}
+      onPressIn={pressScale.onPressIn}
+      onPressOut={pressScale.onPressOut}
+      style={[
+        styles.option,
+        isSelected && {
+          borderColor: option.color,
+          backgroundColor: redesignColors.raised,
+        },
+        pressScale.animatedStyle,
+      ]}
+    >
+      <View style={[styles.letterBadge, { backgroundColor: `${option.color}26` }]}>
+        <Text style={[styles.letterBadgeText, { color: option.color }]}>
+          {option.letter}
+        </Text>
+      </View>
+      <View style={styles.optionContent}>
+        <Text numberOfLines={1} style={styles.optionLabel}>
+          {option.name}
+        </Text>
+        <Text style={styles.optionMeta}>
+          {`${option.exerciseCount} ${option.exerciseCount === 1 ? 'EXERCISE' : 'EXERCISES'}`}
+        </Text>
+      </View>
+    </AnimatedPressable>
+  );
+});
 
 export function WorkoutPicker({
   visible,
@@ -36,6 +152,9 @@ export function WorkoutPicker({
   onSelect,
   onClose,
   onExited,
+  customOptions,
+  selectedCustomId,
+  onSelectCustom,
 }: WorkoutPickerProps) {
   const { height: screenHeight } = useWindowDimensions();
   const [isMounted, setIsMounted] = useState(visible);
@@ -44,18 +163,16 @@ export function WorkoutPicker({
   useEffect(() => {
     if (visible) {
       setIsMounted(true);
-      progress.value = withTiming(1, {
-        duration: 280,
-        easing: Easing.out(Easing.cubic),
-      });
+      progress.value = withMotionTiming(1);
       return;
     }
 
     if (isMounted) {
-      progress.value = withTiming(
+      progress.value = withMotionTiming(
         0,
-        { duration: 220, easing: Easing.in(Easing.cubic) },
+        { easing: 'accelerate' },
         (finished) => {
+          'worklet';
           if (finished) {
             runOnJS(setIsMounted)(false);
             if (onExited) {
@@ -79,17 +196,22 @@ export function WorkoutPicker({
     return null;
   }
 
-  const { remaining, nextUp } = getWeeklyQueueState();
+  const isCustomMode = customOptions !== undefined;
+  const { remaining, nextUp } = isCustomMode
+    ? { remaining: [] as Archetype[], nextUp: [] as Archetype[] }
+    : getWeeklyQueueState();
   const queuedArchetypes = [...new Set(options ?? [...nextUp, ...remaining])];
   const isWeekComplete = queuedArchetypes.length === 0;
   const isBonusPool = options === undefined && isWeekComplete;
   const archetypes = isBonusPool ? ALL_ARCHETYPES : queuedArchetypes;
   const pickerTitle = title ?? (
-    isBonusPool
-      ? 'What would you like to work out?'
-      : isWeekComplete
-        ? 'Week complete'
-        : 'Change workout'
+    isCustomMode
+      ? 'Change workout'
+      : isBonusPool
+        ? 'What would you like to work out?'
+        : isWeekComplete
+          ? 'Week complete'
+          : 'Change workout'
   );
 
   return (
@@ -108,37 +230,40 @@ export function WorkoutPicker({
           <Text style={styles.eyebrow}>{eyebrow}</Text>
           <Text style={styles.title}>{pickerTitle}</Text>
 
-          {isWeekComplete && !isBonusPool ? (
+          {!isCustomMode && isWeekComplete && !isBonusPool ? (
             <Text style={styles.completeMessage}>
               {"YOU'RE DONE FOR THIS WEEK"}
             </Text>
           ) : null}
 
-          {archetypes.length > 0 ? (
+          {isCustomMode ? (
+            customOptions.length > 0 ? (
+              <View style={styles.options}>
+                {customOptions.map((option) => (
+                  <CustomWorkoutOptionRow
+                    key={option.id}
+                    option={option}
+                    isSelected={selectedCustomId === option.id}
+                    onSelect={onSelectCustom ?? (() => {})}
+                  />
+                ))}
+              </View>
+            ) : (
+              <Text style={styles.completeMessage}>
+                THIS SPLIT HAS NO WORKOUTS YET
+              </Text>
+            )
+          ) : archetypes.length > 0 ? (
             <View style={styles.options}>
               {archetypes.map((archetype) => {
-                const composition = ARCHETYPE_COMPOSITIONS[archetype];
                 const isSelected = selected === archetype;
                 return (
-                  <Pressable
+                  <WorkoutOption
                     key={archetype}
-                    accessibilityRole="button"
-                    accessibilityLabel={`${composition.label}, select workout`}
-                    accessibilityState={{ selected: isSelected }}
-                    onPress={() => onSelect(archetype)}
-                    style={[
-                      styles.option,
-                      isSelected && {
-                        borderColor: composition.color,
-                        backgroundColor: redesignColors.raised,
-                      },
-                    ]}
-                  >
-                    <View style={[styles.dot, { backgroundColor: composition.color }]} />
-                    <View style={styles.optionContent}>
-                      <Text style={styles.optionLabel}>{composition.label}</Text>
-                    </View>
-                  </Pressable>
+                    archetype={archetype}
+                    isSelected={isSelected}
+                    onSelect={onSelect}
+                  />
                 );
               })}
             </View>
@@ -221,6 +346,27 @@ const styles = StyleSheet.create({
   optionContent: {
     flex: 1,
     alignItems: 'flex-start',
+  },
+  letterBadge: {
+    width: 26,
+    height: 26,
+    borderRadius: 9,
+    borderCurve: 'continuous',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 11,
+  },
+  letterBadgeText: {
+    fontFamily: redesignFonts.monoBold,
+    fontSize: 13,
+    letterSpacing: 0.5,
+  },
+  optionMeta: {
+    marginTop: 2,
+    fontFamily: redesignFonts.mono,
+    fontSize: 10,
+    letterSpacing: 0.6,
+    color: redesignColors.ash,
   },
   completeMessage: {
     fontFamily: redesignFonts.monoBold,

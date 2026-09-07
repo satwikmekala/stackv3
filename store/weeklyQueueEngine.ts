@@ -47,10 +47,15 @@ export const getWeeklyQueueState = (): WeeklyQueueState => {
   const sessionsThisWeek = readCompletedSessionsSync().filter((session) =>
     weekDates.includes(getSessionLocalDate(session.date))
   );
+  // Custom Split sessions are their own program: they still count as trained
+  // days, but they must never consume a slot in Stack's archetype queue.
+  const stackSessionsThisWeek = sessionsThisWeek.filter(
+    (session) => session.customSplitId == null
+  );
   const completedKnown: Archetype[] = [];
   let unknownCompletedCount = 0;
 
-  for (const session of sessionsThisWeek) {
+  for (const session of stackSessionsThisWeek) {
     if (session.archetype) {
       completedKnown.push(session.archetype);
     } else {

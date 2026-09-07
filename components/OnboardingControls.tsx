@@ -2,16 +2,12 @@ import React from 'react';
 import { Pressable, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { ArrowRight, ChevronLeft } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
-import Animated, {
-  Easing,
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { redesignColors, splitColors } from '@/constants/theme';
+import { usePressScale } from '@/hooks/usePressScale';
 
-const TOTAL_STEPS = 4;
+const TOTAL_STEPS = 5;
 export function OnboardingProgress({ currentStep }: { currentStep: number }) {
   return (
     <View
@@ -65,25 +61,11 @@ export function OnboardingNextButton({
   onPress,
   size = 56,
 }: OnboardingNextButtonProps) {
-  const press = useSharedValue(0);
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: 1 - press.value * 0.02 }],
-  }));
+  const pressScale = usePressScale();
 
   const handlePressIn = () => {
-    press.value = withTiming(1, {
-      duration: 150,
-      easing: Easing.inOut(Easing.ease),
-    });
+    pressScale.onPressIn();
     void Haptics.selectionAsync();
-  };
-
-  const handlePressOut = () => {
-    press.value = withTiming(0, {
-      duration: 150,
-      easing: Easing.inOut(Easing.ease),
-    });
   };
 
   return (
@@ -93,7 +75,7 @@ export function OnboardingNextButton({
         styles.nextButton,
         { width: size, height: size, borderRadius: size / 2 },
         disabled && styles.nextButtonDisabled,
-        animatedStyle,
+        pressScale.animatedStyle,
       ]}
     >
       <Pressable
@@ -103,7 +85,7 @@ export function OnboardingNextButton({
         hitSlop={8}
         onPress={onPress}
         onPressIn={handlePressIn}
-        onPressOut={handlePressOut}
+        onPressOut={pressScale.onPressOut}
         style={[styles.nextButtonHitTarget, { borderRadius: size / 2 }]}
       >
         <ArrowRight

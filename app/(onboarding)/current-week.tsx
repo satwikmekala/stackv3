@@ -3,11 +3,9 @@ import { Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Check } from 'lucide-react-native';
 import Animated, {
-  Easing,
   interpolateColor,
   useAnimatedStyle,
   useSharedValue,
-  withTiming,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import {
@@ -21,7 +19,9 @@ import {
   DEFAULT_WEIGHT_UNIT,
 } from '@/store/workoutDatabase';
 import { ExperienceLevel, useWorkoutStore } from '@/store/workoutStore';
+import { withMotionTiming } from '@/constants/motion';
 import { redesignColors, redesignFonts, splitColors } from '@/constants/theme';
+import { usePressScale } from '@/hooks/usePressScale';
 import '@/global.css';
 
 const WEEKDAYS = [
@@ -46,13 +46,10 @@ interface WeekdayRowProps {
 
 function WeekdayRow({ weekday, selected, disabled, onToggle }: WeekdayRowProps) {
   const selection = useSharedValue(selected ? 1 : 0);
-  const press = useSharedValue(0);
+  const pressScale = usePressScale();
 
   useEffect(() => {
-    selection.value = withTiming(selected ? 1 : 0, {
-      duration: 180,
-      easing: Easing.inOut(Easing.ease),
-    });
+    selection.value = withMotionTiming(selected ? 1 : 0);
   }, [selected, selection]);
 
   const containerStyle = useAnimatedStyle(() => ({
@@ -66,7 +63,6 @@ function WeekdayRow({ weekday, selected, disabled, onToggle }: WeekdayRowProps) 
       [0, 1],
       [redesignColors.border, splitColors.chest]
     ),
-    transform: [{ scale: 1 - press.value * 0.02 }],
   }));
 
   const textStyle = useAnimatedStyle(() => ({
@@ -91,18 +87,8 @@ function WeekdayRow({ weekday, selected, disabled, onToggle }: WeekdayRowProps) 
   }));
 
   const handlePressIn = () => {
-    press.value = withTiming(1, {
-      duration: 150,
-      easing: Easing.inOut(Easing.ease),
-    });
+    pressScale.onPressIn();
     void Haptics.selectionAsync();
-  };
-
-  const handlePressOut = () => {
-    press.value = withTiming(0, {
-      duration: 150,
-      easing: Easing.inOut(Easing.ease),
-    });
   };
 
   return (
@@ -113,8 +99,13 @@ function WeekdayRow({ weekday, selected, disabled, onToggle }: WeekdayRowProps) 
       disabled={disabled}
       onPress={() => onToggle(weekday.index)}
       onPressIn={handlePressIn}
-      onPressOut={handlePressOut}
-      style={[styles.dayRow, disabled && styles.dayRowDisabled, containerStyle]}
+      onPressOut={pressScale.onPressOut}
+      style={[
+        styles.dayRow,
+        disabled && styles.dayRowDisabled,
+        containerStyle,
+        pressScale.animatedStyle,
+      ]}
     >
       <Animated.Text style={[styles.dayLabel, textStyle]}>
         {weekday.label}
@@ -156,14 +147,15 @@ export default function CurrentWeek() {
       weeklyGoal: selectedDays.length,
       experienceLevel: params.experienceLevel ?? 'intermediate',
       trainingDays: [...selectedDays].sort((a, b) => a - b),
-      onboardingCompleted: true,
+      onboardingCompleted: false,
       weightIncrement: DEFAULT_WEIGHT_INCREMENT,
       weightUnit: DEFAULT_WEIGHT_UNIT,
       weightIncrementLbs: DEFAULT_WEIGHT_INCREMENT_LBS,
+      activeSplitId: null,
       workoutsCompletedThisWeek: 0,
     });
 
-    router.replace('/(tabs)');
+    router.push('/(onboarding)/split-choice');
   };
 
   return (
@@ -201,7 +193,7 @@ export default function CurrentWeek() {
             </Text>
           </View>
           <OnboardingNextButton
-            accessibilityLabel="Finish onboarding"
+            accessibilityLabel="Continue to split choice"
             disabled={selectedDays.length === 0}
             onPress={handleFinish}
             size={64}

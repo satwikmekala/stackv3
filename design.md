@@ -1,6 +1,6 @@
 # Stack Design System
 
-> Live implementation reference, verified against constants/theme.ts, app/_layout.tsx, and current app/component usage on 2026-07-19.
+> Live implementation reference, verified against constants/theme.ts, app/_layout.tsx, and current app/component usage on 2026-09-03.
 
 ## Documentation status
 
@@ -163,15 +163,16 @@ There is no shared icon-size token. Literal Lucide sizes range from 13 to 31 px;
 - **Native/framework transitions** are also present: WorkoutIntensityPicker uses Modal fade; SwapExerciseSheet uses Modal slide; the workout feedback modal uses fade; and app/_layout.tsx configures the workout route with slide_from_right and pop-on-replace. WorkoutPicker and profile detail sheets use Modal animationType none because Reanimated supplies their transitions.
 - No source imports or declared dependencies were found for Moti, Lottie, React Native Animatable, Rive, Skia, or another animation library.
 
-There is no shared motion hook, timing-token object, or central animation module. Motion configurations are local to each component or screen. Reusable patterns in practice are:
+Shared UI motion is defined by `constants/motion.ts` and `hooks/usePressScale.ts`:
 
-- Short press-scale feedback repeated locally in Button, OnboardingControls, ActiveSetCard, ExerciseFinisher, and WorkoutHeroCard.
-- Selection/toggle interpolation in onboarding/current-week and onboarding/experience, implemented similarly but separately.
-- app/workout.tsx’s file-local cluster of directional transitions, layout transition, check spring, and feedback-sheet entrance; it explicitly uses ReduceMotion.System where applicable.
-- BonusSet’s local reduced-motion-aware acknowledgement-check spring and RestTimer’s reduced-motion-aware slide transitions.
-- ActiveSetCard’s rolling numeric value transition and app/index.tsx’s local splash reveal helpers.
+- `motionDuration` provides three semantic timings: `feedback` (120 ms), `transition` (220 ms), and `entrance` (480 ms).
+- `motionEasing` provides decelerating ease-out cubic motion for arrivals and accelerating ease-in cubic motion for departures.
+- `withMotionTiming` accepts those semantic token names and always applies the system reduced-motion preference.
+- `usePressScale` provides interruptible press feedback at two size-aware strengths: `control` scales to 0.98 and `surface` scales to 0.99. Haptics and action behavior remain component-owned.
 
-When changing motion, preserve reduced-motion handling where the local pattern already uses it and avoid implying that a central timing scale exists when it does not.
+Primary reusable selection surfaces emit their haptic at the point of interaction so parent callbacks remain state-focused and do not duplicate feedback. Schedule correction uses a light impact; workout and exercise choices use selection feedback. Web interactions never request haptics.
+
+The shared vocabulary covers ordinary press feedback, onboarding selection changes, sheets and overlays, and standard screen entrances. Feature-specific motion remains local where its duration or physics carries product meaning: the first-run splash choreography, workout-stage transitions, rolling numeric values, set-completion sequence, rest countdown, hero ambient glow, and tuned springs. Reanimated 4.1 also defaults its animations to the system reduced-motion preference, but shared timing calls state that contract explicitly.
 
 ## Durable design rules for future work
 

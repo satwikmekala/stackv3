@@ -1,16 +1,13 @@
 import React from 'react';
 import { Text, ActivityIndicator, Pressable } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import { colors, fonts } from '@/constants/theme';
+import { usePressScale } from '@/hooks/usePressScale';
 
 interface ButtonProps {
   title: string;
   onPress: () => void;
-  variant?: 'primary' | 'secondary' | 'ghost';
+  variant?: 'primary' | 'secondary' | 'ghost' | 'destructive';
   disabled?: boolean;
   loading?: boolean;
   className?: string;
@@ -22,12 +19,14 @@ const CONTAINER_STYLES = {
   primary: { backgroundColor: colors.bone },
   secondary: { backgroundColor: colors.surfaceRaised },
   ghost: { backgroundColor: 'transparent' },
+  destructive: { backgroundColor: '#E5484D' },
 } as const;
 
 const TEXT_STYLES = {
   primary: { fontFamily: fonts.heading, color: colors.ink },
   secondary: { fontFamily: fonts.bodySemiBold, color: colors.bone },
   ghost: { fontFamily: fonts.bodyMedium, color: colors.ash },
+  destructive: { fontFamily: fonts.bodySemiBold, color: colors.bone },
 } as const;
 
 export function Button({
@@ -38,18 +37,14 @@ export function Button({
   loading = false,
   className = '',
 }: ButtonProps) {
-  const press = useSharedValue(0);
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: 1 - press.value * 0.03 }],
-  }));
+  const pressScale = usePressScale();
 
   return (
     <AnimatedPressable
       onPress={onPress}
       disabled={disabled || loading}
-      onPressIn={() => (press.value = withTiming(1, { duration: 120 }))}
-      onPressOut={() => (press.value = withTiming(0, { duration: 120 }))}
+      onPressIn={pressScale.onPressIn}
+      onPressOut={pressScale.onPressOut}
       className={className}
       style={[
         {
@@ -61,7 +56,7 @@ export function Button({
           opacity: disabled || loading ? 0.45 : 1,
         },
         CONTAINER_STYLES[variant],
-        animatedStyle,
+        pressScale.animatedStyle,
       ]}
     >
       {loading ? (

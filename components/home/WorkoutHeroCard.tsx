@@ -1,9 +1,12 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Check, Zap } from 'lucide-react-native';
 import Animated, {
   Easing,
+  FadeInDown,
+  FadeOut,
+  ReduceMotion,
   useAnimatedStyle,
   useSharedValue,
   withRepeat,
@@ -17,6 +20,8 @@ import {
 import type { WorkoutType } from '@/store/workoutStore';
 import { workoutMeta } from '@/constants/workouts';
 import { redesignColors, redesignFonts } from '@/constants/theme';
+import { motionDuration, motionEasing } from '@/constants/motion';
+import { usePressScale } from '@/hooks/usePressScale';
 
 type WorkoutHeroCardProps = {
   type?: WorkoutType;
@@ -26,9 +31,25 @@ type WorkoutHeroCardProps = {
   completed?: boolean;
   /** When the queued workout is scheduled: "TODAY", "TOMORROW", "FRIDAY"… */
   whenLabel?: string;
+  /** Custom Split overrides — the hierarchy stays identical, only the
+   *  identity of the workout comes from the saved split instead of an
+   *  archetype. */
+  title?: string;
+  groupLabel?: string;
+  accentColor?: string;
 };
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+const CONTENT_ENTER = FadeInDown.duration(motionDuration.transition)
+  .easing(motionEasing.decelerate)
+  .withInitialValues({
+    opacity: 0,
+    transform: [{ translateY: 3 }],
+  })
+  .reduceMotion(ReduceMotion.System);
+const CONTENT_EXIT = FadeOut.duration(motionDuration.feedback)
+  .easing(motionEasing.accelerate)
+  .reduceMotion(ReduceMotion.System);
 
 function rgba(hex: string, opacity: number) {
   const value = hex.replace('#', '');
@@ -45,6 +66,9 @@ export function WorkoutHeroCard({
   onPress,
   completed = false,
   whenLabel = 'TODAY',
+  title,
+  groupLabel,
+  accentColor,
 }: WorkoutHeroCardProps) {
   const primaryArchetype = archetypes?.[0];
   const sessionDisplay = getSessionWorkoutDisplay({
@@ -54,21 +78,28 @@ export function WorkoutHeroCard({
   });
   const color = completed
     ? redesignColors.accent
-    : sessionDisplay.color;
+    : accentColor ?? sessionDisplay.color;
   const label = completed
     ? 'Nice work this week'
-    : sessionDisplay.label;
+    : title ?? sessionDisplay.label;
   const group = completed
     ? 'Goal met'
-    : sessionDisplay.isMerged
-      ? 'Merged day'
-      : primaryArchetype
-        ? ARCHETYPE_COMPOSITIONS[primaryArchetype].shortLabel
-        : type
-          ? workoutMeta[type].group
-          : 'Training';
-  const pressed = useSharedValue(0);
+    : groupLabel
+      ? groupLabel
+      : sessionDisplay.isMerged
+        ? 'Merged day'
+        : primaryArchetype
+          ? ARCHETYPE_COMPOSITIONS[primaryArchetype].shortLabel
+          : type
+            ? workoutMeta[type].group
+            : 'Training';
   const glow = useSharedValue(0);
+  const pressScale = usePressScale('surface');
+  const hasMountedContent = useRef(false);
+
+  useEffect(() => {
+    hasMountedContent.current = true;
+  }, []);
 
   useEffect(() => {
     glow.value = withRepeat(
@@ -77,10 +108,6 @@ export function WorkoutHeroCard({
       true
     );
   }, [color, glow]);
-
-  const cardStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: 1 - pressed.value * 0.012 }],
-  }));
 
   const buttonStyle = useAnimatedStyle(() => ({
     shadowOpacity: 0.24 + glow.value * 0.2,
@@ -99,9 +126,9 @@ export function WorkoutHeroCard({
       }
       disabled={!onPress}
       onPress={onPress}
-      onPressIn={() => (pressed.value = withTiming(1, { duration: 90 }))}
-      onPressOut={() => (pressed.value = withTiming(0, { duration: 140 }))}
-      style={[styles.card, { borderColor: rgba(color, 0.72) }, cardStyle]}
+      onPressIn={pressScale.onPressIn}
+      onPressOut={pressScale.onPressOut}
+      style={[styles.card, { borderColor: rgba(color, 0.72) }, pressScale.animatedStyle]}
     >
       <LinearGradient
         pointerEvents="none"
@@ -112,7 +139,11 @@ export function WorkoutHeroCard({
         style={StyleSheet.absoluteFill}
       />
 
-      <View>
+      <Animated.View
+        entering={hasMountedContent.current ? CONTENT_ENTER : undefined}
+        exiting={CONTENT_EXIT}
+        key={`${whenLabel}\u0000${label}\u0000${group}\u0000${exerciseCount}`}
+      >
         <Text style={[styles.eyebrow, { color }]}>{completed ? 'Goal met' : whenLabel}</Text>
         <Text
           adjustsFontSizeToFit
@@ -127,7 +158,7 @@ export function WorkoutHeroCard({
             ? 'Your weekly target is complete'
             : `${group.toUpperCase()} · ${exerciseCount} ${exerciseCount === 1 ? 'EXERCISE' : 'EXERCISES'}`}
         </Text>
-      </View>
+      </Animated.View>
 
       <View style={styles.divider} />
 
@@ -169,9 +200,7 @@ const styles = StyleSheet.create({
     borderCurve: 'continuous',
     borderWidth: 1.25,
     overflow: 'hidden',
-    paddingHorizontal: 24,
-    paddingTop: 24,
-    paddingBottom: 20,
+    padding: 24,
     justifyContent: 'space-between',
     backgroundColor: redesignColors.surface,
   },
@@ -179,7 +208,7 @@ const styles = StyleSheet.create({
     fontFamily: redesignFonts.monoBold,
     fontSize: 13,
     letterSpacing: 2.2,
-    marginBottom: 14,
+    marginBottom: 12,
   },
   title: {
     fontFamily: redesignFonts.display,
@@ -187,7 +216,7 @@ const styles = StyleSheet.create({
     lineHeight: 46,
     letterSpacing: -1.6,
     color: redesignColors.bone,
-    marginBottom: 10,
+    marginBottom: 12,
   },
   meta: {
     fontFamily: redesignFonts.mono,
@@ -199,8 +228,7 @@ const styles = StyleSheet.create({
   divider: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: redesignColors.hi,
-    marginTop: 19,
-    marginBottom: 17,
+    marginVertical: 20,
   },
   actionRow: {
     flexDirection: 'row',

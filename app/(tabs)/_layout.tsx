@@ -9,7 +9,7 @@ import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-na
 import { redesignColors, splitColors } from '@/constants/theme';
 import '@/global.css';
 
-const BAR_WIDTH = 144;
+const BAR_WIDTH = 118;
 const BAR_HEIGHT = 64;
 const BAR_PADDING = 5;
 const ITEM_WIDTH = (BAR_WIDTH - BAR_PADDING * 2) / 2;
@@ -169,7 +169,7 @@ const styles = StyleSheet.create({
   },
   indicator: {
     position: 'absolute',
-    top: (BAR_HEIGHT - ACTIVE_SIZE) / 2,
+    top: (BAR_HEIGHT - ACTIVE_SIZE) / 2 - 1,
     left: BAR_PADDING + (ITEM_WIDTH - ACTIVE_SIZE) / 2,
     width: ACTIVE_SIZE,
     height: ACTIVE_SIZE,

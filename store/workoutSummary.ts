@@ -35,7 +35,15 @@ const SPECIAL_SET_TYPES: BonusSetType[] = ['pr', 'dropset', 'extra'];
  * screen. Skipped sets are intentionally excluded even though the logging flow
  * marks them completed in order to advance through the workout.
  */
-export function deriveWorkoutSummary(session: WorkoutSession): WorkoutSummary {
+export function deriveWorkoutSummary(
+  session: WorkoutSession,
+  /**
+   * Custom Split sessions carry no archetype, so the completion screen passes
+   * the saved workout's own name here rather than falling back to a muscle
+   * label that would misdescribe the session.
+   */
+  titleOverride?: string | null
+): WorkoutSummary {
   const exercises = session.exercises.flatMap<WorkoutSummaryExercise>((exercise) => {
     const performedSets = exercise.sets.filter(
       (set) => set.completed && !set.skipped
@@ -81,11 +89,13 @@ export function deriveWorkoutSummary(session: WorkoutSession): WorkoutSummary {
 
   return {
     id: session.id,
-    title: primaryArchetype
-      ? secondaryArchetype
-        ? `${primaryArchetype.shortLabel} + ${secondaryArchetype.shortLabel}`
-        : primaryArchetype.shortLabel
-      : legacyMeta?.label ?? 'Workout',
+    title:
+      titleOverride?.trim() ||
+      (primaryArchetype
+        ? secondaryArchetype
+          ? `${primaryArchetype.shortLabel} + ${secondaryArchetype.shortLabel}`
+          : primaryArchetype.shortLabel
+        : legacyMeta?.label ?? 'Workout'),
     accent: primaryArchetype?.color ?? legacyMeta?.color ?? '#FF7A3D',
     date: new Date(session.date),
     intensity: session.intensity ?? 'medium',

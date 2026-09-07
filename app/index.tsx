@@ -93,12 +93,8 @@ export default function Splash() {
       minimumAnimation.start(({ finished }) => resolve(finished));
     });
 
-    // [BOOT] 8a — right before Promise.all([animationReady, initializeWorkoutStore()])
-    console.log('[BOOT] app/index.tsx: calling Promise.all([animationReady, initializeWorkoutStore()])');
     void Promise.all([animationReady, initializeWorkoutStore()])
       .then(([animationFinished]) => {
-        // [BOOT] 8b — Promise.all resolved
-        console.log('[BOOT] app/index.tsx: Promise.all resolved, animationFinished:', animationFinished);
         if (!animationFinished || cancelled) return;
 
         fadeAnimation = Animated.timing(screen, {

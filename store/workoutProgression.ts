@@ -13,6 +13,20 @@ const WEIGHT_INCREMENT_BY_LEVEL: Record<ExperienceLevel, number> = {
 const getWeightIncrement = (level: ExperienceLevel | undefined): number =>
   WEIGHT_INCREMENT_BY_LEVEL[level ?? 'intermediate'];
 
+/**
+ * Canonical shape for an exercise entering a session with no template targets
+ * and no usable history. Shared by the split editor and by custom-split
+ * sessions so a first-time exercise always starts the same way.
+ */
+export const makeDefaultExercise = (name: string): Exercise => ({
+  name,
+  sets: [
+    { reps: 8, weight: 0 },
+    { reps: 8, weight: 0 },
+    { reps: 8, weight: 0 },
+  ],
+});
+
 // Pure progressive-overload business logic, unchanged from the previous store.
 const computeNextTarget = (
   lastSet: ExerciseSet | undefined,

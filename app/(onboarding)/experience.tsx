@@ -3,11 +3,9 @@ import { Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Check } from 'lucide-react-native';
 import Animated, {
-  Easing,
   interpolateColor,
   useAnimatedStyle,
   useSharedValue,
-  withTiming,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import {
@@ -15,8 +13,10 @@ import {
   OnboardingNextButton,
   OnboardingProgress,
 } from '@/components/OnboardingControls';
+import { withMotionTiming } from '@/constants/motion';
 import { ExperienceLevel } from '@/store/workoutStore';
 import { redesignColors, redesignFonts, splitColors } from '@/constants/theme';
+import { usePressScale } from '@/hooks/usePressScale';
 import '@/global.css';
 
 const EXPERIENCE_OPTIONS: {
@@ -56,13 +56,10 @@ interface ExperienceRowProps {
 
 function ExperienceRow({ option, selected, onSelect }: ExperienceRowProps) {
   const selection = useSharedValue(selected ? 1 : 0);
-  const press = useSharedValue(0);
+  const pressScale = usePressScale();
 
   useEffect(() => {
-    selection.value = withTiming(selected ? 1 : 0, {
-      duration: 180,
-      easing: Easing.inOut(Easing.ease),
-    });
+    selection.value = withMotionTiming(selected ? 1 : 0);
   }, [selected, selection]);
 
   const containerStyle = useAnimatedStyle(() => ({
@@ -78,7 +75,6 @@ function ExperienceRow({ option, selected, onSelect }: ExperienceRowProps) {
     ),
     shadowOpacity: selection.value * 0.2,
     elevation: selection.value * 4,
-    transform: [{ scale: 1 - press.value * 0.02 }],
   }));
 
   const indicatorStyle = useAnimatedStyle(() => ({
@@ -95,18 +91,8 @@ function ExperienceRow({ option, selected, onSelect }: ExperienceRowProps) {
   }));
 
   const handlePressIn = () => {
-    press.value = withTiming(1, {
-      duration: 150,
-      easing: Easing.inOut(Easing.ease),
-    });
+    pressScale.onPressIn();
     void Haptics.selectionAsync();
-  };
-
-  const handlePressOut = () => {
-    press.value = withTiming(0, {
-      duration: 150,
-      easing: Easing.inOut(Easing.ease),
-    });
   };
 
   return (
@@ -115,8 +101,8 @@ function ExperienceRow({ option, selected, onSelect }: ExperienceRowProps) {
       accessibilityState={{ checked: selected }}
       onPress={() => onSelect(option.value)}
       onPressIn={handlePressIn}
-      onPressOut={handlePressOut}
-      style={[styles.optionRow, containerStyle]}
+      onPressOut={pressScale.onPressOut}
+      style={[styles.optionRow, containerStyle, pressScale.animatedStyle]}
     >
       <View style={styles.levelMeter}>
         {BAR_HEIGHTS.map((height, index) => (

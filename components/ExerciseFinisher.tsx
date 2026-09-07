@@ -1,15 +1,10 @@
 import React, { ReactNode } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 import { ArrowDown, ChevronRight, Plus, Trophy } from 'lucide-react-native';
-import Animated, {
-  Easing,
-  ReduceMotion,
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import { BONUS_SET_META, type BonusSetSelection } from '@/components/BonusSet';
 import { redesignColors, redesignFonts } from '@/constants/theme';
+import { usePressScale } from '@/hooks/usePressScale';
 import type { ExerciseSet } from '@/store/workoutStore';
 import { formatWeight, unitLabel, type WeightUnit } from '@/store/weightUnits';
 
@@ -24,17 +19,7 @@ function FinisherOption({ title, metric, color, icon, onPress }: {
   icon: ReactNode;
   onPress: () => void;
 }) {
-  const pressed = useSharedValue(0);
-  const pressedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: 1 - pressed.value * 0.035 }],
-  }));
-  const setPressed = (value: number) => {
-    pressed.value = withTiming(value, {
-      duration: value ? 80 : 140,
-      easing: Easing.out(Easing.cubic),
-      reduceMotion: ReduceMotion.System,
-    });
-  };
+  const pressScale = usePressScale();
 
   return (
     <AnimatedTouchableOpacity
@@ -42,8 +27,8 @@ function FinisherOption({ title, metric, color, icon, onPress }: {
       accessibilityLabel={title}
       activeOpacity={0.74}
       onPress={onPress}
-      onPressIn={() => setPressed(1)}
-      onPressOut={() => setPressed(0)}
+      onPressIn={pressScale.onPressIn}
+      onPressOut={pressScale.onPressOut}
       style={[
         {
           flex: 1,
@@ -63,7 +48,7 @@ function FinisherOption({ title, metric, color, icon, onPress }: {
           shadowOffset: { width: 0, height: 2 },
           elevation: 3,
         },
-        pressedStyle,
+        pressScale.animatedStyle,
       ]}
     >
       <View
@@ -129,10 +114,7 @@ export function ExerciseFinisher({
   onEditSet: (setIndex: number) => void;
   onSelectBonus: (selection: BonusSetSelection) => void;
 }) {
-  const advancePressed = useSharedValue(0);
-  const advancePressedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: 1 - advancePressed.value * 0.018 }],
-  }));
+  const advancePressScale = usePressScale();
   const lastSet = [...sets].reverse().find((set) => !set.type);
   const lastWeight = lastSet?.weight ?? 0;
   const lastReps = lastSet?.reps ?? 1;
@@ -242,19 +224,8 @@ export function ExerciseFinisher({
       <AnimatedTouchableOpacity
         accessibilityRole="button"
         onPress={onAdvance}
-        onPressIn={() => {
-          advancePressed.value = withTiming(1, {
-            duration: 80,
-            reduceMotion: ReduceMotion.System,
-          });
-        }}
-        onPressOut={() => {
-          advancePressed.value = withTiming(0, {
-            duration: 140,
-            easing: Easing.out(Easing.cubic),
-            reduceMotion: ReduceMotion.System,
-          });
-        }}
+        onPressIn={advancePressScale.onPressIn}
+        onPressOut={advancePressScale.onPressOut}
         activeOpacity={0.65}
         style={[
           {
@@ -269,7 +240,7 @@ export function ExerciseFinisher({
             borderWidth: 1,
             borderColor: redesignColors.border,
           },
-          advancePressedStyle,
+          advancePressScale.animatedStyle,
         ]}
       >
         <Text
