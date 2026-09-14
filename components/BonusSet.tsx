@@ -32,7 +32,7 @@ export function BonusSet({
   onCancel,
 }: {
   selection: BonusSetSelection;
-  weightIncrement?: number;
+  weightIncrement: number;
   weightUnit?: WeightUnit;
   onDone: (set: BonusSetSelection) => void;
   onCancel: () => void;

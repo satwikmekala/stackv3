@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import Animated, { useAnimatedRef, useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   Check,
@@ -27,6 +28,7 @@ import {
 } from 'lucide-react-native';
 
 import { SelectedExerciseList } from '@/components/custom-split/SelectedExerciseList';
+import { ExerciseSearchInput } from '@/components/ExerciseSearchInput';
 import { getWeeklyArchetypeSequence } from '@/constants/archetypes';
 import { redesignColors, redesignFonts, splitColors } from '@/constants/theme';
 import {
@@ -229,7 +231,8 @@ function WorkoutName({
         onPress={() => setEditing(true)}
         style={styles.renameButton}
       >
-        <Pencil color={splitColors.chest} size={19} strokeWidth={2.2} />
+        <Pencil color={splitColors.chest} size={15} strokeWidth={2.2} />
+        <Text style={styles.renameText}>Rename</Text>
       </Pressable>
     </View>
   );
@@ -360,12 +363,12 @@ function MuscleFilters({ onToggle, selected }: MuscleFiltersProps) {
             style={[
               styles.filterChip,
               {
-                backgroundColor: isSelected ? color : alpha(color, '13'),
-                borderColor: isSelected ? color : alpha(color, '66'),
+                backgroundColor: isSelected ? color : 'transparent',
+                borderColor: isSelected ? color : alpha(color, '40'),
               },
             ]}
           >
-            <Text style={[styles.filterChipText, { color: isSelected ? redesignColors.ink : color }]}>
+            <Text style={[styles.filterChipText, { color: isSelected ? redesignColors.ink : alpha(color, '99') }]}>
               {group}
             </Text>
           </Pressable>
@@ -456,18 +459,22 @@ export default function CustomSplitBuilderScreen() {
   const mergePrefill = useCustomSplitDraftStore((state) => state.mergePrefill);
 
   const [catalog, setCatalog] = useState(() => readExerciseCatalogSync());
+  const [exerciseQuery, setExerciseQuery] = useState('');
   const [contextMenu, setContextMenu] = useState<{
     workoutId: string;
     anchorX: number;
     anchorY: number;
   } | null>(null);
-  const [bottomBarHeight, setBottomBarHeight] = useState(75);
   const [reordering, setReordering] = useState(false);
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useAnimatedRef<Animated.ScrollView>();
   // Measured separately from the ScrollView itself: only a host View exposes
   // measureInWindow, and the drag needs window coordinates for its edge zones.
   const scrollAreaRef = useRef<View>(null);
-  const scrollOffset = useRef(0);
+  const scrollOffset = useSharedValue(0);
+  const maxScrollOffset = useSharedValue(0);
+  const handleScroll = useAnimatedScrollHandler((event) => {
+    scrollOffset.value = event.contentOffset.y;
+  });
   const scrollViewportHeight = useRef(0);
   const scrollContentHeight = useRef(0);
 
@@ -485,21 +492,6 @@ export default function CustomSplitBuilderScreen() {
       }),
     []
   );
-
-  // Returns the distance actually scrolled so the dragged row can compensate
-  // exactly, including when the list is already pinned at either end.
-  const autoScrollBy = useCallback((delta: number) => {
-    const maxOffset = Math.max(
-      0,
-      scrollContentHeight.current - scrollViewportHeight.current
-    );
-    const next = Math.min(Math.max(scrollOffset.current + delta, 0), maxOffset);
-    const travelled = next - scrollOffset.current;
-    if (travelled === 0) return 0;
-    scrollOffset.current = next;
-    scrollRef.current?.scrollTo({ y: next, animated: false });
-    return travelled;
-  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -591,10 +583,16 @@ export default function CustomSplitBuilderScreen() {
     });
   };
 
+  const normalizedExerciseQuery = exerciseQuery.trim().toLowerCase();
   const catalogByGroup = CUSTOM_SPLIT_MUSCLE_GROUPS.reduce<
     Record<CustomSplitMuscleGroup, DraftExercise[]>
   >((groups, group) => {
-    groups[group] = catalog.filter((exercise) => getMuscleGroupForExercise(exercise) === group);
+    groups[group] = catalog.filter(
+      (exercise) =>
+        getMuscleGroupForExercise(exercise) === group &&
+        !selectedIds.has(exercise.id) &&
+        exercise.name.toLowerCase().includes(normalizedExerciseQuery)
+    );
     return groups;
   }, {} as Record<CustomSplitMuscleGroup, DraftExercise[]>);
 
@@ -662,21 +660,18 @@ export default function CustomSplitBuilderScreen() {
         />
 
         <View ref={scrollAreaRef} style={styles.scrollArea}>
-          <ScrollView
-            contentContainerStyle={[
-              styles.scrollContent,
-              { paddingBottom: bottomBarHeight + 28 },
-            ]}
+          <Animated.ScrollView
+            contentContainerStyle={styles.scrollContent}
             keyboardShouldPersistTaps="handled"
             onContentSizeChange={(_width, height) => {
               scrollContentHeight.current = height;
+              maxScrollOffset.value = Math.max(0, height - scrollViewportHeight.current);
             }}
             onLayout={(event) => {
               scrollViewportHeight.current = event.nativeEvent.layout.height;
+              maxScrollOffset.value = Math.max(0, scrollContentHeight.current - scrollViewportHeight.current);
             }}
-            onScroll={(event) => {
-              scrollOffset.current = event.nativeEvent.contentOffset.y;
-            }}
+            onScroll={handleScroll}
             ref={scrollRef}
             scrollEnabled={!reordering}
             scrollEventThrottle={16}
@@ -706,21 +701,25 @@ export default function CustomSplitBuilderScreen() {
               selected={activeWorkout.selectedMuscleGroups}
             />
 
-            {hasExercises ? (
-              <SelectedExerciseList
-                autoScrollBy={autoScrollBy}
-                exercises={activeWorkout.exercises}
-                // Namespaced: the sibling WorkoutName is already keyed by the
-                // raw workout id, and sibling keys must be unique.
-                key={`selected-${activeWorkout.id}`}
-                measureViewport={measureScrollViewport}
-                onDragStateChange={setReordering}
-                onRemove={(exerciseId) => removeExercise(activeWorkout.id, exerciseId)}
-                onReorder={(fromIndex, toIndex) =>
-                  reorderExercise(activeWorkout.id, fromIndex, toIndex)
-                }
-              />
-            ) : null}
+            <SelectedExerciseList
+              scrollRef={scrollRef}
+              scrollOffset={scrollOffset}
+              maxScrollOffset={maxScrollOffset}
+              exercises={activeWorkout.exercises}
+              // Namespaced: the sibling WorkoutName is already keyed by the
+              // raw workout id, and sibling keys must be unique.
+              key={`selected-${activeWorkout.id}`}
+              measureViewport={measureScrollViewport}
+              onAdd={() => router.push({
+                pathname: '/custom-split/new-exercise',
+                params: { workoutId: activeWorkout.id },
+              })}
+              onDragStateChange={setReordering}
+              onRemove={(exerciseId) => removeExercise(activeWorkout.id, exerciseId)}
+              onReorder={(fromIndex, toIndex) =>
+                reorderExercise(activeWorkout.id, fromIndex, toIndex)
+              }
+            />
 
             {activeWorkout.selectedMuscleGroups.length === 0 ? (
               <View style={styles.emptyState}>
@@ -730,52 +729,35 @@ export default function CustomSplitBuilderScreen() {
                 </Text>
               </View>
             ) : (
-              activeWorkout.selectedMuscleGroups.map((group) => (
-                <CatalogSection
-                  exercises={catalogByGroup[group]}
-                  group={group}
-                  key={group}
-                  onToggle={(exercise) => {
-                    void Haptics.selectionAsync();
-                    toggleExercise(activeWorkout.id, exercise);
-                  }}
-                  selectedIds={selectedIds}
-                />
-              ))
+              <>
+                <ExerciseSearchInput value={exerciseQuery} onChangeText={setExerciseQuery} />
+                {activeWorkout.selectedMuscleGroups.every((group) => catalogByGroup[group].length === 0) ? (
+                  <Text style={styles.emptyStateText}>
+                    {normalizedExerciseQuery
+                      ? 'No matching exercises in the selected muscle groups.'
+                      : 'All exercises in the selected muscle groups are already in this workout.'}
+                  </Text>
+                ) : null}
+                {activeWorkout.selectedMuscleGroups.map((group) =>
+                  catalogByGroup[group].length > 0 ? (
+                    <CatalogSection
+                      exercises={catalogByGroup[group]}
+                      group={group}
+                      key={group}
+                      onToggle={(exercise) => {
+                        void Haptics.selectionAsync();
+                        toggleExercise(activeWorkout.id, exercise);
+                      }}
+                      selectedIds={selectedIds}
+                    />
+                  ) : null
+                )}
+              </>
             )}
 
-          </ScrollView>
+          </Animated.ScrollView>
         </View>
 
-        <View
-          onLayout={(event) => setBottomBarHeight(event.nativeEvent.layout.height)}
-          style={styles.bottomBar}
-        >
-          <Pressable
-            accessibilityLabel="Add a custom exercise"
-            accessibilityRole="button"
-            onPress={() => router.push({
-              pathname: '/custom-split/new-exercise',
-              params: { workoutId: activeWorkout.id },
-            })}
-            style={[
-              styles.addExerciseButton,
-              hasExercises ? styles.addExerciseButtonFilled : styles.addExerciseButtonEmpty,
-            ]}
-          >
-            <Plus
-              color={hasExercises ? redesignColors.ink : redesignColors.ashDim}
-              size={26}
-              strokeWidth={2.4}
-            />
-            <Text style={[
-              styles.addExerciseText,
-              hasExercises ? styles.addExerciseTextFilled : styles.addExerciseTextEmpty,
-            ]}>
-              Add Exercise
-            </Text>
-          </Pressable>
-        </View>
       </KeyboardAvoidingView>
 
       {contextMenu && contextWorkoutIndex >= 0 ? (
@@ -901,8 +883,7 @@ const styles = StyleSheet.create({
   },
   scrollArea: { flex: 1 },
   scroll: { flex: 1 },
-  // paddingBottom is applied inline from the measured sticky-footer height.
-  scrollContent: { paddingHorizontal: 28 },
+  scrollContent: { paddingHorizontal: 28, paddingBottom: 28 },
   prefillCard: {
     minHeight: 96,
     paddingHorizontal: 24,
@@ -1008,11 +989,16 @@ const styles = StyleSheet.create({
     letterSpacing: -0.35,
   },
   renameButton: {
-    width: 44,
     height: 44,
-    marginRight: -10,
+    flexDirection: 'row',
+    gap: 5,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  renameText: {
+    color: splitColors.chest,
+    fontFamily: redesignFonts.uiSemiBold,
+    fontSize: 13,
   },
   muscleLabel: {
     marginTop: 22,
@@ -1085,40 +1071,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     letterSpacing: 0.8,
   },
-  bottomBar: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    paddingHorizontal: 28,
-    paddingTop: 9,
-    paddingBottom: 8,
-    backgroundColor: redesignColors.ink,
-  },
-  addExerciseButton: {
-    height: 58,
-    borderRadius: 19,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-  },
-  addExerciseButtonFilled: {
-    backgroundColor: splitColors.chest,
-    shadowColor: splitColors.chest,
-    shadowOpacity: 0.3,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 7,
-  },
-  addExerciseButtonEmpty: {
-    borderWidth: 1.5,
-    borderStyle: 'dashed',
-    borderColor: redesignColors.border,
-  },
-  addExerciseText: { fontFamily: redesignFonts.uiBold, fontSize: 20 },
-  addExerciseTextFilled: { color: redesignColors.ink },
-  addExerciseTextEmpty: { color: redesignColors.ashDim },
   menuModal: { flex: 1 },
   menuBackdrop: {
     ...StyleSheet.absoluteFillObject,

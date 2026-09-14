@@ -15,6 +15,7 @@ import {
 } from '@expo-google-fonts/hanken-grotesk';
 import { JetBrainsMono_400Regular, JetBrainsMono_700Bold } from '@expo-google-fonts/jetbrains-mono';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
+import { ActiveWorkoutBar } from '@/components/ActiveWorkoutBar';
 import { initializeWorkoutStore, useWorkoutStore } from '@/store/workoutStore';
 import '@/global.css';
 
@@ -122,24 +123,45 @@ export default function RootLayout() {
         />
         <Stack.Screen
           name="workout"
-          options={{
+          options={({ route }) => ({
             headerShown: false,
             gestureEnabled: false,
-            animation: 'slide_from_right',
+            presentation: 'transparentModal',
+            contentStyle: { backgroundColor: 'transparent' },
+            // These surfaces own their transitions, including the first frame.
+            animation: route.params && (
+              ('fromActivityCard' in route.params && route.params.fromActivityCard === '1') ||
+              'launchOrigin' in route.params
+            ) ? 'none' : 'fade',
             animationTypeForReplace: 'pop',
-          }}
+          })}
         />
         <Stack.Screen
           name="workout-summary"
-          options={{
+          options={({ route }) => ({
             headerShown: false,
             gestureEnabled: false,
-            animation: 'fade',
+            animation:
+              route.params && 'source' in route.params && route.params.source === 'history'
+                ? 'slide_from_right'
+                : 'fade',
             animationTypeForReplace: 'push',
-          }}
+          })}
         />
         <Stack.Screen
           name="records"
+          options={{ headerShown: false, animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="record-detail"
+          options={{ headerShown: false, animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="history"
+          options={{ headerShown: false, animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="history-week"
           options={{ headerShown: false, animation: 'slide_from_right' }}
         />
         <Stack.Screen
@@ -149,6 +171,7 @@ export default function RootLayout() {
         <Stack.Screen name="settings" options={{ headerShown: false, presentation: 'modal' }} />
         <Stack.Screen name="+not-found" />
       </Stack>
+      <ActiveWorkoutBar />
       <StatusBar style="light" />
     </GestureHandlerRootView>
   );

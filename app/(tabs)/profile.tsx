@@ -13,7 +13,8 @@ import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import {
   Check,
-  Flame,
+  ChevronRight,
+  History as HistoryIcon,
   Settings,
   SlidersHorizontal,
   Trophy,
@@ -33,16 +34,11 @@ import {
   useWorkoutStore,
   type WorkoutSession,
 } from '@/store/workoutStore';
-import { formatWeight, kgToLbs, unitLabel, type WeightUnit } from '@/store/weightUnits';
+import { formatWeight, unitLabel, type WeightUnit } from '@/store/weightUnits';
 import { DEFAULT_WEIGHT_UNIT } from '@/store/workoutDatabase';
+import { derivePersonalRecords } from '@/store/personalRecords';
+import { getVerifiedSessions } from '@/store/verifiedSessions';
 import '@/global.css';
-
-type ExerciseDefinition = {
-  key: string;
-  label: string;
-  aliases: string[];
-  color: string;
-};
 
 type StrengthMetric = {
   key: string;
@@ -64,45 +60,6 @@ type StrengthWeekPoint = {
   recorded: boolean;
 };
 
-type PersonalRecord = ExerciseDefinition & {
-  weight: number | null;
-  reps: number | null;
-  daysAgo: number | null;
-};
-
-const TRACKED_EXERCISES = {
-  bench: {
-    key: 'bench',
-    label: 'Bench Press',
-    aliases: ['Bench Press'],
-    color: splitColors.chest,
-  },
-  deadlift: {
-    key: 'deadlift',
-    label: 'Deadlift',
-    aliases: ['Deadlift'],
-    color: splitColors.back,
-  },
-  squat: {
-    key: 'squat',
-    label: 'Squat',
-    aliases: ['Squat', 'Squats'],
-    color: splitColors.legs,
-  },
-  overheadPress: {
-    key: 'overhead-press',
-    label: 'Overhead Press',
-    aliases: ['Overhead Press'],
-    color: splitColors.shoulders,
-  },
-} satisfies Record<string, ExerciseDefinition>;
-
-const PERSONAL_RECORD_EXERCISES: ExerciseDefinition[] = [
-  TRACKED_EXERCISES.deadlift,
-  TRACKED_EXERCISES.bench,
-  TRACKED_EXERCISES.squat,
-];
-
 const SECTION_BORDER = 'rgba(169, 159, 145, 0.18)';
 const STREAK_ORANGE = splitColors.chest;
 const STRENGTH_RANGES: StrengthRange[] = [4, 8, 12, 16];
@@ -122,16 +79,6 @@ const useWeightUnit = (): WeightUnit =>
 
 const formatNumber = (value: number) =>
   value.toLocaleString('en-US', { maximumFractionDigits: 1 });
-
-const getSessionVolume = (session: WorkoutSession) => {
-  const allSets = session.exercises.flatMap((exercise) => exercise.sets);
-  const completedSets = allSets.filter((set) => set.completed);
-  const setsToCount = completedSets.length > 0 ? completedSets : allSets;
-  return setsToCount.reduce((sum, set) => sum + set.weight * set.reps, 0);
-};
-
-const matchingExercise = (session: WorkoutSession, aliases: string[]) =>
-  session.exercises.find((exercise) => aliases.includes(exercise.name));
 
 type StrengthHistoryEntry = { date: Date; weight: number };
 
@@ -221,58 +168,6 @@ function deriveStrengthMetrics(
         || a.label.localeCompare(b.label)
     )
     .slice(0, 4);
-}
-
-function derivePersonalRecords(completedSessions: WorkoutSession[]) {
-  return PERSONAL_RECORD_EXERCISES.map((exercise) => {
-    const candidates = completedSessions.flatMap((session) => {
-      const matching = matchingExercise(session, exercise.aliases);
-      if (!matching) return [];
-      const completedSets = matching.sets.filter((set) => set.completed);
-      const sets = completedSets.length > 0 ? completedSets : matching.sets;
-      return sets.map((set) => ({
-        weight: set.weight,
-        reps: set.reps,
-        date: parseSessionDate(session.date),
-      }));
-    });
-
-    if (candidates.length === 0) {
-      return { ...exercise, weight: null, reps: null, daysAgo: null };
-    }
-
-    const best = [...candidates].sort(
-      (a, b) => b.weight - a.weight || b.reps - a.reps || b.date.getTime() - a.date.getTime()
-    )[0];
-    const daysAgo = Math.max(
-      0,
-      Math.floor((Date.now() - best.date.getTime()) / 86_400_000)
-    );
-
-    return { ...exercise, weight: best.weight, reps: best.reps, daysAgo };
-  });
-}
-
-function deriveConsistency(completedSessions: WorkoutSession[], weeklyGoal: number) {
-  const currentWeek = getStartOfWeek(new Date());
-  const weeks = Array.from({ length: 24 }, (_, index) => {
-    const weekStart = new Date(currentWeek);
-    weekStart.setDate(currentWeek.getDate() - (23 - index) * 7);
-    const nextWeek = new Date(weekStart);
-    nextWeek.setDate(weekStart.getDate() + 7);
-    const count = completedSessions.filter((session) => {
-      const date = parseSessionDate(session.date);
-      return date >= weekStart && date < nextWeek;
-    }).length;
-    return count >= weeklyGoal;
-  });
-
-  let streak = 0;
-  for (let index = weeks.length - 1; index >= 0 && weeks[index]; index -= 1) {
-    streak += 1;
-  }
-
-  return { weeks, hitWeeks: weeks.filter(Boolean).length, streak };
 }
 
 function SectionHeader({
@@ -694,49 +589,6 @@ function StrengthProgressionDetail({
   );
 }
 
-function ConsistencyCard({
-  weeks,
-  hitWeeks,
-  streak,
-  weeklyGoal,
-}: {
-  weeks: boolean[];
-  hitWeeks: number;
-  streak: number;
-  weeklyGoal: number;
-}) {
-  const rows = [weeks.slice(0, 8), weeks.slice(8, 16), weeks.slice(16, 24)];
-
-  return (
-    <View style={styles.consistencyCard}>
-      <View style={styles.consistencyCopy}>
-        <View style={styles.streakRow}>
-          <Flame color={STREAK_ORANGE} fill={STREAK_ORANGE} size={16} strokeWidth={1.7} />
-          <Text style={styles.streakLabel}>{streak}-WEEK STREAK</Text>
-        </View>
-        <View style={styles.weekCountRow}>
-          <Text style={styles.weekCount}>{hitWeeks}</Text>
-          <Text style={styles.weekCountSuffix}>of 24 weeks</Text>
-        </View>
-        <Text style={styles.goalCopy}>hit your {weeklyGoal}×/week goal</Text>
-      </View>
-
-      <View accessibilityLabel={`${hitWeeks} of 24 weeks met your goal`} style={styles.weekGrid}>
-        {rows.map((row, rowIndex) => (
-          <View key={rowIndex} style={styles.weekGridRow}>
-            {row.map((complete, columnIndex) => (
-              <View
-                key={`${rowIndex}-${columnIndex}`}
-                style={[styles.weekCell, complete ? styles.weekCellComplete : styles.weekCellEmpty]}
-              />
-            ))}
-          </View>
-        ))}
-      </View>
-    </View>
-  );
-}
-
 function WeeklyGoalCard({ completed, goal }: { completed: number; goal: number }) {
   const visibleGoal = Math.max(1, Math.min(goal, 7));
   const visibleCompleted = Math.min(completed, visibleGoal);
@@ -750,11 +602,19 @@ function WeeklyGoalCard({ completed, goal }: { completed: number; goal: number }
     >
       <LinearGradient
         pointerEvents="none"
-        colors={['rgba(241, 130, 73, 0.20)', 'rgba(42, 35, 29, 0.82)', redesignColors.surface]}
-        locations={[0, 0.52, 1]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={StyleSheet.absoluteFill}
+        colors={['#6F3D25', '#452B1E', '#2C201A']}
+        locations={[0, 0.5, 1]}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+        style={styles.weeklyGoalBorder}
+      />
+      <LinearGradient
+        pointerEvents="none"
+        colors={['#3E281D', '#35241B', '#2B1F19', '#201B18', '#171716']}
+        locations={[0, 0.28, 0.56, 0.82, 1]}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+        style={styles.weeklyGoalFill}
       />
 
       <View style={styles.weeklyGoalTopRow}>
@@ -790,45 +650,6 @@ function WeeklyGoalCard({ completed, goal }: { completed: number; goal: number }
   );
 }
 
-function VolumeCard({ label, value }: { label: string; value: number }) {
-  const weightUnit = useWeightUnit();
-
-  return (
-    <View style={styles.volumeCard}>
-      <Text style={styles.volumeLabel}>{label}</Text>
-      <Text adjustsFontSizeToFit minimumFontScale={0.74} numberOfLines={1} style={styles.volumeValue}>
-        {formatNumber(weightUnit === 'lbs' ? kgToLbs(value) : value)}
-      </Text>
-      <Text style={styles.volumeUnit}>{unitLabel(weightUnit)} lifted</Text>
-    </View>
-  );
-}
-
-function RecordCard({ record }: { record: PersonalRecord }) {
-  const weightUnit = useWeightUnit();
-  const hasRecord = record.weight !== null && record.reps !== null && record.daysAgo !== null;
-  const details = record.weight === null || record.reps === null
-    ? 'No record yet'
-    : `${formatWeight(record.weight, weightUnit)} ${unitLabel(weightUnit)} × ${record.reps} reps`;
-
-  return (
-    <View style={styles.recordCard}>
-      <View style={[styles.trophyTile, { backgroundColor: `${record.color}21` }]}>
-        <Trophy color={record.color} size={21} strokeWidth={2} />
-      </View>
-      <View style={styles.recordCopy}>
-        <Text numberOfLines={1} style={styles.recordName}>{record.label}</Text>
-        <Text numberOfLines={1} style={styles.recordDetails}>
-          {details}
-        </Text>
-      </View>
-      {hasRecord ? (
-        <Text style={styles.recordAge}>{record.daysAgo === 0 ? 'today' : `${record.daysAgo}d ago`}</Text>
-      ) : null}
-    </View>
-  );
-}
-
 export default function Progress() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -844,8 +665,8 @@ export default function Progress() {
     [sessions]
   );
   const verifiedSessions = useMemo(
-    () => completedSessions.filter((session) => !session.retroactive),
-    [completedSessions]
+    () => getVerifiedSessions(sessions),
+    [sessions]
   );
   const strengthMetrics = useMemo(
     () => deriveStrengthMetrics(verifiedSessions, strengthRange),
@@ -859,21 +680,6 @@ export default function Progress() {
     () => derivePersonalRecords(verifiedSessions),
     [verifiedSessions]
   );
-  const consistency = useMemo(
-    () => deriveConsistency(completedSessions, profile?.weeklyGoal ?? 4),
-    [completedSessions, profile?.weeklyGoal]
-  );
-  const volumes = useMemo(() => {
-    const currentWeek = getStartOfWeek(new Date());
-    const thisWeek = verifiedSessions
-      .filter((session) => parseSessionDate(session.date) >= currentWeek)
-      .reduce((sum, session) => sum + getSessionVolume(session), 0);
-    const allTime = verifiedSessions.reduce(
-      (sum, session) => sum + getSessionVolume(session),
-      0
-    );
-    return { thisWeek, allTime };
-  }, [verifiedSessions]);
   const weeklyProgress = getWeeklyProgress();
 
   if (!profile) return null;
@@ -885,6 +691,10 @@ export default function Progress() {
   const openAllRecords = () => {
     if (Platform.OS !== 'web') void Haptics.selectionAsync();
     router.push('/records');
+  };
+  const openHistory = () => {
+    if (Platform.OS !== 'web') void Haptics.selectionAsync();
+    router.push('/history' as Parameters<typeof router.push>[0]);
   };
   const openStrengthDetail = (metric: StrengthMetric) => {
     if (Platform.OS !== 'web') void Haptics.selectionAsync();
@@ -966,40 +776,47 @@ export default function Progress() {
         </View>
 
         <View style={styles.section}>
-          <SectionHeader label="CONSISTENCY" />
-          <ConsistencyCard
-            weeks={consistency.weeks}
-            hitWeeks={consistency.hitWeeks}
-            streak={consistency.streak}
-            weeklyGoal={profile.weeklyGoal}
-          />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Personal Records. ${personalRecords.length} exercises tracked`}
+            onPress={openAllRecords}
+            style={styles.recordCard}
+          >
+            <View style={[styles.trophyTile, { backgroundColor: `${STREAK_ORANGE}21` }]}>
+              <Trophy color={STREAK_ORANGE} size={21} strokeWidth={2} />
+            </View>
+            <View style={styles.recordCopy}>
+              <Text style={styles.recordName}>Personal Records</Text>
+              <Text style={styles.recordDetails}>{personalRecords.length} exercises tracked</Text>
+            </View>
+            <ChevronRight color={redesignColors.ash} size={21} style={styles.historyChevron} />
+          </Pressable>
         </View>
 
-        <View style={styles.section}>
-          <SectionHeader label="VOLUME" />
-          <View style={styles.volumeGrid}>
-            <VolumeCard label="This week" value={volumes.thisWeek} />
-            <VolumeCard label="All-time" value={volumes.allTime} />
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <View style={styles.recordsHeader}>
-            <Text style={styles.sectionLabel}>PERSONAL RECORDS</Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="View all personal records"
-              onPress={openAllRecords}
-              style={({ pressed }) => [styles.viewAllButton, pressed && styles.viewAllPressed]}
-            >
-              <Text numberOfLines={1} style={styles.viewAllText}>VIEW ALL  →</Text>
-            </Pressable>
-          </View>
-          <View style={styles.recordList}>
-            {personalRecords.map((record) => (
-              <RecordCard key={record.key} record={record} />
-            ))}
-          </View>
+        <View style={[styles.section, styles.compactSection]}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`View history. ${completedSessions.length} ${completedSessions.length === 1 ? 'workout' : 'workouts'} logged`}
+            onPress={openHistory}
+            style={[styles.recordCard, styles.historyCard]}
+          >
+            <View style={[styles.trophyTile, { backgroundColor: `${STREAK_ORANGE}21` }]}>
+              <HistoryIcon color={STREAK_ORANGE} size={21} strokeWidth={2} />
+            </View>
+            <View style={styles.recordCopy}>
+              <Text numberOfLines={1} style={styles.recordName}>History</Text>
+              <Text numberOfLines={1} style={styles.recordDetails}>
+                {completedSessions.length}{' '}
+                {completedSessions.length === 1 ? 'workout' : 'workouts'} logged
+              </Text>
+            </View>
+            <ChevronRight
+              color={redesignColors.ash}
+              size={21}
+              strokeWidth={2.1}
+              style={styles.historyChevron}
+            />
+          </Pressable>
         </View>
       </ScrollView>
 
@@ -1071,10 +888,27 @@ const styles = StyleSheet.create({
     borderRadius: 27,
     borderCurve: 'continuous',
     borderWidth: 1,
-    borderColor: 'rgba(241, 130, 73, 0.56)',
-    backgroundColor: redesignColors.surface,
-    overflow: 'hidden',
+    borderColor: 'transparent',
+    backgroundColor: '#171716',
+    shadowColor: STREAK_ORANGE,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.13,
+    shadowRadius: 20,
     justifyContent: 'space-between',
+  },
+  weeklyGoalBorder: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 27,
+    borderCurve: 'continuous',
+  },
+  weeklyGoalFill: {
+    position: 'absolute',
+    top: 1,
+    right: 1,
+    bottom: 1,
+    left: 1,
+    borderRadius: 26,
+    borderCurve: 'continuous',
   },
   weeklyGoalTopRow: {
     flexDirection: 'row',
@@ -1142,6 +976,9 @@ const styles = StyleSheet.create({
   },
   section: {
     marginTop: 34,
+  },
+  compactSection: {
+    marginTop: 24,
   },
   sectionHeader: {
     minHeight: 44,
@@ -1687,143 +1524,6 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     color: redesignColors.ash,
   },
-  consistencyCard: {
-    minHeight: 236,
-    paddingHorizontal: 25,
-    paddingVertical: 24,
-    borderRadius: 27,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    borderColor: SECTION_BORDER,
-    backgroundColor: redesignColors.surface,
-    alignItems: 'stretch',
-  },
-  consistencyCopy: {
-    width: '100%',
-  },
-  streakRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-  },
-  streakLabel: {
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 12,
-    lineHeight: 17,
-    letterSpacing: 1.4,
-    color: STREAK_ORANGE,
-  },
-  weekCountRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    marginTop: 12,
-  },
-  weekCount: {
-    fontFamily: redesignFonts.display,
-    fontSize: 43,
-    lineHeight: 46,
-    letterSpacing: -1,
-    color: redesignColors.bone,
-  },
-  weekCountSuffix: {
-    marginLeft: 8,
-    marginBottom: 5,
-    fontFamily: redesignFonts.uiSemiBold,
-    fontSize: 14,
-    lineHeight: 18,
-    color: redesignColors.ash,
-  },
-  goalCopy: {
-    marginTop: 2,
-    fontFamily: redesignFonts.uiMedium,
-    fontSize: 15,
-    lineHeight: 20,
-    color: redesignColors.ash,
-  },
-  weekGrid: {
-    width: '100%',
-    marginTop: 18,
-    gap: 6,
-  },
-  weekGridRow: {
-    flexDirection: 'row',
-    gap: 5,
-  },
-  weekCell: {
-    flex: 1,
-    aspectRatio: 1,
-    maxHeight: 27,
-    borderRadius: 5,
-  },
-  weekCellComplete: {
-    backgroundColor: STREAK_ORANGE,
-  },
-  weekCellEmpty: {
-    backgroundColor: redesignColors.raised,
-  },
-  volumeGrid: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  volumeCard: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: 130,
-    paddingHorizontal: 20,
-    paddingVertical: 21,
-    borderRadius: 25,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    borderColor: SECTION_BORDER,
-    backgroundColor: redesignColors.surface,
-  },
-  volumeLabel: {
-    fontFamily: redesignFonts.uiMedium,
-    fontSize: 14,
-    color: redesignColors.ash,
-  },
-  volumeValue: {
-    marginTop: 10,
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 27,
-    lineHeight: 32,
-    letterSpacing: -1,
-    color: redesignColors.bone,
-  },
-  volumeUnit: {
-    marginTop: 1,
-    fontFamily: redesignFonts.mono,
-    fontSize: 11,
-    letterSpacing: 0.35,
-    color: redesignColors.ashDim,
-  },
-  recordsHeader: {
-    minHeight: 28,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 14,
-  },
-  viewAllButton: {
-    width: 104,
-    minHeight: 44,
-    marginVertical: -8,
-    flexShrink: 0,
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-  },
-  viewAllPressed: {
-    opacity: 0.65,
-  },
-  viewAllText: {
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 11,
-    letterSpacing: 0.5,
-    color: STREAK_ORANGE,
-  },
-  recordList: {
-    gap: 11,
-  },
   recordCard: {
     minHeight: 88,
     paddingHorizontal: 18,
@@ -1835,6 +1535,14 @@ const styles = StyleSheet.create({
     backgroundColor: redesignColors.surface,
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  historyCard: {
+    width: '100%',
+    overflow: 'hidden',
+  },
+  historyChevron: {
+    marginLeft: 10,
+    flexShrink: 0,
   },
   trophyTile: {
     width: 50,
@@ -1862,10 +1570,5 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     color: redesignColors.ash,
   },
-  recordAge: {
-    marginLeft: 10,
-    fontFamily: redesignFonts.mono,
-    fontSize: 11,
-    color: redesignColors.ashDim,
-  },
+
 });

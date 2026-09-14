@@ -3,13 +3,16 @@ import {
   Alert,
   BackHandler,
   Platform,
-  SafeAreaView,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useRouter } from 'expo-router';
-import { Check, ChevronRight, Repeat2, X } from 'lucide-react-native';
+import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { WorkoutMinimizeSurface, type WorkoutMinimizeHandle } from '@/components/WorkoutMinimizeSurface';
+import { WorkoutLaunchSection, WorkoutLaunchSurface } from '@/components/WorkoutLaunchSurface';
+import { parseWorkoutLaunchOrigin } from '@/utils/workoutLaunch';
+import { Check, ChevronDown, ChevronRight, Repeat2, X } from 'lucide-react-native';
 import Animated, {
   Easing,
   FadeIn,
@@ -36,6 +39,7 @@ import {
 } from '@/components/BonusSet';
 import { ExerciseFinisher } from '@/components/ExerciseFinisher';
 import { SwapExerciseSheet } from '@/components/SwapExerciseSheet';
+import { UpNextSheet, type RemainingExercise } from '@/components/UpNextSheet';
 import { WorkoutDayLabel } from '@/components/WorkoutDayLabel';
 import { WorkoutIntensityPicker } from '@/components/home/WorkoutIntensityPicker';
 import { ARCHETYPE_COMPOSITIONS } from '@/constants/archetypes';
@@ -48,9 +52,12 @@ import {
   type ExerciseSet,
   useWorkoutStore,
 } from '@/store/workoutStore';
-import { DEFAULT_WEIGHT_INCREMENT, DEFAULT_WEIGHT_UNIT } from '@/store/workoutDatabase';
-import { formatWeight, type WeightUnit } from '@/store/weightUnits';
+import { DEFAULT_WEIGHT_UNIT } from '@/store/workoutDatabase';
+import { formatWeight, getWeightIncrement, type WeightUnit } from '@/store/weightUnits';
+import { getInitialExerciseIndex } from '@/utils/workoutResume';
 import '@/global.css';
+
+const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
 const FEEDBACK_LEVELS = [
   { value: 0, label: 'TOO EASY' },
@@ -195,15 +202,15 @@ function SetPip({
             style={[
               {
                 position: 'absolute',
-                width: 38,
-                height: 38,
-                borderRadius: 19,
+                width: 30,
+                height: 30,
+                borderRadius: 15,
                 backgroundColor: accent,
                 shadowColor: accent,
                 shadowOpacity: 0.9,
-                shadowRadius: 14,
+                shadowRadius: 18,
                 shadowOffset: { width: 0, height: 0 },
-                elevation: 10,
+                elevation: 12,
               },
               glowStyle,
             ]}
@@ -316,15 +323,6 @@ function SetProgress({
   );
 }
 
-const getInitialExerciseIndex = (
-  exercises: NonNullable<ReturnType<typeof useWorkoutStore.getState>['currentSession']>['exercises']
-) => {
-  const firstIncomplete = exercises.findIndex((exercise) =>
-    exercise.sets.some((set) => !set.completed)
-  );
-  return firstIncomplete === -1 ? Math.max(0, exercises.length - 1) : firstIncomplete;
-};
-
 const isExerciseComplete = (exercise: Exercise) =>
   exercise.sets.every((set) => set.completed);
 
@@ -340,15 +338,39 @@ const getNextIncompleteExerciseIndex = (
   return -1;
 };
 
+const getRemainingExercises = (
+  exercises: Exercise[],
+  currentIndex: number
+): RemainingExercise[] => {
+  const remaining: RemainingExercise[] = [];
+
+  for (let offset = 1; offset < exercises.length; offset += 1) {
+    const index = (currentIndex + offset) % exercises.length;
+    const exercise = exercises[index];
+    if (!isExerciseComplete(exercise)) remaining.push({ exercise, index });
+  }
+
+  return remaining;
+};
+
 export default function Workout() {
   const router = useRouter();
+  const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
+  const { fromActivityCard, launchOrigin: launchOriginParam } = useLocalSearchParams<{
+    fromActivityCard?: string;
+    launchOrigin?: string;
+  }>();
+  const [launchOrigin] = useState(() => fromActivityCard === '1' ? null : parseWorkoutLaunchOrigin(launchOriginParam));
+  const minimizeRef = useRef<WorkoutMinimizeHandle>(null);
   const currentSession = useWorkoutStore((state) => state.currentSession);
   const weightIncrement = useWorkoutStore(
-    (state) => state.profile?.weightIncrement ?? DEFAULT_WEIGHT_INCREMENT
+    (state) => (state.profile ? getWeightIncrement(state.profile) : null)
   );
   const weightUnit = useWorkoutStore(
     (state) => state.profile?.weightUnit ?? DEFAULT_WEIGHT_UNIT
   );
+  const updateProfile = useWorkoutStore((state) => state.updateProfile);
   const updateExerciseSet = useWorkoutStore((state) => state.updateExerciseSet);
   const appendBonusSet = useWorkoutStore((state) => state.appendBonusSet);
   const toggleSetCompleted = useWorkoutStore((state) => state.toggleSetCompleted);
@@ -363,6 +385,7 @@ export default function Workout() {
     currentSession ? getInitialExerciseIndex(currentSession.exercises) : 0
   );
   const [showSwapSheet, setShowSwapSheet] = useState(false);
+  const [showUpNextSheet, setShowUpNextSheet] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [bonusSelection, setBonusSelection] = useState<BonusSetSelection | null>(null);
   const [loggedBonusSet, setLoggedBonusSet] = useState<BonusSetSelection | null>(null);
@@ -425,7 +448,7 @@ export default function Workout() {
     renderedExerciseIdentityRef.current = exerciseIdentity;
   }, [exerciseIdentity]);
 
-  if (!currentSession) return null;
+  if (!currentSession || weightIncrement === null) return null;
   const workoutType = currentSession.workoutTypes[0];
   if (!workoutType) return null;
 
@@ -454,6 +477,10 @@ export default function Workout() {
     nextIncompleteExerciseIndex === -1
       ? undefined
       : currentSession.exercises[nextIncompleteExerciseIndex];
+  const remainingExercises = getRemainingExercises(
+    currentSession.exercises,
+    exerciseIndex
+  );
   const exerciseComplete = isExerciseComplete(exercise);
 
   const handleRepsChange = (delta: number) => {
@@ -541,6 +568,11 @@ export default function Workout() {
     setShowSwapSheet(false);
   };
 
+  const handleNavigateFromUpNext = (targetIndex: number) => {
+    navigateToExercise(targetIndex, 'forward');
+    setShowUpNextSheet(false);
+  };
+
   const handleSwapExercise = (name: string) => {
     setExerciseMotion('replace');
     swapCurrentSessionExercise(exerciseIndex, name);
@@ -587,7 +619,26 @@ export default function Workout() {
     hasRenderedRef.current && renderedExerciseIdentityRef.current === exerciseIdentity;
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: redesignColors.ink }}>
+    <WorkoutLaunchSurface origin={launchOrigin}>
+    <WorkoutMinimizeSurface
+      ref={minimizeRef}
+      expandFromCard={fromActivityCard === '1'}
+      session={currentSession}
+      onMinimize={() => {
+        if (router.canGoBack()) router.back();
+        else router.replace('/(tabs)');
+      }}
+    >
+    {/* Keep padding tied to the screen, not the moving surface's native bounds.
+        Native SafeAreaView recalculates its insets during the morph. */}
+    <View style={{
+      flex: 1,
+      backgroundColor: redesignColors.ink,
+      paddingTop: insets.top,
+      paddingBottom: insets.bottom,
+      paddingLeft: insets.left,
+      paddingRight: insets.right,
+    }}>
       <View
         style={{
           flex: 1,
@@ -596,6 +647,7 @@ export default function Workout() {
           paddingBottom: 20,
         }}
       >
+        <WorkoutLaunchSection>
         <View
           style={{
             flexDirection: 'row',
@@ -643,6 +695,30 @@ export default function Workout() {
 
             <TouchableOpacity
               accessibilityRole="button"
+              accessibilityLabel="Minimize workout"
+              accessibilityHint="Keep your workout active and return to the previous screen"
+              onPress={() => {
+                navigation.setOptions({ animation: 'none' });
+                minimizeRef.current?.minimize();
+              }}
+              activeOpacity={0.7}
+              style={{
+                width: 42,
+                height: 42,
+                marginLeft: 10,
+                borderRadius: 21,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderWidth: 1,
+                borderColor: redesignColors.border,
+                backgroundColor: redesignColors.surface,
+              }}
+            >
+              <ChevronDown color={redesignColors.ash} size={20} strokeWidth={2.4} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              accessibilityRole="button"
               accessibilityLabel="Close workout"
               onPress={confirmDiscardWorkout}
               activeOpacity={0.7}
@@ -662,7 +738,9 @@ export default function Workout() {
             </TouchableOpacity>
           </View>
         </View>
+        </WorkoutLaunchSection>
 
+        <WorkoutLaunchSection order={1}>
         <Animated.View
           key={`title-${exerciseIdentity}`}
           entering={animateExercise ? exerciseEntering : undefined}
@@ -723,7 +801,9 @@ export default function Workout() {
             />
           ))}
         </View>
+        </WorkoutLaunchSection>
 
+        <WorkoutLaunchSection order={2} fill>
         <Animated.View
           key={`body-${exerciseIdentity}`}
           entering={animateExercise ? exerciseEntering : undefined}
@@ -732,10 +812,8 @@ export default function Workout() {
         >
           <Animated.View
             style={{
-              flex: 1,
-              justifyContent: exerciseComplete ? 'flex-start' : 'center',
-              paddingTop: exerciseComplete ? 36 : 18,
-              paddingBottom: 18,
+              marginTop: 24,
+              marginBottom: 22,
             }}
           >
             <Animated.View
@@ -829,7 +907,7 @@ export default function Workout() {
                     entering={animateStage ? FORWARD_ENTER : undefined}
                     exiting={STAGE_EXIT}
                     layout={STAGE_LAYOUT}
-                    style={{ marginTop: 20 }}
+                    style={{ marginTop: 24 }}
                   >
                     <ActiveSetCard
                       setNumber={setIndex + 1}
@@ -837,6 +915,7 @@ export default function Workout() {
                       weight={activeSet.weight}
                       weightIncrement={weightIncrement}
                       weightUnit={weightUnit}
+                      onWeightUnitChange={(unit) => updateProfile({ weightUnit: unit })}
                       weightDeltaLabel={weightDeltaLabel}
                       accent={accent}
                       onRepsChange={handleRepsChange}
@@ -851,7 +930,14 @@ export default function Workout() {
           </Animated.View>
 
           {nextExercise && !exerciseComplete && !bonusSelection && !loggedBonusSet ? (
-          <Animated.View
+          <AnimatedTouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel={`Up next, ${remainingExercises.length} ${
+              remainingExercises.length === 1 ? 'exercise' : 'exercises'
+            } remaining`}
+            accessibilityHint="Shows the remaining exercise queue"
+            activeOpacity={0.72}
+            onPress={() => setShowUpNextSheet(true)}
             exiting={UP_NEXT_EXIT}
             style={{
               height: 82,
@@ -918,9 +1004,10 @@ export default function Workout() {
                 <ChevronRight color={redesignColors.ashDim} size={20} style={{ marginLeft: 7 }} />
               </View>
             </View>
-          </Animated.View>
+          </AnimatedTouchableOpacity>
           ) : null}
         </Animated.View>
+        </WorkoutLaunchSection>
       </View>
 
       <SwapExerciseSheet
@@ -934,6 +1021,14 @@ export default function Workout() {
         onNavigate={handleNavigateExercise}
         onReplace={handleSwapExercise}
         onClose={() => setShowSwapSheet(false)}
+      />
+
+      <UpNextSheet
+        visible={showUpNextSheet}
+        accent={accent}
+        exercises={remainingExercises}
+        onNavigate={handleNavigateFromUpNext}
+        onClose={() => setShowUpNextSheet(false)}
       />
 
       <WorkoutIntensityPicker
@@ -950,6 +1045,8 @@ export default function Workout() {
         }}
         onClose={() => setShowFeedbackModal(false)}
       />
-    </SafeAreaView>
+    </View>
+    </WorkoutMinimizeSurface>
+    </WorkoutLaunchSurface>
   );
 }

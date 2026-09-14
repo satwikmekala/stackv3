@@ -1,6 +1,7 @@
 import { openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
 
 import type { Archetype } from '@/constants/archetypes';
+import { EmptyCustomWorkoutError } from '@/store/customSplits';
 
 import type {
   CustomSplit,
@@ -20,6 +21,8 @@ import type {
   WorkoutType,
 } from '@/store/workoutStore';
 import type { WeightUnit } from '@/store/weightUnits';
+import type { RecordSet } from '@/store/personalRecords';
+import { getVerifiedSessions } from '@/store/verifiedSessions';
 import {
   createCompletedSessionExercise,
   createSessionExercise,
@@ -29,14 +32,15 @@ import {
 const DATABASE_NAME = 'workouts.db';
 const CURRENT_SCHEMA_VERSION = 13;
 
-// Default step for the manual weight steppers; mirrors the profile column
-// default so a fresh row and a migrated row agree.
-export const DEFAULT_WEIGHT_INCREMENT = 2.5;
+// Kg-native step assigned only when a brand-new profile is created. Legacy
+// profiles that predate this column retain the historical 2.5 kg migration
+// backfill below.
+export const NEW_PROFILE_WEIGHT_INCREMENT = 0.5;
 
 // Display unit for every weight surface; storage stays kg-canonical regardless.
 export const DEFAULT_WEIGHT_UNIT: WeightUnit = 'kg';
 
-// Lb-native step, independent of DEFAULT_WEIGHT_INCREMENT — it is not a
+// Lb-native step, independent of the new-profile kg increment — it is not a
 // conversion of the kg value, it is the increment lifters expect in lbs.
 export const DEFAULT_WEIGHT_INCREMENT_LBS = 5;
 
@@ -453,7 +457,8 @@ CREATE TABLE IF NOT EXISTS profile (
   experience_level TEXT NOT NULL DEFAULT 'intermediate',
   training_days TEXT NOT NULL DEFAULT '[]',
   onboarding_completed INTEGER NOT NULL DEFAULT 0,
-  weight_increment REAL NOT NULL DEFAULT 2.5,
+  auto_increase_weight INTEGER NOT NULL DEFAULT 1,
+  weight_increment REAL NOT NULL DEFAULT ${NEW_PROFILE_WEIGHT_INCREMENT},
   weight_unit TEXT NOT NULL DEFAULT 'kg',
   weight_increment_lbs REAL NOT NULL DEFAULT 5,
   active_split_id INTEGER REFERENCES custom_splits(id)
@@ -483,6 +488,7 @@ interface ProfileRow {
   experience_level: ExperienceLevel;
   training_days: string;
   onboarding_completed: number;
+  auto_increase_weight: number;
   weight_increment: number;
   weight_unit: WeightUnit;
   weight_increment_lbs: number;
@@ -656,7 +662,8 @@ const profileFromRow = (row: ProfileRow | null): UserProfile | null => {
     experienceLevel: row.experience_level,
     trainingDays,
     onboardingCompleted: Boolean(row.onboarding_completed),
-    weightIncrement: row.weight_increment ?? DEFAULT_WEIGHT_INCREMENT,
+    autoIncreaseWeight: Boolean(row.auto_increase_weight),
+    weightIncrement: row.weight_increment,
     weightUnit: row.weight_unit ?? DEFAULT_WEIGHT_UNIT,
     weightIncrementLbs: row.weight_increment_lbs ?? DEFAULT_WEIGHT_INCREMENT_LBS,
     activeSplitId: row.active_split_id ?? null,
@@ -1102,7 +1109,17 @@ const ensureProfileWeightIncrementColumnAsync = async (
 ): Promise<void> => {
   if (!(await tableHasColumnAsync(db, 'profile', 'weight_increment'))) {
     await db.execAsync(
-      `ALTER TABLE profile ADD COLUMN weight_increment REAL NOT NULL DEFAULT ${DEFAULT_WEIGHT_INCREMENT};`
+      'ALTER TABLE profile ADD COLUMN weight_increment REAL NOT NULL DEFAULT 2.5;'
+    );
+  }
+};
+
+const ensureProfileAutoIncreaseWeightColumnAsync = async (
+  db: SQLiteDatabase
+): Promise<void> => {
+  if (!(await tableHasColumnAsync(db, 'profile', 'auto_increase_weight'))) {
+    await db.execAsync(
+      'ALTER TABLE profile ADD COLUMN auto_increase_weight INTEGER NOT NULL DEFAULT 1;'
     );
   }
 };
@@ -1375,6 +1392,7 @@ export const initializeWorkoutDatabase = async (): Promise<SQLiteDatabase> => {
       await removeLegacyTestExerciseAsync(opened);
     }
     await ensureSessionRetroactiveColumnAsync(opened);
+    await ensureProfileAutoIncreaseWeightColumnAsync(opened);
     await ensureProfileWeightIncrementColumnAsync(opened);
     await ensureProfileWeightUnitColumnAsync(opened);
     await ensureProfileWeightIncrementLbsColumnAsync(opened);
@@ -1557,6 +1575,39 @@ export const readCompletedSessionsSync = (): WorkoutSession[] =>
     getDatabase().getAllSync<SessionJoinRow>(sessionJoinSql('WHERE s.completed = 1'))
   );
 
+/** Set-level history for one exact catalog name, scoped by the shared verification rule. */
+export function readExerciseRecordSetsSync(
+  exerciseName: string,
+  sessions: readonly WorkoutSession[]
+): RecordSet[] {
+  const verified = new Map(getVerifiedSessions(sessions).map((session) => [session.id, session]));
+  if (verified.size === 0) return [];
+  return getDatabase().getAllSync<{
+    id: number; session_id: number; exercise_index: number; set_index: number;
+    weight: number; reps: number;
+  }>(
+    `SELECT st.id, s.id AS session_id, se.position AS exercise_index,
+            st.set_index, st.weight, st.reps
+     FROM sets st
+     JOIN session_exercises se ON se.id = st.session_exercise_id
+     JOIN sessions s ON s.id = se.session_id
+     JOIN exercises e ON e.id = se.exercise_id
+     WHERE e.name = ? AND st.completed = 1 AND st.skipped = 0
+     ORDER BY julianday(s.date) DESC, s.id DESC, se.position ASC, st.set_index ASC`,
+    exerciseName
+  ).filter((row) => verified.has(String(row.session_id))).map((row) => {
+    const session = verified.get(String(row.session_id))!;
+    // Preserve the app's local-calendar interpretation of date-only legacy sessions.
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(session.date)
+      ? new Date(`${session.date}T00:00:00`) : new Date(session.date);
+    return {
+      id: String(row.id), sessionId: session.id, date,
+      exerciseIndex: row.exercise_index, setIndex: row.set_index,
+      weight: row.weight, reps: row.reps,
+    };
+  });
+}
+
 /**
  * Stable rotation source for Custom Splits: the workout ID of the most recent
  * successfully completed live session belonging to `splitId`.
@@ -1633,14 +1684,15 @@ export const writeProfile = (profile: UserProfile): void => {
   getDatabase().runSync(
     `INSERT INTO profile
       (id, name, weekly_goal, experience_level, training_days, onboarding_completed,
-       weight_increment, weight_unit, weight_increment_lbs, active_split_id)
-     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       auto_increase_weight, weight_increment, weight_unit, weight_increment_lbs, active_split_id)
+     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        name = excluded.name,
        weekly_goal = excluded.weekly_goal,
        experience_level = excluded.experience_level,
        training_days = excluded.training_days,
        onboarding_completed = excluded.onboarding_completed,
+       auto_increase_weight = excluded.auto_increase_weight,
        weight_increment = excluded.weight_increment,
        weight_unit = excluded.weight_unit,
        weight_increment_lbs = excluded.weight_increment_lbs,
@@ -1650,6 +1702,7 @@ export const writeProfile = (profile: UserProfile): void => {
     profile.experienceLevel,
     JSON.stringify(profile.trainingDays),
     profile.onboardingCompleted ? 1 : 0,
+    profile.autoIncreaseWeight ? 1 : 0,
     profile.weightIncrement,
     profile.weightUnit,
     profile.weightIncrementLbs,
@@ -2119,8 +2172,8 @@ export const saveCustomSplitDraftSync = (
   if (workouts.length === 0) {
     throw new Error('A custom split needs at least one workout.');
   }
-  if (workouts.some((workout) => workout.exerciseIds.length === 0)) {
-    throw new Error('Every workout needs at least one exercise.');
+  if (workouts.every((workout) => workout.exerciseIds.length === 0)) {
+    throw new Error('A custom split needs at least one exercise.');
   }
 
   const db = getDatabase();
@@ -2198,8 +2251,8 @@ export const updateCustomSplitDraftSync = (
   if (workouts.length === 0) {
     throw new Error('A custom split needs at least one workout.');
   }
-  if (workouts.some((workout) => workout.exerciseIds.length === 0)) {
-    throw new Error('Every workout needs at least one exercise.');
+  if (workouts.every((workout) => workout.exerciseIds.length === 0)) {
+    throw new Error('A custom split needs at least one exercise.');
   }
 
   const db = getDatabase();
@@ -2485,16 +2538,17 @@ export const startWorkoutFromCustomWorkout = (
     workoutId
   );
   if (savedExercises.length === 0) {
-    throw new Error(`Custom split workout ${workoutId} has no exercises`);
+    throw new EmptyCustomWorkoutError(workoutId);
   }
 
   const date = new Date().toISOString();
-  const experienceLevel = readProfileSync()?.experienceLevel;
+  const profile = readProfileSync();
+  if (!profile) throw new Error('A profile is required to start a workout');
   const exercises = savedExercises.map((row) =>
     createSessionExercise(
       customWorkoutTemplateExerciseSync(db, row.name),
       readLastExerciseHistorySync(row.name),
-      experienceLevel
+      profile
     )
   );
   const workoutTypes = workoutTypesForExercisesSync(db, exercises);
@@ -2551,14 +2605,15 @@ export const startWorkoutFromArchetype = (
 
   const db = getDatabase();
   const date = new Date().toISOString();
-  const experienceLevel = readProfileSync()?.experienceLevel;
+  const profile = readProfileSync();
+  if (!profile) throw new Error('A profile is required to start a workout');
   const selections = selectNextArchetypeVariantsSync(archetypes);
   const exercises = combineArchetypeTemplatesSync(selections).map(
     (templateExercise) =>
       createSessionExercise(
         templateExercise,
         readLastExerciseHistorySync(templateExercise.name),
-        experienceLevel
+        profile
       )
   );
   const workoutTypes = workoutTypesForExercisesSync(db, exercises);
@@ -3224,7 +3279,9 @@ export const readLastWorkoutOfTypeSync = (
     `SELECT s.id
      FROM sessions s
      JOIN session_workout_types swt ON swt.session_id = s.id
-     WHERE s.completed = 1 AND swt.workout_type = ?
+     WHERE s.completed = 1
+       AND s.retroactive = 0
+       AND swt.workout_type = ?
      ORDER BY s.date DESC, s.id ASC
      LIMIT 1`,
     type
@@ -3241,6 +3298,7 @@ export const readLastExerciseSync = (
      FROM sessions s
      JOIN session_workout_types swt ON swt.session_id = s.id
      WHERE s.completed = 1
+       AND s.retroactive = 0
        AND swt.workout_type = ?
        AND EXISTS (
          SELECT 1
@@ -3264,6 +3322,7 @@ export const readLastExerciseHistorySync = (name: string): Exercise | undefined 
      FROM session_exercises se
      JOIN sessions s ON s.id = se.session_id
      WHERE s.completed = 1
+       AND s.retroactive = 0
        AND se.exercise_id = (SELECT id FROM exercises WHERE name = ?)
      ORDER BY s.date DESC, s.id ASC
      LIMIT 1`,

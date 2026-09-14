@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { ArrowLeftRight } from 'lucide-react-native';
@@ -9,15 +10,14 @@ import Animated, {
   ReduceMotion,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ScheduleRow } from '@/components/home/ScheduleRow';
 import { WorkoutHeroCard } from '@/components/home/WorkoutHeroCard';
 import { YourSplitCard } from '@/components/home/YourSplitCard';
-import { WorkoutIntensityPicker } from '@/components/home/WorkoutIntensityPicker';
+import { EMPTY_CUSTOM_WORKOUT_MESSAGE } from '@/store/customSplits';
 import {
   WorkoutPicker,
   type CustomWorkoutOption,
 } from '@/components/home/WorkoutPicker';
-import { ARCHETYPE_COMPOSITIONS, type Archetype } from '@/constants/archetypes';
+import type { Archetype } from '@/constants/archetypes';
 import { motionDuration, motionEasing } from '@/constants/motion';
 import { redesignColors, redesignFonts } from '@/constants/theme';
 import { getWeeklyQueueState } from '@/store/weeklyQueueEngine';
@@ -33,6 +33,8 @@ import {
 import type { CustomSplitWorkout } from '@/store/customSplits';
 import { resolveNextCustomWorkoutIndex } from '@/store/customSplitRotation';
 import { toLocalCalendarDate, useWorkoutStore } from '@/store/workoutStore';
+import { resumeWorkout } from '@/utils/workoutResume';
+import type { WorkoutLaunchOrigin } from '@/utils/workoutLaunch';
 import '@/global.css';
 
 const DAY_LABELS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
@@ -61,8 +63,6 @@ const FULL_DAY_LABELS = [
   'SUNDAY',
 ];
 
-const SCHEDULE_ENTER_START = 270;
-const SCHEDULE_ENTER_STAGGER = 60;
 const EMPTY_CUSTOM_WORKOUTS: CustomSplitWorkout[] = [];
 
 function buildHomeEnter(delay: number) {
@@ -79,11 +79,7 @@ function buildHomeEnter(delay: number) {
 const HEADER_ENTER = buildHomeEnter(0);
 const HERO_ENTER = buildHomeEnter(80);
 const CHANGE_BUTTON_ENTER = buildHomeEnter(150);
-const QUOTE_ENTER = buildHomeEnter(210);
 const SPLIT_CARD_ENTER = buildHomeEnter(240);
-const SCHEDULE_ROW_ENTERS = DAY_LABELS.map((_, index) =>
-  buildHomeEnter(SCHEDULE_ENTER_START + index * SCHEDULE_ENTER_STAGGER)
-);
 
 /** Eyebrow for the hero card: which day the queued workout actually belongs to. */
 function scheduleEyebrow(nextUpDate: string | null) {
@@ -126,16 +122,13 @@ function todayLabel() {
 
 export default function Home() {
   const router = useRouter();
+  const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
   const profile = useWorkoutStore((state) => state.profile);
   useWorkoutStore((state) => state.sessions);
   const currentSession = useWorkoutStore((state) => state.currentSession);
-  const getWeekSchedule = useWorkoutStore((state) => state.getWeekSchedule);
   const startWorkoutFromArchetype = useWorkoutStore(
     (state) => state.startWorkoutFromArchetype
-  );
-  const logArchetypeCompletedRetroactively = useWorkoutStore(
-    (state) => state.logArchetypeCompletedRetroactively
   );
   const currentCustomSplit = useWorkoutStore((state) => state.currentCustomSplit);
   const customSplits = useWorkoutStore((state) => state.customSplits);
@@ -156,38 +149,29 @@ export default function Home() {
   // The selectors above make queue state refresh whenever profile or completed
   // sessions change; the engine itself remains the single source of truth.
   const queueState = getWeeklyQueueState();
-  const nextUp = queueState.nextUp;
-  const schedule = getWeekSchedule();
-  const heroEyebrow = scheduleEyebrow(queueState.nextUpDate);
+  const [selectedArchetype, setSelectedArchetype] = useState<Archetype | null>(null);
+  const nextUp = selectedArchetype ? [selectedArchetype] : queueState.nextUp;
+  const heroEyebrow = selectedArchetype ? 'NEXT UP' : scheduleEyebrow(queueState.nextUpDate);
   const exerciseCount = nextUp.reduce(
     (count, archetype) =>
       count +
       readArchetypeTemplateSync(archetype, getNextArchetypeVariant(archetype)).length,
     0
   );
-  const intensityPickerType = nextUp[0]
-    ? ARCHETYPE_COMPOSITIONS[nextUp[0]].workoutTypes[0]
-    : 'chest';
-  const [intensityPickerVisible, setIntensityPickerVisible] = useState(false);
-  const [pendingArchetypes, setPendingArchetypes] = useState<Archetype[]>([]);
   const [workoutPickerVisible, setWorkoutPickerVisible] = useState(false);
   const [selectedCustomWorkoutId, setSelectedCustomWorkoutId] = useState<number | null>(
     null
   );
-  const [pendingCustomWorkoutId, setPendingCustomWorkoutId] = useState<number | null>(
-    null
-  );
   const [activeSplitMissing, setActiveSplitMissing] = useState(false);
-  const [retroactiveDate, setRetroactiveDate] = useState<string | null>(null);
-  const [retroactiveConfirmation, setRetroactiveConfirmation] = useState<string | null>(
-    null
-  );
-  const isLoggingRetroactiveRef = useRef(false);
-  // Unlike Stack selection, a Custom selection changes the hero's identity.
-  // Keep that update out of the picker's UI-runtime exit animation and commit
-  // it at the same lifecycle boundary that already drives Stack's follow-up.
+  // Commit preview changes after the picker finishes its exit animation.
+  const selectedArchetypeAfterPickerExitRef = useRef<Archetype | null>(null);
   const selectedCustomWorkoutAfterPickerExitRef = useRef<number | null>(null);
   const hasAnimatedHomeRef = useRef(false);
+  const startingWorkoutRef = useRef(false);
+
+  useFocusEffect(useCallback(() => {
+    startingWorkoutRef.current = false;
+  }, []));
 
   const shouldAnimateHomeEntrance = Boolean(profile) && !hasAnimatedHomeRef.current;
 
@@ -196,12 +180,6 @@ export default function Home() {
       hasAnimatedHomeRef.current = true;
     }
   }, [profile]);
-
-  useEffect(() => {
-    if (!retroactiveConfirmation) return;
-    const timeout = setTimeout(() => setRetroactiveConfirmation(null), 2400);
-    return () => clearTimeout(timeout);
-  }, [retroactiveConfirmation]);
 
   // Load the active split's persistent detail whenever Home is focused or the
   // active program changes, so activating a split in Your Splits shows up here
@@ -299,6 +277,9 @@ export default function Home() {
   // leak into another.
   useEffect(() => {
     setSelectedCustomWorkoutId(null);
+    setSelectedArchetype(null);
+    selectedArchetypeAfterPickerExitRef.current = null;
+    selectedCustomWorkoutAfterPickerExitRef.current = null;
   }, [activeSplitId]);
 
   useEffect(() => {
@@ -315,48 +296,43 @@ export default function Home() {
     }
   };
 
-  const handleStartWorkout = () => {
+  const handleStartWorkout = (origin?: WorkoutLaunchOrigin) => {
+    if (startingWorkoutRef.current) return;
+    startingWorkoutRef.current = true;
     tapFeedback();
     // An already-created session resumes through the existing mechanism,
     // whatever program produced it.
     if (currentSession) {
-      router.push('/workout');
+      resumeWorkout(router);
       return;
     }
+    const openWorkout = () => router.push({
+      pathname: '/workout',
+      params: origin ? { launchOrigin: JSON.stringify(origin) } : {},
+    });
     if (isCustomMode) {
-      if (!selectedCustomWorkout || !customWorkoutReady) return;
-      setPendingCustomWorkoutId(selectedCustomWorkout.id);
-      setIntensityPickerVisible(true);
-      return;
-    }
-    if (nextUp.length > 0) {
-      setPendingArchetypes(nextUp);
-      setIntensityPickerVisible(true);
-    }
-  };
-
-  const handleIntensityChosen = () => {
-    if (currentSession) {
-      setIntensityPickerVisible(false);
-      router.push('/workout');
-      return;
-    }
-    if (pendingCustomWorkoutId !== null) {
-      if (activeSplitId === null) return;
-      setIntensityPickerVisible(false);
-      startWorkoutFromCustomWorkout(activeSplitId, pendingCustomWorkoutId);
-      setPendingCustomWorkoutId(null);
+      if (activeSplitId === null || !selectedCustomWorkout || !customWorkoutReady ||
+        !startWorkoutFromCustomWorkout(activeSplitId, selectedCustomWorkout.id)) {
+        startingWorkoutRef.current = false;
+        return;
+      }
       // Hand Home back to durable resolution: completing this session advances
       // the rotation, and abandoning it leaves the durable position untouched.
       setSelectedCustomWorkoutId(null);
-      router.push('/workout');
+      openWorkout();
       return;
     }
-    if (pendingArchetypes.length === 0) return;
-    setIntensityPickerVisible(false);
-    startWorkoutFromArchetype(pendingArchetypes);
-    setPendingArchetypes([]);
-    router.push('/workout');
+    if (nextUp.length === 0) {
+      startingWorkoutRef.current = false;
+      return;
+    }
+    startWorkoutFromArchetype(nextUp);
+    if (!useWorkoutStore.getState().currentSession) {
+      startingWorkoutRef.current = false;
+      return;
+    }
+    setSelectedArchetype(null);
+    openWorkout();
   };
 
   // Selection only changes what Home previews: the saved split, its ordering
@@ -367,8 +343,8 @@ export default function Home() {
   }, []);
 
   const handleSelectWorkout = (archetype: Archetype) => {
+    selectedArchetypeAfterPickerExitRef.current = archetype;
     setWorkoutPickerVisible(false);
-    setPendingArchetypes([archetype]);
   };
 
   const handleOpenWorkoutPicker = () => {
@@ -377,8 +353,7 @@ export default function Home() {
   };
 
   const handleWorkoutPickerExited = useCallback(() => {
-    // Custom mode only re-previews the chosen workout; starting stays an
-    // explicit tap on the hero card.
+    // Both programs only update the preview; Start launches the selected workout.
     if (isCustomMode) {
       const workoutId = selectedCustomWorkoutAfterPickerExitRef.current;
       selectedCustomWorkoutAfterPickerExitRef.current = null;
@@ -387,25 +362,12 @@ export default function Home() {
       }
       return;
     }
-    if (currentSession) {
-      router.push('/workout');
-      return;
+    const archetype = selectedArchetypeAfterPickerExitRef.current;
+    selectedArchetypeAfterPickerExitRef.current = null;
+    if (archetype !== null) {
+      setSelectedArchetype(archetype);
     }
-    if (pendingArchetypes.length > 0) {
-      setIntensityPickerVisible(true);
-    }
-  }, [currentSession, isCustomMode, pendingArchetypes.length, router]);
-
-  const handleRetroactiveWorkout = (archetype: Archetype) => {
-    if (isLoggingRetroactiveRef.current) return;
-    isLoggingRetroactiveRef.current = true;
-    if (!retroactiveDate) return;
-    logArchetypeCompletedRetroactively([archetype], retroactiveDate);
-    setRetroactiveDate(null);
-    setRetroactiveConfirmation(
-      `${ARCHETYPE_COMPOSITIONS[archetype].shortLabel} logged as complete`
-    );
-  };
+  }, [isCustomMode]);
 
   if (!profile) {
     return null;
@@ -430,12 +392,10 @@ export default function Home() {
     ? `Open Your Splits. Active split: ${splitCardName}.`
     : "Open Your Splits. Stack's split is active.";
   const customHeroEyebrow = queueState.completedToday ? 'NEXT UP' : 'TODAY';
-  const customIntensityType =
-    selectedCustomWorkout?.exercises[0]?.workoutType ?? 'chest';
   const firstName = profile.name?.trim().split(/\s+/)[0] || 'there';
-  const visibleSchedule = schedule
-    .map((day, index) => ({ day, dayLabel: DAY_LABELS[index] }))
-    .filter(({ day }) => day.status !== 'today' || Boolean(day.completedWorkout));
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Morning' : hour < 18 ? 'Afternoon' : 'Evening';
+
 
   return (
     <View style={styles.screen}>
@@ -449,6 +409,7 @@ export default function Home() {
       />
 
       <ScrollView
+        scrollEnabled={false}
         contentContainerStyle={[
           styles.scrollContent,
           { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 128 },
@@ -467,7 +428,7 @@ export default function Home() {
               numberOfLines={1}
               style={styles.greeting}
             >
-              Hey, {firstName}
+              {greeting}, {firstName}
             </Text>
           </View>
         </Animated.View>
@@ -478,6 +439,7 @@ export default function Home() {
         >
           {isCustomMode ? (
             <WorkoutHeroCard
+              hideStartButton={!isFocused && startingWorkoutRef.current}
               exerciseCount={selectedCustomWorkout?.exercises.length ?? 0}
               whenLabel={customHeroEyebrow}
               title={
@@ -509,6 +471,7 @@ export default function Home() {
             />
           ) : (
             <WorkoutHeroCard
+              hideStartButton={!isFocused && startingWorkoutRef.current}
               archetypes={nextUp}
               exerciseCount={exerciseCount}
               whenLabel={heroEyebrow}
@@ -516,6 +479,11 @@ export default function Home() {
               onPress={nextUp.length > 0 ? handleStartWorkout : handleOpenWorkoutPicker}
             />
           )}
+          {isCustomMode && selectedCustomWorkout && !customWorkoutReady ? (
+            <Text accessibilityLiveRegion="polite" style={styles.emptyWorkoutMessage}>
+              {EMPTY_CUSTOM_WORKOUT_MESSAGE}
+            </Text>
+          ) : null}
         </Animated.View>
 
         <Animated.View
@@ -532,19 +500,6 @@ export default function Home() {
           </Pressable>
         </Animated.View>
 
-        {retroactiveConfirmation ? (
-          <Text accessibilityLiveRegion="polite" style={styles.confirmation}>
-            {retroactiveConfirmation}
-          </Text>
-        ) : null}
-
-        <Animated.Text
-          entering={shouldAnimateHomeEntrance ? QUOTE_ENTER : undefined}
-          style={styles.quote}
-        >
-          “Small sessions, stacked. That’s the whole trick.”
-        </Animated.Text>
-
         <Animated.View
           entering={shouldAnimateHomeEntrance ? SPLIT_CARD_ENTER : undefined}
           style={styles.splitCardWrap}
@@ -556,34 +511,6 @@ export default function Home() {
             onPress={() => router.push('/your-splits')}
           />
         </Animated.View>
-
-        <View style={styles.scheduleSection}>
-          <View style={styles.scheduleList}>
-            {visibleSchedule.map(({ day, dayLabel }, visibleIndex) => (
-              <Animated.View
-                entering={
-                  shouldAnimateHomeEntrance
-                    ? SCHEDULE_ROW_ENTERS[visibleIndex]
-                    : undefined
-                }
-                key={day.date}
-              >
-                <ScheduleRow
-                  day={day}
-                  dayLabel={dayLabel}
-                  onPress={
-                    day.status === 'past' && !day.completedWorkout
-                      ? () => {
-                          isLoggingRetroactiveRef.current = false;
-                          setRetroactiveDate(day.date);
-                        }
-                      : undefined
-                  }
-                />
-              </Animated.View>
-            ))}
-          </View>
-        </View>
       </ScrollView>
 
       <WorkoutPicker
@@ -601,43 +528,27 @@ export default function Home() {
             }
           : {})}
       />
-      <WorkoutPicker
-        visible={Boolean(retroactiveDate)}
-        options={queueState.remaining}
-        eyebrow="QUICK CORRECTION"
-        title="What did you finish?"
-        onSelect={handleRetroactiveWorkout}
-        onClose={() => {
-          isLoggingRetroactiveRef.current = false;
-          setRetroactiveDate(null);
-        }}
-      />
-      <WorkoutIntensityPicker
-        visible={intensityPickerVisible}
-        type={
-          pendingCustomWorkoutId !== null
-            ? customIntensityType
-            : pendingArchetypes[0]
-              ? ARCHETYPE_COMPOSITIONS[pendingArchetypes[0]].workoutTypes[0]
-              : intensityPickerType
-        }
-        onChoose={handleIntensityChosen}
-        onClose={() => {
-          setIntensityPickerVisible(false);
-          setPendingArchetypes([]);
-          setPendingCustomWorkoutId(null);
-        }}
-      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  emptyWorkoutMessage: {
+    marginTop: 12,
+    color: redesignColors.ash,
+    fontFamily: redesignFonts.ui,
+    fontSize: 15,
+    lineHeight: 22,
+    textAlign: 'center',
+  },
   screen: {
     flex: 1,
     backgroundColor: redesignColors.ink,
   },
   scrollContent: {
+    width: '100%',
+    maxWidth: 480,
+    alignSelf: 'center',
     paddingHorizontal: 24,
   },
   header: {
@@ -652,65 +563,46 @@ const styles = StyleSheet.create({
   date: {
     fontFamily: redesignFonts.monoBold,
     fontSize: 12,
-    letterSpacing: 1,
-    color: redesignColors.ash,
-    marginBottom: 12,
+    letterSpacing: 2.4,
+    textAlign: 'center',
+    color: redesignColors.ashDim,
+    marginBottom: 16,
   },
   greeting: {
     fontFamily: redesignFonts.display,
-    fontSize: 42,
-    lineHeight: 46,
+    fontSize: 34,
+    lineHeight: 42,
+    textAlign: 'center',
     letterSpacing: -1.6,
     color: redesignColors.bone,
   },
   heroWrap: {
-    marginTop: 24,
+    marginTop: 16,
   },
   changeButton: {
     alignSelf: 'center',
-    height: 52,
-    marginTop: 24,
+    width: '50%',
+    minHeight: 58,
+    paddingVertical: 15,
+    // The hero includes 10 points below the visible start button.
+    marginTop: 10,
     paddingHorizontal: 24,
-    borderRadius: 26,
+    borderRadius: 20,
     borderCurve: 'continuous',
     borderWidth: 1,
     borderColor: redesignColors.border,
-    backgroundColor: redesignColors.surface,
+    backgroundColor: 'rgba(29, 25, 21, 0.65)',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 12,
+    gap: 10,
   },
   changeButtonText: {
     fontFamily: redesignFonts.uiSemiBold,
     fontSize: 16,
     color: redesignColors.ash,
   },
-  confirmation: {
-    alignSelf: 'center',
-    marginTop: 12,
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 11,
-    letterSpacing: 0.7,
-    color: redesignColors.ash,
-  },
-  quote: {
-    maxWidth: 320,
-    alignSelf: 'center',
-    marginTop: 28,
-    fontFamily: redesignFonts.uiItalic,
-    fontSize: 16,
-    lineHeight: 23,
-    color: redesignColors.ashDim,
-    textAlign: 'center',
-  },
   splitCardWrap: {
-    marginTop: 32,
-  },
-  scheduleSection: {
-    marginTop: 24,
-  },
-  scheduleList: {
-    gap: 8,
+    marginTop: 20,
   },
 });

@@ -1,16 +1,21 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
+  type AnimatedRef,
   type SharedValue,
+  cancelAnimation,
   runOnJS,
+  runOnUI,
+  scrollTo,
+  useAnimatedReaction,
   useAnimatedStyle,
-  useDerivedValue,
+  useFrameCallback,
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
-import { GripHorizontal, X } from 'lucide-react-native';
+import { GripHorizontal, Plus, X } from 'lucide-react-native';
 
 import { motionDuration, motionEasing } from '@/constants/motion';
 import { redesignColors, redesignFonts, splitColors } from '@/constants/theme';
@@ -30,124 +35,206 @@ const STRIDE = REORDER_ROW_HEIGHT + REORDER_ROW_GAP;
 
 /** Distance from the scroll viewport edge that starts auto-scrolling. */
 const AUTO_SCROLL_EDGE = 76;
-const AUTO_SCROLL_STEP = 9;
+const AUTO_SCROLL_SPEED = 9 / 16; // Points per millisecond, independent of refresh rate.
+const TARGET_HYSTERESIS = 6; // Extra travel past the midpoint before changing slots.
 
 const clamp = (value: number, min: number, max: number) => {
   'worklet';
   return Math.min(Math.max(value, min), max);
 };
 
+interface DragValues {
+  activeId: SharedValue<number>;
+  startIndex: SharedValue<number>;
+  targetIndex: SharedValue<number>;
+  // 0: idle, 1: dragging, 2: snapping, 3: waiting for the React order commit.
+  phase: SharedValue<number>;
+  dragBase: SharedValue<number>;
+  scrollAccum: SharedValue<number>;
+  pointerY: SharedValue<number>;
+  positions: SharedValue<Record<number, number>>;
+}
+
 interface SelectedExerciseListProps {
-  /**
-   * Scrolls the surrounding builder ScrollView by `delta` and returns the
-   * distance actually travelled (0 once the list is pinned at an end).
-   */
-  autoScrollBy: (delta: number) => number;
+  scrollRef: AnimatedRef<Animated.ScrollView>;
+  scrollOffset: SharedValue<number>;
+  maxScrollOffset: SharedValue<number>;
   exercises: DraftExercise[];
   /** Absolute-window bounds of the scroll viewport, read at drag start. */
   measureViewport: () => Promise<{ top: number; bottom: number }>;
+  onAdd: () => void;
   onDragStateChange: (dragging: boolean) => void;
   onRemove: (exerciseId: number) => void;
   onReorder: (fromIndex: number, toIndex: number) => void;
 }
 
 export function SelectedExerciseList({
-  autoScrollBy,
+  scrollRef,
+  scrollOffset,
+  maxScrollOffset,
   exercises,
   measureViewport,
+  onAdd,
   onDragStateChange,
   onRemove,
   onReorder,
 }: SelectedExerciseListProps) {
   const count = exercises.length;
-  const activeIndex = useSharedValue(-1);
+  const activeId = useSharedValue(-1);
+  const startIndex = useSharedValue(-1);
+  const targetIndex = useSharedValue(-1);
+  const phase = useSharedValue(0);
   const dragBase = useSharedValue(0);
   const scrollAccum = useSharedValue(0);
+  const pointerY = useSharedValue(0);
+  const positions = useSharedValue<Record<number, number>>(
+    Object.fromEntries(exercises.map((exercise, index) => [exercise.id, index]))
+  );
+  const viewport = useSharedValue({ top: 0, bottom: 0 });
+  const dragSession = useSharedValue(0);
+  const drag: DragValues = {
+    activeId, startIndex, targetIndex, phase, dragBase, scrollAccum, pointerY, positions,
+  };
 
-  const dragOffset = useDerivedValue(() => dragBase.value + scrollAccum.value);
-  const targetIndex = useDerivedValue(() => {
-    if (activeIndex.value < 0) return -1;
-    return clamp(
-      activeIndex.value + Math.round(dragOffset.value / STRIDE),
-      0,
-      count - 1
+  // Rows keep UI-owned absolute positions across React's array commit. Updating
+  // indices in React can therefore never combine a new top with an old transform.
+  useLayoutEffect(() => {
+    const nextPositions = Object.fromEntries(
+      exercises.map((exercise, index) => [exercise.id, index])
     );
+    runOnUI(() => {
+      cancelAnimation(dragBase);
+      positions.value = nextPositions;
+      activeId.value = -1;
+      targetIndex.value = -1;
+      dragBase.value = 0;
+      scrollAccum.value = 0;
+      phase.value = 0;
+    })();
+  }, [exercises, positions, activeId, targetIndex, dragBase, scrollAccum, phase]);
+
+  useEffect(() => () => {
+    runOnUI(() => {
+      cancelAnimation(dragBase);
+      dragSession.value += 1;
+      phase.value = 0;
+    })();
+    onDragStateChange(false);
+  }, [dragBase, dragSession, onDragStateChange, phase]);
+
+  useAnimatedReaction(
+    () => phase.value === 1 ? startIndex.value + (dragBase.value + scrollAccum.value) / STRIDE : null,
+    (slot) => {
+      if (slot === null) return;
+      let next = targetIndex.value;
+      const margin = TARGET_HYSTERESIS / STRIDE;
+      while (next < count - 1 && slot > next + 0.5 + margin) next += 1;
+      while (next > 0 && slot < next - 0.5 - margin) next -= 1;
+      targetIndex.value = next;
+    },
+    [count]
+  );
+
+  useFrameCallback(({ timeSincePreviousFrame }) => {
+    if (phase.value !== 1 || viewport.value.bottom <= viewport.value.top) return;
+    let direction = 0;
+    if (pointerY.value < viewport.value.top + AUTO_SCROLL_EDGE) direction = -1;
+    else if (pointerY.value > viewport.value.bottom - AUTO_SCROLL_EDGE) direction = 1;
+    if (direction === 0) return;
+    const delta = direction * AUTO_SCROLL_SPEED * Math.min(timeSincePreviousFrame ?? 16, 32);
+    const next = clamp(scrollOffset.value + delta, 0, maxScrollOffset.value);
+    const travelled = next - scrollOffset.value;
+    if (travelled === 0) return;
+    // One UI frame issues the native scroll and the matching finger compensation.
+    scrollTo(scrollRef, 0, next, false);
+    scrollOffset.value = next;
+    scrollAccum.value += travelled;
   });
 
-  const pointerY = useRef(0);
-  const viewport = useRef({ top: 0, bottom: 0 });
-  const autoScrollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const stopAutoScroll = useCallback(() => {
-    if (autoScrollTimer.current !== null) {
-      clearInterval(autoScrollTimer.current);
-      autoScrollTimer.current = null;
-    }
-  }, []);
-
-  useEffect(() => stopAutoScroll, [stopAutoScroll]);
-
-  const beginDrag = useCallback(() => {
+  const beginDrag = useCallback((session: number) => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     onDragStateChange(true);
     void measureViewport().then((bounds) => {
-      viewport.current = bounds;
+      runOnUI(() => {
+        if (dragSession.value === session && phase.value === 1) viewport.value = bounds;
+      })();
     });
-    stopAutoScroll();
-    autoScrollTimer.current = setInterval(() => {
-      const { top, bottom } = viewport.current;
-      if (bottom <= top) return;
-      let delta = 0;
-      if (pointerY.current < top + AUTO_SCROLL_EDGE) delta = -AUTO_SCROLL_STEP;
-      else if (pointerY.current > bottom - AUTO_SCROLL_EDGE) delta = AUTO_SCROLL_STEP;
-      if (delta === 0) return;
-      const travelled = autoScrollBy(delta);
-      // Keep the lifted row under the finger while the content moves beneath it.
-      if (travelled !== 0) scrollAccum.value += travelled;
-    }, 16);
-  }, [autoScrollBy, measureViewport, onDragStateChange, scrollAccum, stopAutoScroll]);
+  }, [dragSession, measureViewport, onDragStateChange, phase, viewport]);
 
-  const trackPointer = useCallback((y: number) => {
-    pointerY.current = y;
-  }, []);
+  const commitDrag = useCallback((from: number, to: number) => {
+    if (from !== to) {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      onReorder(from, to);
+      // The exercises layout effect acknowledges the new order before unlocking.
+    } else {
+      phase.value = 0;
+    }
+    onDragStateChange(false);
+  }, [onDragStateChange, onReorder, phase]);
 
-  const endDrag = useCallback(
-    (from: number, to: number) => {
-      stopAutoScroll();
-      if (from !== to) {
-        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        onReorder(from, to);
+  const settleDrag = (cancelled: boolean) => {
+    'worklet';
+    phase.value = 2; // Immediately stops edge scrolling, including during the snap.
+    const from = startIndex.value;
+    const to = cancelled ? from : targetIndex.value;
+    targetIndex.value = to;
+    dragBase.value = withTiming(
+      (to - from) * STRIDE - scrollAccum.value,
+      { duration: motionDuration.feedback, easing: motionEasing.decelerate },
+      (finished) => {
+        if (!finished) return;
+        const nextPositions = { ...positions.value };
+        for (const id in nextPositions) {
+          const position = nextPositions[id];
+          if (Number(id) === activeId.value) nextPositions[id] = to;
+          else if (from < position && position <= to) nextPositions[id] = position - 1;
+          else if (to <= position && position < from) nextPositions[id] = position + 1;
+        }
+        // The final visual slots and drag reset are atomic on the UI thread.
+        // Siblings animate absolute positions, so this rebase has no return motion.
+        positions.value = nextPositions;
+        activeId.value = -1;
+        targetIndex.value = -1;
+        dragBase.value = 0;
+        scrollAccum.value = 0;
+        phase.value = 3;
+        runOnJS(commitDrag)(from, to);
       }
-      activeIndex.value = -1;
-      dragBase.value = 0;
-      scrollAccum.value = 0;
-      onDragStateChange(false);
-    },
-    [activeIndex, dragBase, onDragStateChange, onReorder, scrollAccum, stopAutoScroll]
-  );
+    );
+  };
 
   return (
     <View style={styles.selectedSection}>
       <View style={styles.sectionHeadingRow}>
-        <Text style={styles.sectionHeading}>IN THIS WORKOUT</Text>
-        <Text style={styles.sectionCount}>{count}</Text>
+        <View style={styles.sectionHeadingCopy}>
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85} style={styles.sectionHeading}>
+            IN THIS WORKOUT
+          </Text>
+          <Text style={styles.sectionCount}>{count}</Text>
+        </View>
+        <Pressable
+          accessibilityLabel="Add a custom exercise"
+          accessibilityRole="button"
+          hitSlop={6}
+          onPress={onAdd}
+          style={styles.addExerciseButton}
+        >
+          <Plus color={splitColors.chest} size={16} strokeWidth={2.4} />
+          <Text style={styles.addExerciseText}>Add Exercise</Text>
+        </Pressable>
       </View>
       <View style={[styles.selectedList, { height: Math.max(0, count * STRIDE - REORDER_ROW_GAP) }]}>
         {exercises.map((exercise, index) => (
           <ExerciseRow
-            activeIndex={activeIndex}
             beginDrag={beginDrag}
-            count={count}
-            dragOffset={dragOffset}
-            endDrag={endDrag}
+            drag={drag}
+            dragSession={dragSession}
             exercise={exercise}
             index={index}
             key={exercise.id}
             onRemove={onRemove}
-            scrollAccum={scrollAccum}
-            dragBase={dragBase}
-            targetIndex={targetIndex}
-            trackPointer={trackPointer}
+            settleDrag={settleDrag}
+            viewport={viewport}
           />
         ))}
       </View>
@@ -156,107 +243,96 @@ export function SelectedExerciseList({
 }
 
 interface ExerciseRowProps {
-  activeIndex: SharedValue<number>;
-  beginDrag: () => void;
-  count: number;
-  dragBase: SharedValue<number>;
-  dragOffset: SharedValue<number>;
-  endDrag: (from: number, to: number) => void;
+  beginDrag: (session: number) => void;
+  drag: DragValues;
+  dragSession: SharedValue<number>;
   exercise: DraftExercise;
   index: number;
   onRemove: (exerciseId: number) => void;
-  scrollAccum: SharedValue<number>;
-  targetIndex: SharedValue<number>;
-  trackPointer: (y: number) => void;
+  settleDrag: (cancelled: boolean) => void;
+  viewport: SharedValue<{ top: number; bottom: number }>;
 }
 
 function ExerciseRow({
-  activeIndex,
   beginDrag,
-  count,
-  dragBase,
-  dragOffset,
-  endDrag,
+  drag,
+  dragSession,
   exercise,
   index,
   onRemove,
-  scrollAccum,
-  targetIndex,
-  trackPointer,
+  settleDrag,
+  viewport,
 }: ExerciseRowProps) {
   const group = getMuscleGroupForExercise(exercise);
-  // Set between onEnd and onFinalize so the cancel path does not double-commit.
-  const settling = useSharedValue(false);
+  const exerciseId = exercise.id;
 
-  // The drag lives on the handle only, and waits out a short long-press, so a
-  // flick anywhere on the row (handle included) still scrolls the builder.
+  // Keep the handle-only 180 ms activation; a pending snap/commit owns the drag.
   const pan = Gesture.Pan()
     .activateAfterLongPress(180)
-    .onStart(() => {
-      activeIndex.value = index;
-      dragBase.value = 0;
-      scrollAccum.value = 0;
-      runOnJS(beginDrag)();
+    .onStart((event) => {
+      if (drag.phase.value !== 0) return;
+      drag.activeId.value = exerciseId;
+      drag.startIndex.value = drag.positions.value[exerciseId] ?? index;
+      drag.targetIndex.value = drag.startIndex.value;
+      drag.dragBase.value = 0;
+      drag.scrollAccum.value = 0;
+      drag.pointerY.value = event.absoluteY;
+      viewport.value = { top: 0, bottom: 0 };
+      dragSession.value += 1;
+      drag.phase.value = 1;
+      runOnJS(beginDrag)(dragSession.value);
     })
     .onUpdate((event) => {
-      dragBase.value = event.translationY;
-      runOnJS(trackPointer)(event.absoluteY);
+      if (drag.phase.value !== 1 || drag.activeId.value !== exerciseId) return;
+      drag.dragBase.value = event.translationY;
+      drag.pointerY.value = event.absoluteY;
     })
     .onEnd(() => {
-      const to = targetIndex.value < 0 ? index : targetIndex.value;
-      settling.value = true;
-      // Snap to the destination slot and hold there until the draft commits,
-      // so the row never flashes back to where the drag started.
-      dragBase.value = (to - index) * STRIDE - scrollAccum.value;
-      runOnJS(endDrag)(index, to);
+      if (drag.phase.value === 1 && drag.activeId.value === exerciseId) settleDrag(false);
     })
     .onFinalize(() => {
-      if (!settling.value && activeIndex.value === index) {
-        activeIndex.value = -1;
-        dragBase.value = 0;
-        scrollAccum.value = 0;
-        runOnJS(endDrag)(index, index);
-      }
-      settling.value = false;
+      if (drag.phase.value === 1 && drag.activeId.value === exerciseId) settleDrag(true);
     });
 
   const animatedStyle = useAnimatedStyle(() => {
-    const active = activeIndex.value === index;
+    const active = drag.activeId.value === exerciseId;
     if (active) {
       return {
-        transform: [{ translateY: dragOffset.value }, { scale: 1.02 }],
+        transform: [
+          { translateY: drag.startIndex.value * STRIDE + drag.dragBase.value + drag.scrollAccum.value },
+          { scale: 1.02 },
+        ],
         zIndex: 20,
         elevation: 10,
         shadowOpacity: 0.45,
       };
     }
 
-    const from = activeIndex.value;
-    const to = targetIndex.value;
-    let shift = 0;
-    if (from >= 0) {
-      if (from < index && to >= index) shift = -STRIDE;
-      else if (from > index && to <= index) shift = STRIDE;
+    const position = drag.positions.value[exerciseId] ?? index;
+    const from = drag.startIndex.value;
+    const to = drag.targetIndex.value;
+    let slot = position;
+    if (drag.activeId.value >= 0) {
+      if (from < position && to >= position) slot -= 1;
+      else if (from > position && to <= position) slot += 1;
     }
     return {
       transform: [
-        {
-          translateY: withTiming(shift, {
-            duration: motionDuration.feedback,
-            easing: motionEasing.decelerate,
-          }),
-        },
+        { translateY: withTiming(slot * STRIDE, {
+          duration: motionDuration.feedback,
+          easing: motionEasing.decelerate,
+        }) },
         { scale: 1 },
       ],
       zIndex: 0,
       elevation: 0,
       shadowOpacity: 0,
     };
-  }, [count, index]);
+  }, [exerciseId, index]);
 
   return (
     <Animated.View
-      style={[styles.selectedExerciseRow, { top: index * STRIDE }, animatedStyle]}
+      style={[styles.selectedExerciseRow, animatedStyle]}
     >
       <GestureDetector gesture={pan}>
         <View
@@ -288,18 +364,45 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 12,
     marginBottom: 10,
   },
+  sectionHeadingCopy: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   sectionHeading: {
+    flexShrink: 1,
     color: redesignColors.ashDim,
     fontFamily: redesignFonts.monoBold,
-    fontSize: 13,
-    letterSpacing: 2.1,
+    fontSize: 11,
+    letterSpacing: 1.2,
   },
   sectionCount: { color: splitColors.chest, fontFamily: redesignFonts.monoBold, fontSize: 14 },
+  addExerciseButton: {
+    minHeight: 34,
+    paddingHorizontal: 10,
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: `${splitColors.chest}66`,
+    backgroundColor: `${splitColors.chest}14`,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  addExerciseText: {
+    color: splitColors.chest,
+    fontFamily: redesignFonts.uiBold,
+    fontSize: 12,
+  },
   selectedList: { position: 'relative' },
   selectedExerciseRow: {
     position: 'absolute',
+    top: 0,
     left: 0,
     right: 0,
     height: REORDER_ROW_HEIGHT,

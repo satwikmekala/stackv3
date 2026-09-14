@@ -7,6 +7,7 @@ import {
   TextInput,
   Alert,
   Pressable,
+  Switch,
   TouchableOpacity,
 } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -15,12 +16,12 @@ import * as Haptics from 'expo-haptics';
 import { useWorkoutStore } from '@/store/workoutStore';
 import { unitLabel, type WeightUnit } from '@/store/weightUnits';
 import { Button } from '@/components/Button';
-import { colors, fonts } from '@/constants/theme';
+import { colors, fonts, redesignColors } from '@/constants/theme';
 import '@/global.css';
 
 // Supported weekly-goal range.
 const GOAL_OPTIONS = [1, 2, 3, 4, 5, 6];
-const WEIGHT_INCREMENT_OPTIONS = [1, 1.5, 2.5];
+const WEIGHT_INCREMENT_OPTIONS = [0.5, 1, 1.5, 2.5];
 const WEIGHT_INCREMENT_OPTIONS_LBS = [2.5, 5, 10];
 const WEIGHT_UNIT_OPTIONS: WeightUnit[] = ['kg', 'lbs'];
 const WEEKDAY_INDEXES = [0, 1, 2, 3, 4, 5, 6];
@@ -130,6 +131,10 @@ export default function Settings() {
     updateProfile(
       profile.weightUnit === 'lbs' ? { weightIncrementLbs: value } : { weightIncrement: value }
     );
+  };
+
+  const handleAutoIncreaseWeightChange = (autoIncreaseWeight: boolean) => {
+    updateProfile({ autoIncreaseWeight });
   };
 
   const handleReset = () => {
@@ -363,6 +368,51 @@ export default function Settings() {
               />
             ))}
           </View>
+        </View>
+
+        {/* Auto-increase — independent of the configured increment size */}
+        <View
+          style={{
+            backgroundColor: colors.surface,
+            borderRadius: 20,
+            padding: 20,
+            marginBottom: 12,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 16,
+          }}
+        >
+          <View style={{ flex: 1 }}>
+            <Text
+              style={{
+                fontFamily: fonts.bodyMedium,
+                fontSize: 12,
+                color: colors.ash,
+                marginBottom: 4,
+              }}
+            >
+              Auto-increase Weight
+            </Text>
+            <Text
+              style={{
+                fontFamily: fonts.body,
+                fontSize: 13,
+                color: colors.ash,
+              }}
+            >
+              Raise next session&apos;s target after you hit your reps
+            </Text>
+          </View>
+          <Switch
+            accessibilityLabel="Auto-increase weight"
+            accessibilityHint="Raises next session's target weight after you hit your reps"
+            value={profile.autoIncreaseWeight}
+            onValueChange={handleAutoIncreaseWeightChange}
+            trackColor={{ false: colors.surfaceRaised, true: redesignColors.accent }}
+            thumbColor={colors.bone}
+            ios_backgroundColor={colors.surfaceRaised}
+          />
         </View>
 
         {/* Danger zone — moved as-is from the old Profile */}

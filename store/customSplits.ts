@@ -1,5 +1,15 @@
 import type { WorkoutType } from '@/store/workoutStore';
 
+export const EMPTY_CUSTOM_WORKOUT_MESSAGE =
+  "This workout doesn't have any exercises yet — add some first.";
+
+export class EmptyCustomWorkoutError extends Error {
+  constructor(workoutId: number) {
+    super(`Custom split workout ${workoutId} has no exercises`);
+    this.name = 'EmptyCustomWorkoutError';
+  }
+}
+
 export interface CustomSplitSummary {
   id: number;
   name: string;

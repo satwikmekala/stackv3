@@ -221,9 +221,10 @@ interface ActiveSetCardProps {
   weightDeltaLabel?: string | null;
   // Step size for the manual weight stepper, from the user's profile — already
   // in `weightUnit`, so it is lb-native in lbs mode rather than a converted kg.
-  weightIncrement?: number;
+  weightIncrement: number;
   // Display/input unit. `weight` is always kg, and so is every onWeightChange delta.
   weightUnit?: WeightUnit;
+  onWeightUnitChange?: (weightUnit: WeightUnit) => void;
   accent: string;
   onRepsChange: (delta: number) => void;
   onWeightChange: (delta: number) => void;
@@ -234,14 +235,15 @@ interface ActiveSetCardProps {
 export function ActiveSetCard({
   setNumber,
   heading,
-  badgeLabel = 'Recommended',
+  badgeLabel,
   primaryLabel = 'Log it',
   secondaryLabel = 'Skip',
   reps,
   weight,
   weightDeltaLabel,
-  weightIncrement = 2.5,
+  weightIncrement,
   weightUnit = 'kg',
+  onWeightUnitChange,
   accent,
   onRepsChange,
   onWeightChange,
@@ -264,15 +266,15 @@ export function ActiveSetCard({
       style={{
         borderRadius: 27,
         borderWidth: 1.5,
-        borderStyle: 'dashed',
+        borderStyle: 'solid',
         borderColor: accent,
         padding: 18,
         backgroundColor: redesignColors.surface,
         shadowColor: accent,
-        shadowOpacity: 0.18,
-        shadowRadius: 22,
-        shadowOffset: { width: 0, height: 8 },
-        elevation: 6,
+        shadowOpacity: 0.3,
+        shadowRadius: 28,
+        shadowOffset: { width: 0, height: 0 },
+        elevation: 10,
       }}
     >
       <View
@@ -294,7 +296,55 @@ export function ActiveSetCard({
         >
           {heading ?? `Set ${setNumber}`}
         </Text>
-        <StatusPill label={badgeLabel} color={accent} />
+        {onWeightUnitChange ? (
+          <View
+            accessibilityRole="radiogroup"
+            style={{
+              flexDirection: 'row',
+              padding: 3,
+              borderRadius: 12,
+              borderWidth: 1,
+              borderColor: redesignColors.border,
+              backgroundColor: redesignColors.raised,
+            }}
+          >
+            {(['kg', 'lbs'] as const).map((unit) => {
+              const selected = weightUnit === unit;
+              return (
+                <TouchableOpacity
+                  key={unit}
+                  accessibilityRole="radio"
+                  accessibilityLabel={`Use ${unit}`}
+                  accessibilityState={{ checked: selected }}
+                  activeOpacity={0.72}
+                  onPress={() => onWeightUnitChange(unit)}
+                  style={{
+                    minWidth: 39,
+                    height: 27,
+                    borderRadius: 9,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: selected ? accent : 'transparent',
+                  }}
+                >
+                  <Text
+                    allowFontScaling={false}
+                    style={{
+                      fontFamily: redesignFonts.monoBold,
+                      fontSize: 10,
+                      letterSpacing: 0.4,
+                      color: selected ? redesignColors.ink : redesignColors.ash,
+                    }}
+                  >
+                    {unit.toUpperCase()}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        ) : badgeLabel ? (
+          <StatusPill label={badgeLabel} color={accent} />
+        ) : null}
       </View>
 
       <View style={{ flexDirection: 'row', gap: 12 }}>
@@ -363,7 +413,7 @@ export function ActiveSetCard({
               alignItems: 'center',
               justifyContent: 'center',
               borderWidth: 1.5,
-              borderStyle: 'dashed',
+              borderStyle: 'solid',
               borderColor: redesignColors.border,
               backgroundColor: 'transparent',
             },

@@ -14,9 +14,9 @@ import {
   OnboardingProgress,
 } from '@/components/OnboardingControls';
 import {
-  DEFAULT_WEIGHT_INCREMENT,
   DEFAULT_WEIGHT_INCREMENT_LBS,
   DEFAULT_WEIGHT_UNIT,
+  NEW_PROFILE_WEIGHT_INCREMENT,
 } from '@/store/workoutDatabase';
 import { ExperienceLevel, useWorkoutStore } from '@/store/workoutStore';
 import { withMotionTiming } from '@/constants/motion';
@@ -148,7 +148,8 @@ export default function CurrentWeek() {
       experienceLevel: params.experienceLevel ?? 'intermediate',
       trainingDays: [...selectedDays].sort((a, b) => a - b),
       onboardingCompleted: false,
-      weightIncrement: DEFAULT_WEIGHT_INCREMENT,
+      autoIncreaseWeight: true,
+      weightIncrement: NEW_PROFILE_WEIGHT_INCREMENT,
       weightUnit: DEFAULT_WEIGHT_UNIT,
       weightIncrementLbs: DEFAULT_WEIGHT_INCREMENT_LBS,
       activeSplitId: null,
