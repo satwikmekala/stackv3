@@ -46,8 +46,6 @@ export function HistoryWorkoutRow({
       onPress={onPress}
       style={styles.row}
     >
-      <View style={[styles.dot, { backgroundColor: summary.accent }]} />
-
       <View style={styles.identity}>
         <Text
           adjustsFontSizeToFit
@@ -96,13 +94,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     overflow: 'hidden',
-  },
-  dot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginRight: 14,
-    flexShrink: 0,
   },
   identity: {
     flex: 1,
