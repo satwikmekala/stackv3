@@ -61,6 +61,7 @@ type ExerciseSwapRowProps = {
   action?: 'navigate' | 'replace';
   isLast: boolean;
   onPress: () => void;
+  onAdd?: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
   isSwipeable?: boolean;
@@ -70,6 +71,18 @@ type ExerciseEditor =
   | { kind: 'add' }
   | { kind: 'rename'; exercise: ExerciseCatalogItem }
   | null;
+
+function filterExercises(
+  exercises: ExerciseCatalogItem[],
+  query: string,
+  muscleGroup: CustomSplitMuscleGroup | null
+) {
+  const normalizedQuery = query.trim().toLowerCase();
+  return exercises.filter((exercise) =>
+    (!muscleGroup || getMuscleGroupForExercise(exercise) === muscleGroup) &&
+    exercise.name.toLowerCase().includes(normalizedQuery)
+  );
+}
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : 'Something went wrong. Please try again.';
@@ -89,6 +102,7 @@ function ExerciseSwapRow({
   action = 'navigate',
   isLast,
   onPress,
+  onAdd,
   onEdit,
   onDelete,
   isSwipeable = false,
@@ -168,16 +182,31 @@ function ExerciseSwapRow({
                 <Check color={redesignColors.ink} size={14} strokeWidth={3.2} />
               </View>
             ) : null}
-            {action === 'replace' ? (
-              <View style={styles.replaceAction}>
-                <Repeat2 color={accent} size={15} strokeWidth={2.4} />
-                <Text allowFontScaling={false} style={[styles.replaceLabel, { color: accent }]}>
-                  Replace
-                </Text>
-              </View>
-            ) : null}
           </View>
         </ReanimatedTouchableOpacity>
+        {action === 'replace' ? (
+          <>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={`Add ${name} to today's workout`}
+              onPress={() => {
+                selectionFeedback();
+                onAdd?.();
+              }}
+              style={styles.rowIconButton}
+            >
+              <Plus color={accent} size={22} strokeWidth={2.4} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={`Replace current exercise with ${name}`}
+              onPress={handlePress}
+              style={styles.rowIconButton}
+            >
+              <Repeat2 color={accent} size={22} strokeWidth={2.4} />
+            </TouchableOpacity>
+          </>
+        ) : null}
       </View>
     </View>
   );
@@ -267,6 +296,14 @@ function SwipeableExerciseRow({
         {...rowProps}
         isSwipeable
         onPress={handleRowPress}
+        onAdd={() => {
+          if (Date.now() < suppressPressUntilRef.current) return;
+          if (isOpenRef.current) {
+            close();
+            return;
+          }
+          rowProps.onAdd?.();
+        }}
         onEdit={isRename ? () => onAction(close) : undefined}
         onDelete={isRename ? undefined : () => onAction(close)}
       />
@@ -293,21 +330,19 @@ export function SwapExerciseSheet({
   const onCloseRef = useRef(onClose);
   const scrollOffsetRef = useRef(0);
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
-  const getExercisesForWorkoutType = useWorkoutStore(
-    (state) => state.getExercisesForWorkoutType
-  );
-  const getExerciseWorkoutType = useWorkoutStore((state) => state.getExerciseWorkoutType);
   const addExerciseToSplit = useWorkoutStore((state) => state.addExerciseToSplit);
+  const appendExerciseToSession = useWorkoutStore((state) => state.appendExerciseToSession);
   const renameExercise = useWorkoutStore((state) => state.renameExercise);
   const hasExerciseHistory = useWorkoutStore((state) => state.hasExerciseHistory);
   const deleteExercise = useWorkoutStore((state) => state.deleteExercise);
 
-  const [exerciseCatalog, setExerciseCatalog] = useState<ExerciseCatalogItem[]>([]);
+  const [otherQuery, setOtherQuery] = useState('');
+  const [otherMuscleGroup, setOtherMuscleGroup] = useState<CustomSplitMuscleGroup | null>(null);
   const [addCatalog, setAddCatalog] = useState<ExerciseCatalogItem[]>([]);
   const [addMuscleGroup, setAddMuscleGroup] = useState<CustomSplitMuscleGroup | null>(null);
   const [pendingExerciseName, setPendingExerciseName] = useState<string | null>(null);
   // Exercises added from this sheet land in Other Exercises, not the session —
-  // the user picks one to swap in when they choose to.
+  // the user adds or swaps it in when they choose to.
   const [addedExerciseNames, setAddedExerciseNames] = useState<string[]>([]);
   const [editor, setEditor] = useState<ExerciseEditor>(null);
   const [exerciseName, setExerciseName] = useState('');
@@ -331,13 +366,10 @@ export function SwapExerciseSheet({
   }, []);
 
   const refreshCatalog = useCallback(() => {
-    const type = getExerciseWorkoutType(currentExerciseName);
-    setExerciseCatalog(type ? getExercisesForWorkoutType(type) : []);
-    // The Add Exercise catalog is intentionally independent of the currently
-    // viewed exercise — it always covers every muscle group, unlike Swap's
-    // same-type-only suggestions.
-    setAddCatalog(readExerciseCatalogSync());
-  }, [currentExerciseName, getExerciseWorkoutType, getExercisesForWorkoutType]);
+    const catalog = readExerciseCatalogSync();
+    setAddCatalog(catalog);
+    return catalog;
+  }, []);
 
   const scheduledNames = useMemo(
     () => new Set(sessionExercises.map((exercise) => exercise.name)),
@@ -348,27 +380,22 @@ export function SwapExerciseSheet({
     [addCatalog]
   );
   const otherExercises = useMemo(() => {
-    const listed = new Set(exerciseCatalog.map((exercise) => exercise.name));
+    const addedNames = new Set(addedExerciseNames);
     const added = addedExerciseNames
-      .filter((name) => !listed.has(name))
       .map((name) => catalogByName.get(name))
       .filter((exercise): exercise is ExerciseCatalogItem => Boolean(exercise));
-    return [...exerciseCatalog, ...added].filter(
-      (exercise) => !scheduledNames.has(exercise.name)
-    );
-  }, [addedExerciseNames, catalogByName, exerciseCatalog, scheduledNames]);
-  const normalizedExerciseQuery = exerciseName.trim().toLowerCase();
+    return [...added, ...addCatalog.filter((exercise) => !addedNames.has(exercise.name))];
+  }, [addedExerciseNames, addCatalog, catalogByName]);
   const addMatches = useMemo(
-    () =>
-      addMuscleGroup
-        ? addCatalog.filter(
-            (exercise) =>
-              getMuscleGroupForExercise(exercise) === addMuscleGroup &&
-              !scheduledNames.has(exercise.name) &&
-              exercise.name.toLowerCase().includes(normalizedExerciseQuery)
-          )
-        : [],
-    [addCatalog, addMuscleGroup, normalizedExerciseQuery, scheduledNames]
+    () => addMuscleGroup
+      ? filterExercises(addCatalog, exerciseName, addMuscleGroup)
+          .filter((exercise) => !scheduledNames.has(exercise.name))
+      : [],
+    [addCatalog, addMuscleGroup, exerciseName, scheduledNames]
+  );
+  const otherMatches = useMemo(
+    () => filterExercises(otherExercises, otherQuery, otherMuscleGroup),
+    [otherExercises, otherQuery, otherMuscleGroup]
   );
 
   useEffect(() => {
@@ -391,7 +418,10 @@ export function SwapExerciseSheet({
     setAddMuscleGroup(null);
     setFormError(null);
     setAddedExerciseNames([]);
-    refreshCatalog();
+    setOtherQuery('');
+    const catalog = refreshCatalog();
+    const currentExercise = catalog.find((exercise) => exercise.name === currentExerciseName);
+    setOtherMuscleGroup(currentExercise ? getMuscleGroupForExercise(currentExercise) : null);
   }, [closeOpenSwipeable, currentExerciseName, refreshCatalog, translateY, visible]);
 
   const finishDrag = (distance: number, velocity: number) => {
@@ -461,7 +491,9 @@ export function SwapExerciseSheet({
   };
 
   const rememberAddedExercise = (name: string) => {
-    setAddedExerciseNames((names) => (names.includes(name) ? names : [...names, name]));
+    setAddedExerciseNames((names) => [name, ...names.filter((existing) => existing !== name)]);
+    setOtherQuery('');
+    setOtherMuscleGroup(null);
   };
 
   const chooseAddExercise = (name: string) => {
@@ -623,26 +655,6 @@ export function SwapExerciseSheet({
             </View>
             <View style={styles.dayActions}>
               <WorkoutDayLabel accent={accent} label={dayLabel} />
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Add exercise"
-                onPress={openAddEditor}
-                style={({ pressed }) => [
-                  styles.addExerciseButton,
-                  pressed && styles.addExerciseButtonPressed,
-                ]}
-              >
-                <View style={styles.addExerciseContent}>
-                  <Plus color={accent} size={16} strokeWidth={2.5} />
-                  <Text
-                    numberOfLines={1}
-                    allowFontScaling={false}
-                    style={[styles.addExerciseLabel, { color: accent }]}
-                  >
-                    Add exercise
-                  </Text>
-                </View>
-              </Pressable>
             </View>
           </View>
 
@@ -685,6 +697,12 @@ export function SwapExerciseSheet({
                   nameFocused && { borderColor: accent },
                 ]}
               />
+
+              {editor.kind === 'rename' ? (
+                <Text allowFontScaling={false} style={[styles.muscleHint, styles.renameWarning]}>
+                  This also renames it in your past workouts and other splits.
+                </Text>
+              ) : null}
 
               {editor.kind === 'add' ? (
                 <>
@@ -748,7 +766,7 @@ export function SwapExerciseSheet({
                         <TouchableOpacity
                           key={exercise.id}
                           accessibilityRole="button"
-                          accessibilityLabel={`Add ${exercise.name} to today's workout`}
+                          accessibilityLabel={`Show ${exercise.name} in Other Exercises`}
                           activeOpacity={0.72}
                           onPress={() => chooseAddExercise(exercise.name)}
                           style={styles.addMatchRow}
@@ -862,9 +880,6 @@ export function SwapExerciseSheet({
               <Text allowFontScaling={false} style={styles.sectionTitle}>
                 TODAY&apos;S WORKOUT
               </Text>
-              <Text allowFontScaling={false} style={styles.sectionDescription}>
-                Tap an exercise to move to it
-              </Text>
             </View>
             {sessionExercises.map((exercise, index) => {
               const isCurrent = index === currentExerciseIndex;
@@ -901,32 +916,81 @@ export function SwapExerciseSheet({
               );
             })}
 
-            {otherExercises.length ? (
-              <>
-                <View style={[styles.sectionHeader, styles.otherSectionHeader]}>
-                  <Text allowFontScaling={false} style={styles.sectionTitle}>
-                    OTHER EXERCISES
-                  </Text>
-                  <Text allowFontScaling={false} style={styles.sectionDescription}>
-                    Replace {currentExerciseName} for today
+            <View style={[styles.sectionHeader, styles.otherSectionHeader]}>
+              <Text allowFontScaling={false} style={styles.sectionTitle}>
+                OTHER EXERCISES
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Add exercise"
+                onPress={openAddEditor}
+                style={({ pressed }) => [
+                  styles.addExerciseButton,
+                  pressed && styles.addExerciseButtonPressed,
+                ]}
+              >
+                <View style={styles.addExerciseContent}>
+                  <Plus color={accent} size={16} strokeWidth={2.5} />
+                  <Text
+                    numberOfLines={1}
+                    allowFontScaling={false}
+                    style={[styles.addExerciseLabel, { color: accent }]}
+                  >
+                    Add exercise
                   </Text>
                 </View>
-                {otherExercises.map((exercise, index) => (
-                  <SwipeableExerciseRow
-                    key={exercise.id}
-                    name={exercise.name}
-                    accent={accent}
-                    isCurrent={false}
-                    action="replace"
-                    isLast={index === otherExercises.length - 1}
-                    onPress={() => chooseExercise(exercise.name)}
-                    swipeAction="delete"
-                    onAction={(close) => requestDeleteExercise(exercise, close)}
-                    onOpen={handleSwipeableOpen}
-                    onClose={handleSwipeableClose}
-                  />
+              </Pressable>
+            </View>
+            <TextInput
+              accessibilityLabel="Search other exercises"
+              placeholder="Search exercises"
+              placeholderTextColor={redesignColors.ashDim}
+              autoCorrect={false}
+              autoCapitalize="none"
+              value={otherQuery}
+              onChangeText={setOtherQuery}
+              style={[styles.textInput, styles.otherSearch]}
+            />
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.otherSearch}>
+              <View style={styles.muscleTags}>
+                {[null, ...CUSTOM_SPLIT_MUSCLE_GROUPS].map((group) => (
+                  <TouchableOpacity
+                    key={group ?? 'all'}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: otherMuscleGroup === group }}
+                    onPress={() => setOtherMuscleGroup(group)}
+                    style={[styles.muscleTag, { borderColor: accent },
+                      otherMuscleGroup === group && { backgroundColor: accent }]}
+                  >
+                    <Text style={styles.muscleTagLabel}>{group ?? 'All'}</Text>
+                  </TouchableOpacity>
                 ))}
-              </>
+              </View>
+            </ScrollView>
+            {otherMatches.map((exercise, index) => (
+              <SwipeableExerciseRow
+                key={exercise.id}
+                name={exercise.name}
+                accent={accent}
+                isCurrent={false}
+                action="replace"
+                isLast={index === otherMatches.length - 1}
+                onPress={() => chooseExercise(exercise.name)}
+                onAdd={() => {
+                  try {
+                    appendExerciseToSession(exercise.name);
+                  } catch (error) {
+                    Alert.alert('Couldn’t Add Exercise', errorMessage(error));
+                  }
+                }}
+                swipeAction="delete"
+                onAction={(close) => requestDeleteExercise(exercise, close)}
+                onOpen={handleSwipeableOpen}
+                onClose={handleSwipeableClose}
+              />
+            ))}
+            {!otherMatches.length ? (
+              <Text style={styles.muscleHint}>No exercises found.</Text>
             ) : null}
           </ScrollView>
         </Animated.View>
@@ -1314,21 +1378,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  replaceAction: {
-    flexDirection: 'row',
+  rowIconButton: {
+    width: 48,
+    minHeight: 58,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  replaceLabel: {
-    marginLeft: 5,
-    fontFamily: redesignFonts.uiSemiBold,
-    fontSize: 13,
-  },
+  renameWarning: { marginTop: 8 },
+  otherSearch: { marginBottom: 12 },
   sectionHeader: {
     marginBottom: 11,
     paddingHorizontal: 4,
   },
   otherSectionHeader: {
     marginTop: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   sectionTitle: {
     fontFamily: redesignFonts.monoBold,
@@ -1336,12 +1402,5 @@ const styles = StyleSheet.create({
     lineHeight: 14,
     letterSpacing: 1.5,
     color: redesignColors.ash,
-  },
-  sectionDescription: {
-    marginTop: 4,
-    fontFamily: redesignFonts.ui,
-    fontSize: 13,
-    lineHeight: 17,
-    color: redesignColors.ashDim,
   },
 });

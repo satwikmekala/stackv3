@@ -154,7 +154,7 @@ function WorkoutCard({
         </Text>
       ) : (
         <Text style={styles.emptyWorkoutText}>
-          No exercises yet — add at least one to save.
+          No exercises yet — add anytime.
         </Text>
       )}
 
@@ -304,16 +304,13 @@ export default function CustomSplitReviewScreen() {
   );
 
   const trimmedName = draft.name.trim();
-  const emptyWorkoutLetters = draft.workouts
-    .map((workout, index) => (workout.exercises.length === 0 ? getWorkoutLetter(index) : null))
-    .filter((letter): letter is string => letter !== null);
   const validationError =
     !trimmedName
       ? 'Give this split a name before saving.'
       : workoutCount === 0
         ? 'Add at least one workout before saving.'
-        : emptyWorkoutLetters.length > 0
-          ? `Workout${emptyWorkoutLetters.length === 1 ? '' : 's'} ${emptyWorkoutLetters.join(', ')} ${emptyWorkoutLetters.length === 1 ? 'has' : 'have'} no exercises. Add at least one or remove ${emptyWorkoutLetters.length === 1 ? 'it' : 'them'}.`
+        : exerciseCount === 0
+          ? 'Add at least one exercise to this split before saving.'
           : null;
   const menuWorkoutIndex = menu
     ? draft.workouts.findIndex((workout) => workout.id === menu.workoutId)

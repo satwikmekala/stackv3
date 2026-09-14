@@ -23,4 +23,13 @@ export const getWeightIncrement = (
   profile: Pick<UserProfile, 'weightUnit' | 'weightIncrement' | 'weightIncrementLbs'>
 ): number => (profile.weightUnit === 'lbs' ? profile.weightIncrementLbs : profile.weightIncrement);
 
+// Progression and persistence operate on kg-canonical values, even when the
+// configured increment is native to the user's display unit.
+export const getWeightIncrementKg = (
+  profile: Pick<UserProfile, 'weightUnit' | 'weightIncrement' | 'weightIncrementLbs'>
+): number => {
+  const increment = getWeightIncrement(profile);
+  return profile.weightUnit === 'lbs' ? lbsToKg(increment) : increment;
+};
+
 export const unitLabel = (unit: WeightUnit): string => (unit === 'lbs' ? 'lbs' : 'kg');

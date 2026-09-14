@@ -110,12 +110,12 @@ The specialized plain-system file set is exactly components/Button.tsx, componen
 |---|---|---|---|
 | **display** | BricolageGrotesque_700Bold | @expo-google-fonts/bricolage-grotesque | app/index.tsx; app/workout.tsx; all four onboarding screens; tabs/index, profile, records; ActiveSetCard; BonusSet; RestTimer; SwapExerciseSheet; home/WorkoutHeroCard, WorkoutIntensityPicker, WorkoutPicker |
 | **ui** | HankenGrotesk_400Regular | @expo-google-fonts/hanken-grotesk | onboarding/experience and welcome; tabs/records; app/workout.tsx; BonusSet; ExerciseFinisher; SwapExerciseSheet |
-| **uiMedium** | HankenGrotesk_500Medium | @expo-google-fonts/hanken-grotesk | tabs/profile; home/ScheduleRow |
-| **uiSemiBold** | HankenGrotesk_600SemiBold | @expo-google-fonts/hanken-grotesk | onboarding/current-week and whatsurname; tabs/index and profile; app/workout.tsx; ActiveSetCard; ExerciseFinisher; RestTimer; SwapExerciseSheet; home/ScheduleRow and WorkoutPicker |
+| **uiMedium** | HankenGrotesk_500Medium | @expo-google-fonts/hanken-grotesk | tabs/profile; app/workout-summary.tsx; app/custom-split/review.tsx; StatStripCard |
+| **uiSemiBold** | HankenGrotesk_600SemiBold | @expo-google-fonts/hanken-grotesk | onboarding/current-week and whatsurname; tabs/index and profile; app/workout.tsx; ActiveSetCard; ExerciseFinisher; RestTimer; SwapExerciseSheet; home/WorkoutPicker |
 | **uiBold** | HankenGrotesk_700Bold | @expo-google-fonts/hanken-grotesk | onboarding/current-week, experience, and welcome; tabs/profile and records; ActiveSetCard; ExerciseFinisher; SwapExerciseSheet |
 | **uiItalic** | HankenGrotesk_400Regular_Italic | @expo-google-fonts/hanken-grotesk | tabs/index |
 | **mono** | JetBrainsMono_400Regular | @expo-google-fonts/jetbrains-mono | tabs/profile; ExerciseFinisher; home/WeeklyProgressPill and WorkoutHeroCard |
-| **monoBold** | JetBrainsMono_700Bold | @expo-google-fonts/jetbrains-mono | tabs/index, profile, and records; app/workout.tsx; ActiveSetCard; BonusSet; ExerciseFinisher; RestTimer; StatusPill; SwapExerciseSheet; WorkoutDayLabel; home/ScheduleRow, WorkoutHeroCard, WorkoutIntensityPicker, WorkoutPicker |
+| **monoBold** | JetBrainsMono_700Bold | @expo-google-fonts/jetbrains-mono | tabs/index, profile, and records; app/workout.tsx; ActiveSetCard; BonusSet; ExerciseFinisher; RestTimer; StatusPill; SwapExerciseSheet; WorkoutDayLabel; home/WorkoutHeroCard, WorkoutIntensityPicker, WorkoutPicker |
 
 For compactness, “all four onboarding screens” means app/(onboarding)/welcome.tsx, current-week.tsx, whatsurname.tsx, and experience.tsx. “tabs/index, profile, records” means the matching files in app/(tabs)/. Every redesign-font token has at least one direct live reference.
 
@@ -142,7 +142,6 @@ Spacing and layout are therefore currently component-local, expressed through in
 | **SwapExerciseSheet** | Bottom sheet for navigating and replacing an exercise with confirmation. | Redesign | components/SwapExerciseSheet.tsx |
 | **VolumeChart** | SVG weekly-volume bar chart with an empty state. | Plain | components/VolumeChart.tsx |
 | **WorkoutDayLabel** | Colored dot plus uppercase workout-day label. | Redesign | components/WorkoutDayLabel.tsx |
-| **ScheduleRow** | Row for a scheduled, rest, or completed day in the home schedule. | Redesign | components/home/ScheduleRow.tsx |
 | **WeeklyProgressPill** | Compact completed-versus-goal count with progress bars. | Redesign | components/home/WeeklyProgressPill.tsx |
 | **WorkoutHeroCard** | Animated “today’s workout” launch card. | Redesign | components/home/WorkoutHeroCard.tsx |
 | **WorkoutIntensityPicker** | Modal slider and discrete choice control for workout intensity. | Redesign | components/home/WorkoutIntensityPicker.tsx |

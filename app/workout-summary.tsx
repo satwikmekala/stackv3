@@ -272,9 +272,16 @@ export default function WorkoutSummaryScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const params = useLocalSearchParams<{ sessionId?: string | string[] }>();
+  const params = useLocalSearchParams<{
+    sessionId?: string | string[];
+    /** History and history-week pass source=history when reopening a recap. */
+    source?: string | string[];
+  }>();
   const rawSessionId = params.sessionId;
   const sessionId = Array.isArray(rawSessionId) ? rawSessionId[0] : rawSessionId;
+  const rawSource = params.source;
+  const source = Array.isArray(rawSource) ? rawSource[0] : rawSource;
+  const openedFromHistory = source === 'history';
   const sessions = useWorkoutStore((state) => state.sessions);
   const weightUnit = useWorkoutStore(
     (state) => state.profile?.weightUnit ?? DEFAULT_WEIGHT_UNIT
@@ -313,6 +320,12 @@ export default function WorkoutSummaryScreen() {
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
     router.replace(destination);
+  };
+  const closeHistorySummary = () => {
+    if (Platform.OS !== 'web') {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    router.back();
   };
   const openShare = () => {
     if (Platform.OS !== 'web') void Haptics.selectionAsync();
@@ -368,29 +381,33 @@ export default function WorkoutSummaryScreen() {
             />
             <HeroGlow accent={summary.accent} />
 
-            <View
-              accessibilityLabel="Workout complete"
-              style={[
-                styles.completePill,
-                {
-                  borderColor: rgba(summary.accent, 0.58),
-                  backgroundColor: rgba(summary.accent, 0.09),
-                },
-              ]}
-            >
-              <Animated.View
-                entering={CHECK_ENTER}
-                style={[styles.completeIcon, { backgroundColor: summary.accent }]}
+            {openedFromHistory ? (
+              <View style={styles.completePillPlaceholder} />
+            ) : (
+              <View
+                accessibilityLabel="Workout complete"
+                style={[
+                  styles.completePill,
+                  {
+                    borderColor: rgba(summary.accent, 0.58),
+                    backgroundColor: rgba(summary.accent, 0.09),
+                  },
+                ]}
               >
-                <Check color={redesignColors.ink} size={15} strokeWidth={3.5} />
-              </Animated.View>
-              <Text
-                allowFontScaling={false}
-                style={[styles.completeLabel, { color: summary.accent }]}
-              >
-                WORKOUT COMPLETE
-              </Text>
-            </View>
+                <Animated.View
+                  entering={CHECK_ENTER}
+                  style={[styles.completeIcon, { backgroundColor: summary.accent }]}
+                >
+                  <Check color={redesignColors.ink} size={15} strokeWidth={3.5} />
+                </Animated.View>
+                <Text
+                  allowFontScaling={false}
+                  style={[styles.completeLabel, { color: summary.accent }]}
+                >
+                  WORKOUT COMPLETE
+                </Text>
+              </View>
+            )}
 
             <Text
               adjustsFontSizeToFit
@@ -443,17 +460,33 @@ export default function WorkoutSummaryScreen() {
 
             <ExerciseRecap summary={summary} weightUnit={weightUnit} />
 
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Done. Return home"
-              onPress={() => finish('/(tabs)')}
-              style={[
-                styles.doneButton,
-                { backgroundColor: summary.accent },
-              ]}
-            >
-              <Text allowFontScaling={false} style={styles.doneButtonText}>Done</Text>
-            </Pressable>
+            {openedFromHistory ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Close workout summary"
+                onPress={closeHistorySummary}
+                style={[
+                  styles.doneButton,
+                  { backgroundColor: summary.accent },
+                ]}
+              >
+                <Text allowFontScaling={false} style={styles.doneButtonText}>
+                  Close
+                </Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Done. Return home"
+                onPress={() => finish('/(tabs)')}
+                style={[
+                  styles.doneButton,
+                  { backgroundColor: summary.accent },
+                ]}
+              >
+                <Text allowFontScaling={false} style={styles.doneButtonText}>Done</Text>
+              </Pressable>
+            )}
           </Animated.View>
         </View>
       </ScrollView>
@@ -479,21 +512,28 @@ export default function WorkoutSummaryScreen() {
           style={StyleSheet.absoluteFill}
         />
         <View style={styles.actionColumn}>
-          <View style={styles.actionRow}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="View progress"
-              hitSlop={6}
-              onPress={() => finish('/(tabs)/profile')}
-              style={({ pressed }) => [
-                styles.progressButton,
-                pressed && styles.buttonPressed,
-              ]}
-            >
-              <Text allowFontScaling={false} style={styles.progressButtonText}>
-                View progress
-              </Text>
-            </Pressable>
+          <View
+            style={[
+              styles.actionRow,
+              openedFromHistory && styles.historyActionRow,
+            ]}
+          >
+            {!openedFromHistory ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="View progress"
+                hitSlop={6}
+                onPress={() => finish('/(tabs)/profile')}
+                style={({ pressed }) => [
+                  styles.progressButton,
+                  pressed && styles.buttonPressed,
+                ]}
+              >
+                <Text allowFontScaling={false} style={styles.progressButtonText}>
+                  View progress
+                </Text>
+              </Pressable>
+            ) : null}
 
             <Pressable
               accessibilityRole="button"
@@ -567,6 +607,10 @@ const styles = StyleSheet.create({
     borderCurve: 'continuous',
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  completePillPlaceholder: {
+    height: 30,
+    marginTop: 26,
   },
   completeIcon: {
     width: 20,
@@ -851,6 +895,9 @@ const styles = StyleSheet.create({
   actionRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+  },
+  historyActionRow: {
+    justifyContent: 'flex-end',
   },
   buttonPressed: {
     opacity: 0.72,

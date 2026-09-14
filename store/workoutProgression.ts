@@ -1,17 +1,9 @@
 import type {
   Exercise,
   ExerciseSet,
-  ExperienceLevel,
+  UserProfile,
 } from '@/store/workoutStore';
-
-const WEIGHT_INCREMENT_BY_LEVEL: Record<ExperienceLevel, number> = {
-  beginner: 5,
-  intermediate: 2.5,
-  advanced: 1.25,
-};
-
-const getWeightIncrement = (level: ExperienceLevel | undefined): number =>
-  WEIGHT_INCREMENT_BY_LEVEL[level ?? 'intermediate'];
+import { getWeightIncrementKg } from '@/store/weightUnits';
 
 /**
  * Canonical shape for an exercise entering a session with no template targets
@@ -27,17 +19,18 @@ export const makeDefaultExercise = (name: string): Exercise => ({
   ],
 });
 
-// Pure progressive-overload business logic, unchanged from the previous store.
+// Progressive-overload business logic shared by every live session-start path.
 const computeNextTarget = (
   lastSet: ExerciseSet | undefined,
   templateSet: { reps: number; weight: number },
-  experienceLevel: ExperienceLevel | undefined
+  progressionIncrementKg: number,
+  autoIncreaseWeight: boolean
 ): { targetReps: number; targetWeight: number } => {
   if (!lastSet) {
     return { targetReps: templateSet.reps, targetWeight: templateSet.weight };
   }
   const priorTargetReps = lastSet.targetReps ?? lastSet.reps;
-  const priorTargetWeight = lastSet.targetWeight ?? lastSet.weight;
+  const priorTargetWeight = lastSet.weight ?? lastSet.targetWeight ?? templateSet.weight;
 
   if (lastSet.skipped) {
     return { targetReps: priorTargetReps, targetWeight: priorTargetWeight };
@@ -45,8 +38,8 @@ const computeNextTarget = (
   const hitTarget = lastSet.reps >= priorTargetReps;
   return {
     targetReps: priorTargetReps,
-    targetWeight: hitTarget
-      ? Math.max(0, priorTargetWeight + getWeightIncrement(experienceLevel))
+    targetWeight: hitTarget && autoIncreaseWeight
+      ? Math.max(0, priorTargetWeight + progressionIncrementKg)
       : priorTargetWeight,
   };
 };
@@ -54,27 +47,37 @@ const computeNextTarget = (
 export const createSessionExercise = (
   templateExercise: Exercise,
   lastExercise: Exercise | undefined,
-  experienceLevel: ExperienceLevel | undefined
-): Exercise => ({
-  name: templateExercise.name,
-  sets: templateExercise.sets
-    .filter((set) => !set.type)
-    .map((templateSet, setIndex) => {
-      const { targetReps, targetWeight } = computeNextTarget(
-        lastExercise?.sets[setIndex],
-        templateSet,
-        experienceLevel
-      );
-      return {
-        reps: targetReps,
-        weight: targetWeight,
-        targetReps,
-        targetWeight,
-        completed: false,
-        skipped: false,
-      };
-    }),
-});
+  profile: Pick<
+    UserProfile,
+    'weightUnit' | 'weightIncrement' | 'weightIncrementLbs' | 'autoIncreaseWeight'
+  >
+): Exercise => {
+  // One configured step keeps the next target on the same grid as the actual
+  // weight the user logged, regardless of their display unit.
+  const progressionIncrementKg = getWeightIncrementKg(profile);
+
+  return {
+    name: templateExercise.name,
+    sets: templateExercise.sets
+      .filter((set) => !set.type)
+      .map((templateSet, setIndex) => {
+        const { targetReps, targetWeight } = computeNextTarget(
+          lastExercise?.sets[setIndex],
+          templateSet,
+          progressionIncrementKg,
+          profile.autoIncreaseWeight
+        );
+        return {
+          reps: targetReps,
+          weight: targetWeight,
+          targetReps,
+          targetWeight,
+          completed: false,
+          skipped: false,
+        };
+      }),
+  };
+};
 
 /**
  * Builds an already-completed exercise without applying progressive overload.

@@ -1,16 +1,12 @@
 import { useEffect, useRef } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Check, Zap } from 'lucide-react-native';
+import { Check } from 'lucide-react-native';
+import { WorkoutBolt } from '@/components/WorkoutBolt';
 import Animated, {
-  Easing,
   FadeInDown,
   FadeOut,
   ReduceMotion,
-  useAnimatedStyle,
-  useSharedValue,
-  withRepeat,
-  withTiming,
 } from 'react-native-reanimated';
 import {
   ARCHETYPE_COMPOSITIONS,
@@ -22,12 +18,13 @@ import { workoutMeta } from '@/constants/workouts';
 import { redesignColors, redesignFonts } from '@/constants/theme';
 import { motionDuration, motionEasing } from '@/constants/motion';
 import { usePressScale } from '@/hooks/usePressScale';
+import type { WorkoutLaunchOrigin } from '@/utils/workoutLaunch';
 
 type WorkoutHeroCardProps = {
   type?: WorkoutType;
   archetypes?: Archetype[];
   exerciseCount: number;
-  onPress?: () => void;
+  onPress?: (origin?: WorkoutLaunchOrigin) => void;
   completed?: boolean;
   /** When the queued workout is scheduled: "TODAY", "TOMORROW", "FRIDAY"… */
   whenLabel?: string;
@@ -37,6 +34,7 @@ type WorkoutHeroCardProps = {
   title?: string;
   groupLabel?: string;
   accentColor?: string;
+  hideStartButton?: boolean;
 };
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
@@ -59,6 +57,16 @@ function rgba(hex: string, opacity: number) {
   return `rgba(${red}, ${green}, ${blue}, ${opacity})`;
 }
 
+// Opaque stops keep the charcoal fade consistent across native renderers.
+function tintSurface(hex: string, amount: number) {
+  const base = [23, 23, 22];
+  const channels = base.map((channel, index) => {
+    const accent = parseInt(hex.slice(1 + index * 2, 3 + index * 2), 16);
+    return Math.round(channel + (accent - channel) * amount);
+  });
+  return `rgb(${channels.join(', ')})`;
+}
+
 export function WorkoutHeroCard({
   type,
   archetypes,
@@ -69,6 +77,7 @@ export function WorkoutHeroCard({
   title,
   groupLabel,
   accentColor,
+  hideStartButton = false,
 }: WorkoutHeroCardProps) {
   const primaryArchetype = archetypes?.[0];
   const sessionDisplay = getSessionWorkoutDisplay({
@@ -93,27 +102,13 @@ export function WorkoutHeroCard({
           : type
             ? workoutMeta[type].group
             : 'Training';
-  const glow = useSharedValue(0);
   const pressScale = usePressScale('surface');
   const hasMountedContent = useRef(false);
+  const buttonRef = useRef<View>(null);
 
   useEffect(() => {
     hasMountedContent.current = true;
   }, []);
-
-  useEffect(() => {
-    glow.value = withRepeat(
-      withTiming(1, { duration: 1900, easing: Easing.inOut(Easing.ease) }),
-      -1,
-      true
-    );
-  }, [color, glow]);
-
-  const buttonStyle = useAnimatedStyle(() => ({
-    shadowOpacity: 0.24 + glow.value * 0.2,
-    shadowRadius: 13 + glow.value * 6,
-    transform: [{ scale: 1 + glow.value * 0.025 }],
-  }));
 
   return (
     <AnimatedPressable
@@ -125,33 +120,66 @@ export function WorkoutHeroCard({
           : `${group} workout with ${exerciseCount} exercises`
       }
       disabled={!onPress}
-      onPress={onPress}
+      onPress={() => {
+        if (!onPress) return;
+        if (completed || !buttonRef.current) {
+          onPress();
+          return;
+        }
+        buttonRef.current.measureInWindow((x, y, width, height) => {
+          onPress(width > 0 && height > 0
+            ? { x: x + width / 2, y: y + height / 2, size: width, color }
+            : undefined);
+        });
+      }}
       onPressIn={pressScale.onPressIn}
       onPressOut={pressScale.onPressOut}
-      style={[styles.card, { borderColor: rgba(color, 0.72) }, pressScale.animatedStyle]}
+      style={[styles.card, pressScale.animatedStyle]}
     >
-      <LinearGradient
+      <View
         pointerEvents="none"
-        colors={[rgba(color, 0.31), rgba(color, 0.13), 'rgba(29, 25, 21, 0.96)']}
-        locations={[0, 0.5, 1]}
-        start={{ x: 0.05, y: 0 }}
-        end={{ x: 0.95, y: 1 }}
-        style={StyleSheet.absoluteFill}
+        style={[styles.cardBacklight, { shadowColor: color }]}
       />
+      <View pointerEvents="none" style={styles.cardSurface}>
+        <LinearGradient
+          colors={[tintSurface(color, 0.38), tintSurface(color, 0.2), tintSurface(color, 0.09)]}
+          locations={[0, 0.5, 1]}
+          start={{ x: 0.5, y: 0 }}
+          end={{ x: 0.5, y: 1 }}
+          style={StyleSheet.absoluteFill}
+        />
+        <LinearGradient
+          colors={[
+            tintSurface(color, 0.17),
+            tintSurface(color, 0.13),
+            tintSurface(color, 0.085),
+            tintSurface(color, 0.04),
+            '#171716',
+          ]}
+          locations={[0, 0.28, 0.56, 0.82, 1]}
+          start={{ x: 0.5, y: 0 }}
+          end={{ x: 0.5, y: 1 }}
+          style={styles.cardFill}
+        />
+      </View>
 
       <Animated.View
         entering={hasMountedContent.current ? CONTENT_ENTER : undefined}
         exiting={CONTENT_EXIT}
+        style={styles.content}
         key={`${whenLabel}\u0000${label}\u0000${group}\u0000${exerciseCount}`}
       >
-        <Text style={[styles.eyebrow, { color }]}>{completed ? 'Goal met' : whenLabel}</Text>
+        <View style={[styles.badge, { backgroundColor: rgba(color, 0.14), borderColor: rgba(color, 0.45) }]}>
+          <View style={[styles.badgeDot, { backgroundColor: color, shadowColor: color }]} />
+          <Text style={[styles.eyebrow, { color }]}>{completed ? 'GOAL MET' : whenLabel}</Text>
+        </View>
         <Text
           adjustsFontSizeToFit
           minimumFontScale={0.65}
           numberOfLines={2}
           style={styles.title}
         >
-          {label}
+          {label.replace(/,\s*/, ',\n')}
         </Text>
         <Text style={styles.meta}>
           {completed
@@ -160,34 +188,17 @@ export function WorkoutHeroCard({
         </Text>
       </Animated.View>
 
-      <View style={styles.divider} />
-
-      <View style={styles.actionRow}>
-        <Text style={[styles.tapLabel, { color }]}>
-          {completed
-            ? 'Add a workout'
-            : whenLabel === 'TODAY'
-              ? 'START YOUR WORKOUT'
-              : 'START EARLY'}
-        </Text>
-        <Animated.View
-          style={[
-            styles.playButton,
-            { backgroundColor: color, shadowColor: color },
-            buttonStyle,
-          ]}
-        >
+      <View pointerEvents="none" style={styles.actionRow}>
+        <View ref={buttonRef} collapsable={false}
+          style={[styles.playButton, {
+            backgroundColor: color, shadowColor: color, opacity: hideStartButton ? 0 : 1,
+          }]}>
           {completed ? (
-            <Check color={redesignColors.ink} size={28} strokeWidth={3} />
+            <Check color={redesignColors.ink} size={36} strokeWidth={3} />
           ) : (
-            <Zap
-              color={redesignColors.ink}
-              fill={redesignColors.ink}
-              size={26}
-              strokeWidth={2.5}
-            />
+            <WorkoutBolt />
           )}
-        </Animated.View>
+        </View>
       </View>
     </AnimatedPressable>
   );
@@ -195,58 +206,102 @@ export function WorkoutHeroCard({
 
 const styles = StyleSheet.create({
   card: {
-    minHeight: 246,
-    borderRadius: 28,
+    // Include the entire start button in both layout and the touch target.
+    minHeight: 350,
+    borderRadius: 38,
     borderCurve: 'continuous',
-    borderWidth: 1.25,
+    paddingHorizontal: 22,
+    paddingTop: 32,
+    paddingBottom: 118,
+    justifyContent: 'center',
+  },
+  cardBacklight: {
+    ...StyleSheet.absoluteFillObject,
+    bottom: 46,
+    borderRadius: 38,
+    borderCurve: 'continuous',
+    backgroundColor: '#171716',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.13,
+    shadowRadius: 20,
+  },
+  cardSurface: {
+    ...StyleSheet.absoluteFillObject,
+    bottom: 46,
+    borderRadius: 38,
+    borderCurve: 'continuous',
     overflow: 'hidden',
-    padding: 24,
-    justifyContent: 'space-between',
-    backgroundColor: redesignColors.surface,
+    backgroundColor: '#171716',
+  },
+  cardFill: {
+    position: 'absolute',
+    top: 1,
+    right: 1,
+    bottom: 1,
+    left: 1,
+    borderRadius: 37,
+    borderCurve: 'continuous',
+  },
+  content: {
+    alignItems: 'center',
+    gap: 22,
+  },
+  badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  badgeDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    shadowOpacity: 0.9,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 0 },
   },
   eyebrow: {
     fontFamily: redesignFonts.monoBold,
-    fontSize: 13,
-    letterSpacing: 2.2,
-    marginBottom: 12,
+    fontSize: 11,
+    letterSpacing: 2.4,
   },
   title: {
     fontFamily: redesignFonts.display,
-    fontSize: 42,
-    lineHeight: 46,
-    letterSpacing: -1.6,
+    fontSize: 48,
+    lineHeight: 50,
+    letterSpacing: -1.8,
     color: redesignColors.bone,
-    marginBottom: 12,
+    textAlign: 'center',
+    width: '100%',
   },
   meta: {
     fontFamily: redesignFonts.mono,
-    fontSize: 12,
-    lineHeight: 18,
-    letterSpacing: 0.35,
+    fontSize: 11,
+    lineHeight: 19,
+    letterSpacing: 1.5,
     color: redesignColors.ash,
-  },
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: redesignColors.hi,
-    marginVertical: 20,
+    textAlign: 'center',
   },
   actionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  tapLabel: {
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 12,
-    letterSpacing: 1.65,
-  },
-  playButton: {
-    width: 58,
-    height: 58,
-    borderRadius: 19,
+    position: 'absolute',
+    bottom: 0,
+    alignSelf: 'center',
+    width: 112,
+    height: 112,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 10,
+  },
+  playButton: {
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    width: 92,
+    height: 92,
+    borderRadius: 46,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

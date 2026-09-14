@@ -2,6 +2,7 @@ import { Alert } from 'react-native';
 import { create } from 'zustand';
 
 import type { Archetype } from '@/constants/archetypes';
+import { EMPTY_CUSTOM_WORKOUT_MESSAGE, EmptyCustomWorkoutError } from '@/store/customSplits';
 
 import type {
   CustomSplit,
@@ -69,7 +70,7 @@ import {
   createSessionExercise,
   makeDefaultExercise,
 } from '@/store/workoutProgression';
-import { lbsToKg, type WeightUnit } from '@/store/weightUnits';
+import { getWeightIncrementKg, type WeightUnit } from '@/store/weightUnits';
 
 export type { ExerciseCatalogItem };
 export type {
@@ -122,6 +123,7 @@ export interface UserProfile {
   experienceLevel: ExperienceLevel;
   trainingDays: number[];
   onboardingCompleted: boolean;
+  autoIncreaseWeight: boolean;
   weightIncrement: number;
   weightUnit: WeightUnit;
   weightIncrementLbs: number;
@@ -131,17 +133,6 @@ export interface UserProfile {
 // Kept only at the setProfile call boundary so the existing onboarding caller
 // can pass its former dead counter without that value entering state or SQLite.
 type UserProfileInput = UserProfile & { workoutsCompletedThisWeek?: number };
-
-export interface ScheduleDay {
-  date: string;
-  status: 'past' | 'today' | 'future';
-  completedWorkout?: Pick<
-    WorkoutSession,
-    'archetype' | 'secondaryArchetype' | 'workoutTypes'
-  >;
-  projectedWorkoutTypes?: WorkoutType[];
-  isTrainingDay: boolean;
-}
 
 interface WorkoutStore {
   profile: UserProfile | null;
@@ -191,7 +182,7 @@ interface WorkoutStore {
 
   startWorkout: (workoutTypes: WorkoutType[]) => void;
   startWorkoutFromArchetype: (archetypes: Archetype[]) => void;
-  startWorkoutFromCustomWorkout: (splitId: number, workoutId: number) => void;
+  startWorkoutFromCustomWorkout: (splitId: number, workoutId: number) => boolean;
   logArchetypeCompletedRetroactively: (archetypes: Archetype[], date: string) => void;
   updateExerciseSet: (exerciseIndex: number, setIndex: number, reps: number, weight: number) => void;
   appendBonusSet: (
@@ -224,7 +215,6 @@ interface WorkoutStore {
   getLastWorkoutOfType: (type: WorkoutType) => WorkoutSession | undefined;
   getWeeklyProgress: () => { completed: number; goal: number };
   getWeekStreak: () => { date: string; workouts: number }[];
-  getWeekSchedule: () => ScheduleDay[];
   getWeeklyVolumeTrend: (weeks?: number) => { weekStart: string; volume: number }[];
   getRecentIntensity: (n?: number) => IntensityLevel[];
 
@@ -318,6 +308,7 @@ const normalizeProfile = (profile: UserProfileInput): UserProfile => ({
   experienceLevel: profile.experienceLevel,
   trainingDays: profile.trainingDays,
   onboardingCompleted: profile.onboardingCompleted,
+  autoIncreaseWeight: profile.autoIncreaseWeight,
   weightIncrement: profile.weightIncrement,
   weightUnit: profile.weightUnit,
   weightIncrementLbs: profile.weightIncrementLbs,
@@ -552,12 +543,13 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
     }
     const template = readSplitTemplatesSync()[type];
     const lastWorkout = readLastWorkoutOfTypeSync(type);
-    const experienceLevel = readProfileSync()?.experienceLevel;
+    const profile = readProfileSync();
+    if (!profile) throw new Error('A profile is required to start a workout');
     const exercises = template.map((templateExercise) =>
       createSessionExercise(
         templateExercise,
         lastWorkout?.exercises.find((exercise) => exercise.name === templateExercise.name),
-        experienceLevel
+        profile
       )
     );
     const newSession = replaceCurrentSession({
@@ -584,9 +576,16 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 
   startWorkoutFromCustomWorkout: (splitId, workoutId) =>
     runGuardedAction('startWorkoutFromCustomWorkout', () => {
-      const newSession = persistWorkoutFromCustomWorkout(splitId, workoutId);
-      set({ currentSession: newSession });
-    }),
+      try {
+        const newSession = persistWorkoutFromCustomWorkout(splitId, workoutId);
+        set({ currentSession: newSession });
+        return true;
+      } catch (error) {
+        if (!(error instanceof EmptyCustomWorkoutError)) throw error;
+        Alert.alert('This workout is empty', EMPTY_CUSTOM_WORKOUT_MESSAGE);
+        return false;
+      }
+    }) === true,
 
   logArchetypeCompletedRetroactively: (archetypes, date) =>
     runGuardedAction('logArchetypeCompletedRetroactively', () => {
@@ -633,8 +632,9 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
     exercises[exerciseIndex].sets[setIndex] = updated;
     const nextSet = exercises[exerciseIndex].sets[setIndex + 1];
     if (nowCompleted && nextSet && !nextSet.completed && !nextSet.skipped) {
-      // Bump is unit-native (2.5 kg / 5 lbs) but stored in kg-canonical terms.
-      const bumpKg = get().profile?.weightUnit === 'lbs' ? lbsToKg(5) : 2.5;
+      const profile = get().profile;
+      if (!profile) throw new Error('A profile is required to progress a set');
+      const bumpKg = getWeightIncrementKg(profile);
       const nextUpdated = {
         ...nextSet,
         weight: target.weight + bumpKg,
@@ -691,10 +691,12 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
       readSplitTemplatesSync()[type].find((exercise) => exercise.name === name) ??
       lastExercise ??
       makeDefaultExercise(name);
+    const profile = readProfileSync();
+    if (!profile) throw new Error('A profile is required to swap an exercise');
     const replacement = createSessionExercise(
       { ...templateExercise, name },
       lastExercise,
-      readProfileSync()?.experienceLevel
+      profile
     );
 
     replaceCurrentSessionExercise(exerciseIndex, replacement);
@@ -714,10 +716,12 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
       readSplitTemplatesSync()[type].find((exercise) => exercise.name === name) ??
       lastExercise ??
       makeDefaultExercise(name);
+    const profile = readProfileSync();
+    if (!profile) throw new Error('A profile is required to append an exercise');
     const newExercise = createSessionExercise(
       { ...templateExercise, name },
       lastExercise,
-      readProfileSync()?.experienceLevel
+      profile
     );
 
     appendCurrentSessionExercise(newExercise);
@@ -898,44 +902,6 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
       date,
       workouts: sessions.filter((session) => getSessionLocalDate(session.date) === date).length,
     }));
-  },
-
-  getWeekSchedule: () => {
-    const weekDates = getWeekDates();
-    const sessions = readCompletedSessionsSync();
-    const profile = readProfileSync();
-    const goal = profile?.weeklyGoal ?? 3;
-    const today = toLocalCalendarDate(new Date());
-    const trainingSlots = new Set<number>(
-      profile?.trainingDays?.length ? profile.trainingDays : deriveDefaultSlots(goal)
-    );
-
-    return weekDates.map((date, index) => {
-      const status: ScheduleDay['status'] =
-        date === today ? 'today' : date < today ? 'past' : 'future';
-      const isTrainingDay = trainingSlots.has(index);
-      const completedSession = sessions
-        .filter((session) => getSessionLocalDate(session.date) === date)
-        .sort((a, b) => parseSessionDate(b.date).getTime() - parseSessionDate(a.date).getTime())[0];
-      const completedWorkout = completedSession
-        ? {
-            archetype: completedSession.archetype,
-            secondaryArchetype: completedSession.secondaryArchetype,
-            workoutTypes: completedSession.workoutTypes,
-          }
-        : undefined;
-      let projectedWorkoutTypes: WorkoutType[] | undefined;
-      if (status === 'today' && !completedWorkout) {
-        projectedWorkoutTypes = [get().getNextWorkoutType()];
-      }
-      return {
-        date,
-        status,
-        completedWorkout,
-        projectedWorkoutTypes,
-        isTrainingDay,
-      };
-    });
   },
 
   getWeeklyVolumeTrend: (weeks = 8) => {
