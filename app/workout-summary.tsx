@@ -151,10 +151,12 @@ function SummaryDetails({
   summary,
   weeklyCompleted,
   weeklyGoal,
+  showWeeklyGoal,
 }: {
   summary: WorkoutSummary;
   weeklyCompleted: number;
   weeklyGoal: number;
+  showWeeklyGoal: boolean;
 }) {
   const specialLabel = specialSetSummaryLabel(summary.specialSets);
 
@@ -191,14 +193,16 @@ function SummaryDetails({
         </View>
       ) : null}
 
-      <View style={styles.detailRow}>
-        <Text allowFontScaling={false} style={styles.detailLabel}>WEEKLY GOAL</Text>
-        <WeeklyGoal
-          completed={weeklyCompleted}
-          goal={weeklyGoal}
-          accent={summary.accent}
-        />
-      </View>
+      {showWeeklyGoal ? (
+        <View style={styles.detailRow}>
+          <Text allowFontScaling={false} style={styles.detailLabel}>WEEKLY GOAL</Text>
+          <WeeklyGoal
+            completed={weeklyCompleted}
+            goal={weeklyGoal}
+            accent={summary.accent}
+          />
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -369,21 +373,28 @@ export default function WorkoutSummaryScreen() {
           >
             <LinearGradient
               pointerEvents="none"
-              colors={[
-                rgba(summary.accent, 0),
-                rgba(summary.accent, 0.025),
-                rgba(summary.accent, 0.2),
-              ]}
-              locations={[0, 0.48, 1]}
+              colors={openedFromHistory
+                ? [
+                    rgba(summary.accent, 0.34),
+                    rgba(summary.accent, 0.16),
+                    rgba(summary.accent, 0.055),
+                    rgba(summary.accent, 0),
+                  ]
+                : [
+                    rgba(summary.accent, 0),
+                    rgba(summary.accent, 0.025),
+                    rgba(summary.accent, 0.2),
+                  ]}
+              locations={openedFromHistory
+                ? [0, 0.28, 0.62, 1]
+                : [0, 0.48, 1]}
               start={{ x: 0.5, y: 0 }}
               end={{ x: 0.5, y: 1 }}
               style={StyleSheet.absoluteFill}
             />
-            <HeroGlow accent={summary.accent} />
+            {!openedFromHistory ? <HeroGlow accent={summary.accent} /> : null}
 
-            {openedFromHistory ? (
-              <View style={styles.completePillPlaceholder} />
-            ) : (
+            {!openedFromHistory ? (
               <View
                 accessibilityLabel="Workout complete"
                 style={[
@@ -407,14 +418,18 @@ export default function WorkoutSummaryScreen() {
                   WORKOUT COMPLETE
                 </Text>
               </View>
-            )}
+            ) : null}
 
             <Text
               adjustsFontSizeToFit
               allowFontScaling={false}
               minimumFontScale={0.74}
               numberOfLines={1}
-              style={styles.workoutTitle}
+              style={[
+                styles.workoutTitle,
+                openedFromHistory && styles.historyWorkoutTitle,
+                openedFromHistory && compact && styles.historyWorkoutTitleCompact,
+              ]}
             >
               {summary.title}
             </Text>
@@ -426,7 +441,33 @@ export default function WorkoutSummaryScreen() {
             <Text allowFontScaling={false} style={styles.volumeLabel}>
               TOTAL VOLUME LIFTED
             </Text>
-            <View style={styles.volumeRow}>
+            {openedFromHistory ? (
+              <>
+                <Text
+                  adjustsFontSizeToFit
+                  allowFontScaling={false}
+                  minimumFontScale={0.68}
+                  numberOfLines={1}
+                  style={[
+                    styles.volumeValue,
+                    styles.historyVolumeValue,
+                    compact && styles.volumeValueCompact,
+                  ]}
+                >
+                  {formatSummaryNumber(displayedVolume)}
+                </Text>
+                <Text
+                  allowFontScaling={false}
+                  style={[
+                    styles.volumeUnit,
+                    styles.historyVolumeUnit,
+                    { color: summary.accent },
+                  ]}
+                >
+                  {unitLabel(weightUnit)}
+                </Text>
+              </>
+            ) : (
               <Text
                 adjustsFontSizeToFit
                 allowFontScaling={false}
@@ -434,15 +475,15 @@ export default function WorkoutSummaryScreen() {
                 numberOfLines={1}
                 style={[styles.volumeValue, compact && styles.volumeValueCompact]}
               >
-                {formatSummaryNumber(displayedVolume)}
+                {formatSummaryNumber(displayedVolume)}{' '}
+                <Text
+                  allowFontScaling={false}
+                  style={[styles.volumeUnit, { color: summary.accent }]}
+                >
+                  {unitLabel(weightUnit)}
+                </Text>
               </Text>
-              <Text
-                allowFontScaling={false}
-                style={[styles.volumeUnit, { color: summary.accent }]}
-              >
-                {unitLabel(weightUnit)}
-              </Text>
-            </View>
+            )}
           </Animated.View>
 
           <Animated.View entering={CONTENT_ENTER}>
@@ -456,6 +497,7 @@ export default function WorkoutSummaryScreen() {
               summary={summary}
               weeklyCompleted={weeklyProgress.completed}
               weeklyGoal={weeklyProgress.goal}
+              showWeeklyGoal={!openedFromHistory}
             />
 
             <ExerciseRecap summary={summary} weightUnit={weightUnit} />
@@ -542,6 +584,7 @@ export default function WorkoutSummaryScreen() {
               onPress={openShare}
               style={({ pressed }) => [
                 styles.shareButton,
+                openedFromHistory && styles.historyShareButton,
                 pressed && styles.buttonPressed,
               ]}
             >
@@ -608,10 +651,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  completePillPlaceholder: {
-    height: 30,
-    marginTop: 26,
-  },
   completeIcon: {
     width: 20,
     height: 20,
@@ -636,6 +675,12 @@ const styles = StyleSheet.create({
     letterSpacing: -0.8,
     color: redesignColors.bone,
   },
+  historyWorkoutTitle: {
+    marginTop: 42,
+  },
+  historyWorkoutTitleCompact: {
+    marginTop: 36,
+  },
   workoutDate: {
     marginTop: 1,
     fontFamily: redesignFonts.uiMedium,
@@ -657,15 +702,10 @@ const styles = StyleSheet.create({
     letterSpacing: 2.6,
     color: redesignColors.ash,
   },
-  volumeRow: {
-    maxWidth: '92%',
-    marginTop: 4,
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'center',
-  },
   volumeValue: {
-    flexShrink: 1,
+    width: '92%',
+    marginTop: 4,
+    textAlign: 'center',
     fontFamily: redesignFonts.monoBold,
     fontSize: 58,
     lineHeight: 68,
@@ -677,11 +717,19 @@ const styles = StyleSheet.create({
     lineHeight: 64,
   },
   volumeUnit: {
-    marginLeft: 8,
     fontFamily: redesignFonts.monoBold,
     fontSize: 23,
-    lineHeight: 31,
     letterSpacing: -0.8,
+  },
+  historyVolumeValue: {
+    marginTop: 14,
+  },
+  historyVolumeUnit: {
+    marginTop: -4,
+    textAlign: 'center',
+    fontSize: 17,
+    lineHeight: 22,
+    letterSpacing: -0.4,
   },
   heroGlow: {
     position: 'absolute',
@@ -874,6 +922,9 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     justifyContent: 'center',
   },
+  historyShareButton: {
+    alignItems: 'center',
+  },
   progressButtonText: {
     fontFamily: redesignFonts.uiSemiBold,
     fontSize: 16,
@@ -897,7 +948,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   historyActionRow: {
-    justifyContent: 'flex-end',
+    justifyContent: 'center',
   },
   buttonPressed: {
     opacity: 0.72,

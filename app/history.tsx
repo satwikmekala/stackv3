@@ -15,9 +15,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { HistoryWorkoutRow } from '@/components/HistoryWorkoutRow';
 import { redesignColors, redesignFonts } from '@/constants/theme';
 import { deriveHistoryGroups, type HistoryWeekGroup } from '@/store/workoutHistory';
-import { deriveWorkoutSummary, formatSummaryDate } from '@/store/workoutSummary';
+import { formatSummaryDate } from '@/store/workoutSummary';
 import {
-  parseSessionDate,
   toLocalCalendarDate,
   useWorkoutStore,
   type WorkoutSession,
@@ -30,28 +29,6 @@ function formatWeekDate(date: Date): string {
 
 function formatWeekRange(weekStart: Date, weekEnd: Date): string {
   return `${formatWeekDate(weekStart)} \u2013 ${formatWeekDate(weekEnd)}`;
-}
-
-function sessionsChronologically(sessions: WorkoutSession[]): WorkoutSession[] {
-  return [...sessions].sort(
-    (a, b) => parseSessionDate(a.date).getTime() - parseSessionDate(b.date).getTime()
-  );
-}
-
-function SessionDots({ sessions }: { sessions: WorkoutSession[] }) {
-  return (
-    <View style={styles.dotRow}>
-      {sessionsChronologically(sessions).map((session) => (
-        <View
-          key={session.id}
-          style={[
-            styles.sessionDot,
-            { backgroundColor: deriveWorkoutSummary(session).accent },
-          ]}
-        />
-      ))}
-    </View>
-  );
 }
 
 function SectionHeader({ label, count }: { label: string; count?: number }) {
@@ -82,12 +59,9 @@ function EarlierWeekRow({
       style={styles.earlierRow}
     >
       <View style={styles.weekIdentity}>
-        <View style={styles.weekRangeRow}>
-          <SessionDots sessions={group.sessions} />
-          <Text numberOfLines={1} style={styles.weekRange}>
-            {formatWeekRange(group.weekStart, group.weekEnd)}
-          </Text>
-        </View>
+        <Text numberOfLines={1} style={styles.weekRange}>
+          {formatWeekRange(group.weekStart, group.weekEnd)}
+        </Text>
       </View>
       <Text style={styles.workoutCount}>
         {workoutCount} {workoutCount === 1 ? 'workout' : 'workouts'}
@@ -322,28 +296,12 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
-  weekRangeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
   weekRange: {
     flexShrink: 1,
-    marginLeft: 10,
     fontFamily: redesignFonts.monoBold,
     fontSize: 15,
     lineHeight: 20,
     color: redesignColors.bone,
-  },
-  dotRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    flexShrink: 0,
-  },
-  sessionDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
   },
   workoutCount: {
     marginLeft: 16,

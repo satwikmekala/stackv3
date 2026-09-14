@@ -409,7 +409,7 @@ export default function Home() {
       />
 
       <ScrollView
-        scrollEnabled={false}
+        bounces={false}
         contentContainerStyle={[
           styles.scrollContent,
           { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 128 },
@@ -496,7 +496,14 @@ export default function Home() {
             style={styles.changeButton}
           >
             <ArrowLeftRight color={redesignColors.ash} size={18} strokeWidth={2} />
-            <Text style={styles.changeButtonText}>Change workout</Text>
+            <Text
+              adjustsFontSizeToFit
+              minimumFontScale={0.9}
+              numberOfLines={1}
+              style={styles.changeButtonText}
+            >
+              Change workout
+            </Text>
           </Pressable>
         </Animated.View>
 
@@ -581,12 +588,14 @@ const styles = StyleSheet.create({
   },
   changeButton: {
     alignSelf: 'center',
-    width: '50%',
+    width: '60%',
+    minWidth: 190,
+    maxWidth: 240,
     minHeight: 58,
     paddingVertical: 15,
     // The hero includes 10 points below the visible start button.
     marginTop: 10,
-    paddingHorizontal: 24,
+    paddingHorizontal: 16,
     borderRadius: 20,
     borderCurve: 'continuous',
     borderWidth: 1,
@@ -598,6 +607,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   changeButtonText: {
+    flexShrink: 1,
     fontFamily: redesignFonts.uiSemiBold,
     fontSize: 16,
     color: redesignColors.ash,
