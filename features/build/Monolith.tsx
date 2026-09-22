@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AccessibilityInfo, AppState, FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { AccessibilityInfo, AppState, FlatList, ScrollView, Switch, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useIsFocused, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -13,6 +13,8 @@ import { DEFAULT_TUNING, GOLD } from './model';
 import { monolithWeeks, pickRulerMarkers } from './monolithModel';
 import { makeMonolithDemo, MONOLITH_DEMO_NOW } from './monolithDemo';
 import BuildScene from './BuildScene';
+import { BuildPreview } from './BuildPreview';
+import { buildPreferences, useBuildAccessibility } from './useBuildAccessibility';
 import { fusionCoordinator } from './fusionCoordinator';
 import { FusionPresentation, type FusionSnapshot } from './FusionPresentation';
 
@@ -31,6 +33,7 @@ const sources: { value: Source; title: string; detail: string }[] = [
 ];
 
 export default function Monolith() {
+  const accessibility = useBuildAccessibility();
   const router = useRouter();
   const focused = useIsFocused();
   const hydrated = useWorkoutStore((state) => state.isHydrated);
@@ -65,17 +68,17 @@ export default function Monolith() {
   const currentWeekKey = toLocalCalendarDate(getStartOfWeek(now));
   const history = useMemo(() => adaptBuildHistory(source === 'saved' ? sessions : demo, source === 'saved' ? parseSessionDate(currentWeekKey) : MONOLITH_DEMO_NOW), [source, sessions, demo, currentWeekKey]);
   useEffect(() => {
-    if (source !== 'saved' || !hydrated || !active || !focused || !motionReady || sheet || fusionSnapshot) return;
+    if (source !== 'saved' || !hydrated || !active || !focused || !motionReady || !accessibility.ready || sheet || fusionSnapshot) return;
     let cancelled = false;
     void fusionCoordinator.reconcile(history.state).then((weekId) => {
-      if (!cancelled && weekId && !reducedMotion) {
+      if (!cancelled && weekId && !accessibility.skipRewards) {
         setSelectedId(weekId);
         setOverview(false);
         setFusionSnapshot({ state: history.state, weekId, example: false });
       }
     });
     return () => { cancelled = true; };
-  }, [source, hydrated, active, focused, motionReady, sheet, fusionSnapshot, history.state, reducedMotion]);
+  }, [source, hydrated, active, focused, motionReady, sheet, fusionSnapshot, history.state, accessibility.ready, accessibility.skipRewards]);
   const entries = useMemo(() => monolithWeeks(history.state, history.slabs), [history]);
   const selected = entries.find((entry) => entry.week.id === selectedId) ?? entries[entries.length - 1];
   const selectedIndex = entries.indexOf(selected);
@@ -96,20 +99,21 @@ export default function Monolith() {
   return <SafeAreaView style={styles.screen}>
     <View style={styles.header}>
       <Pressable accessibilityRole="button" accessibilityLabel="Close Build" onPress={() => router.canGoBack() ? router.back() : router.replace('/')} style={styles.icon}><ArrowLeft size={20} color={c.bone} /></Pressable>
-      <Text style={styles.brand}>STACK / BUILD</Text>
-      <Pressable accessibilityRole="button" accessibilityLabel="Choose Build history" onPress={() => setSheet('source')} style={styles.source}><Text style={styles.sourceText}>{source === 'saved' ? 'Your history' : 'Demo'}</Text></Pressable>
+      <Text maxFontSizeMultiplier={1.4} style={styles.brand}>STACK / BUILD</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel="Build options and history source" onPress={() => setSheet('source')} style={styles.source}><Text style={styles.sourceText}>Options</Text></Pressable>
     </View>
+    <ScrollView scrollEnabled={accessibility.largeText} contentContainerStyle={{ flexGrow: 1 }}>
     <View style={styles.intro}>
       <Text style={styles.eyebrow}>{overview ? 'YOUR STACK · ALL OF IT' : 'YOUR STACK'}{source !== 'saved' ? ' · DEMO' : ''}</Text>
-      <Text style={styles.title}>{empty ? 'An empty plinth.' : overview ? 'Your training,\nstanding up.' : `${history.state.sealedWeeks.length} ${history.state.sealedWeeks.length === 1 ? 'week' : 'weeks'} built`}</Text>
+      <Text maxFontSizeMultiplier={2} style={styles.title}>{empty ? 'An empty plinth.' : overview ? 'Your training,\nstanding up.' : `${history.state.sealedWeeks.length} ${history.state.sealedWeeks.length === 1 ? 'week' : 'weeks'} built`}</Text>
       <Text style={styles.caption}>{empty ? 'Finish a session. Your first piece belongs here.' : `${history.state.metrics.workouts} ${history.state.metrics.workouts === 1 ? 'workout' : 'workouts'} · ${volume(history.state.metrics.volumeKg)} moved · ${recordLabel(history.state.metrics.records)}`}</Text>
     </View>
-    <View style={styles.stage}>
+    <View style={[styles.stage, accessibility.largeText && { flex: 0, height: 280 }]}>
       <LinearGradient colors={['#13110E', '#2C1D12', '#13110E']} style={StyleSheet.absoluteFill} />
-      {active && focused && !fusionSnapshot && <View style={StyleSheet.absoluteFill} accessible accessibilityLabel={empty ? 'Empty plinth. No completed workouts.' : `${history.state.sealedWeeks.length} sealed weekly blocks and ${current.pieces.length} separate current-week pieces. ${overview ? 'Overview' : `Focused on week of ${weekLabel(week.weekStart)}`}.`}>
-        <BuildScene slabs={history.slabs} tuning={DEFAULT_TUNING} lamination="strata" paused={sheet !== null} overview={overview} focusRange={focusRange} reducedMotion={reducedMotion} markers={markers} onMarkers={setProjected} onSelectSlab={selectSlab} benchmark={0} onStats={ignoreStats} />
+      {active && focused && accessibility.ready && !fusionSnapshot && <View style={StyleSheet.absoluteFill} accessible accessibilityLabel={empty ? 'Empty plinth. No completed workouts.' : `${accessibility.reduceEffects ? 'Static preview of recent layers. ' : ''}${history.state.sealedWeeks.length} sealed weekly blocks and ${current.pieces.length} separate current-week pieces. ${overview ? 'Overview' : `Focused on week of ${weekLabel(week.weekStart)}`}.`}>
+        {accessibility.reduceEffects ? <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><BuildPreview slabs={overview ? history.slabs : history.slabs.filter((slab) => selected.slabIds.includes(slab.id))} width={230} height={220} /></View> : <BuildScene slabs={history.slabs} tuning={DEFAULT_TUNING} lamination="strata" paused={sheet !== null} overview={overview} focusRange={focusRange} reducedMotion={reducedMotion || accessibility.reducedMotion} markers={markers} onMarkers={setProjected} onSelectSlab={selectSlab} benchmark={0} onStats={ignoreStats} />}
       </View>}
-      {!overview && !sheet && <View style={StyleSheet.absoluteFill} pointerEvents="box-none">{markerLabels.map((marker) => {
+      {!overview && !sheet && !accessibility.reduceEffects && <View style={StyleSheet.absoluteFill} pointerEvents="box-none">{markerLabels.map((marker) => {
         const entry = entries.find((item) => item.week.id === marker.id);
         return entry ? <Pressable key={marker.id} accessibilityRole="button" accessibilityLabel={`Focus week of ${weekLabel(entry.week.weekStart)}`} accessibilityState={{ selected: marker.id === week.id }} onPress={() => selectWeek(marker.id)} style={[styles.ruler, { top: marker.top - 22 }]}><Text style={[styles.rulerText, marker.id === week.id && { color: c.bone }]}>{entry.week.sealed ? dateLabel(entry.week.weekStart).toUpperCase() : 'NOW'} ─</Text></Pressable> : null;
       })}</View>}
@@ -125,7 +129,7 @@ export default function Monolith() {
         <Metric value={String(history.state.metrics.records)} label="RECORDS" />
       </View> : <View style={styles.weekCard}>
         <Text style={styles.eyebrow}>{week.sealed ? 'SEALED' : 'THIS WEEK · OPEN'} · {dateLabel(week.weekStart).toUpperCase()}–{dateLabel(week.weekEnd).toUpperCase()}</Text>
-        <Text style={styles.weekTitle}>{week.pieces.length ? `${week.pieces.length} ${week.pieces.length === 1 ? 'workout' : 'workouts'}, ${week.sealed ? 'one block.' : 'still taking shape.'}` : 'Room for your next session.'}</Text>
+        <Text maxFontSizeMultiplier={2} style={styles.weekTitle}>{week.pieces.length ? `${week.pieces.length} ${week.pieces.length === 1 ? 'workout' : 'workouts'}, ${week.sealed ? 'one block.' : 'still taking shape.'}` : 'Room for your next session.'}</Text>
         <View style={styles.strata}>{week.pieces.map((piece) => <View key={piece.id} style={[styles.stripe, { backgroundColor: piece.color }]} />)}</View>
         <Text style={styles.caption}>{week.pieces.length ? `${volume(week.metrics.volumeKg)} moved · ${week.metrics.liftsUp} lifts up · ${recordLabel(week.metrics.records)}` : 'Your history stays exactly as you built it.'}</Text>
         {week.sealed && <Pressable accessibilityRole="button" onPress={() => router.push({ pathname: '/build-case', params: { source: String(source), week: week.id } })} style={styles.detailButton}><Text style={styles.link}>Unpack this week</Text><ChevronRight size={17} color={c.bone} /></Pressable>}
@@ -138,21 +142,22 @@ export default function Monolith() {
         <Pressable accessibilityRole="button" accessibilityLabel="Next active week" accessibilityState={{ disabled: selectedIndex === entries.length - 1 }} disabled={selectedIndex === entries.length - 1} onPress={() => selectWeek(entries[selectedIndex + 1].week.id)} style={[styles.icon, selectedIndex === entries.length - 1 && styles.disabled]}><ChevronRight size={20} color={c.bone} /></Pressable>
       </View>
     </View>
+    </ScrollView>
     {fusionSnapshot && <FusionPresentation snapshot={fusionSnapshot} unit={unit} onFinish={finishFusion} />}
-    <Modal visible={sheet !== null} animationType={reducedMotion ? 'none' : 'slide'} presentationStyle="pageSheet" onRequestClose={close}>
+    <Modal visible={sheet !== null} animationType={reducedMotion || accessibility.reducedMotion ? 'none' : 'slide'} presentationStyle="pageSheet" onRequestClose={close}>
       <SafeAreaView style={styles.screen}>
-        <View style={styles.sheetHeader}><Text style={styles.sheetTitle}>{sheet === 'source' ? 'History source' : sheet === 'weeks' ? 'Your weeks' : 'This week’s pieces'}</Text><Pressable accessibilityRole="button" accessibilityLabel="Close Build sheet" onPress={close} style={styles.icon}><X size={20} color={c.bone} /></Pressable></View>
-        {sheet === 'source' ? <FlatList data={sources} keyExtractor={(item) => String(item.value)} contentContainerStyle={styles.list} ListHeaderComponent={<Text style={styles.note}>Development preview. Demo sessions are illustrative and never saved to your workout history.</Text>} renderItem={({ item }) => <Pressable accessibilityRole="button" accessibilityState={{ selected: source === item.value }} onPress={() => { setSource(item.value); setSelectedId(null); setProjected([]); close(); }} style={[styles.listRow, source === item.value && styles.selected]}><Text style={styles.rowTitle}>{item.title}</Text><Text style={styles.note}>{item.detail}</Text></Pressable>} />
+        <View style={styles.sheetHeader}><Text maxFontSizeMultiplier={2} style={styles.sheetTitle}>{sheet === 'source' ? 'Build options' : sheet === 'weeks' ? 'Your weeks' : 'This week’s pieces'}</Text><Pressable accessibilityRole="button" accessibilityLabel="Close Build sheet" onPress={close} style={styles.icon}><X size={20} color={c.bone} /></Pressable></View>
+        {sheet === 'source' ? <FlatList data={sources} keyExtractor={(item) => String(item.value)} contentContainerStyle={styles.list} ListHeaderComponent={<View style={{ gap: 12 }}><View style={styles.detailButton}><Text style={styles.link}>Reduce effects</Text><Switch accessibilityLabel="Reduce Build effects" value={accessibility.reduceEffects} disabled={!accessibility.ready} onValueChange={(value) => { void buildPreferences.setReduceEffects(value); }} /></View><Text style={styles.note}>Use static previews and skip reward animations. All workouts and records stay available.</Text><Text style={styles.note}>Demo sessions are illustrative and never saved to your workout history.</Text></View>} renderItem={({ item }) => <Pressable accessibilityRole="button" accessibilityState={{ selected: source === item.value }} onPress={() => { setSource(item.value); setSelectedId(null); setProjected([]); close(); }} style={[styles.listRow, source === item.value && styles.selected]}><Text style={styles.rowTitle}>{item.title}</Text><Text style={styles.note}>{item.detail}</Text></Pressable>} />
           : sheet === 'weeks' ? <FlatList data={[...entries].reverse()} keyExtractor={(item) => item.week.id} contentContainerStyle={styles.list} initialNumToRender={12} renderItem={({ item }) => <Pressable accessibilityRole="button" accessibilityState={{ selected: item.week.id === week.id }} onPress={() => { selectWeek(item.week.id); close(); }} style={[styles.listRow, item.week.id === week.id && styles.selected]}><Text style={styles.rowTitle}>{item.week.sealed ? `Week of ${weekLabel(item.week.weekStart)}` : 'This week · open'}</Text><View style={styles.strata}>{item.week.pieces.map((piece) => <View key={piece.id} style={[styles.stripe, { backgroundColor: piece.color }]} />)}</View><Text style={styles.note}>{item.week.metrics.workouts} {item.week.metrics.workouts === 1 ? 'workout' : 'workouts'} · {volume(item.week.metrics.volumeKg)} · {recordLabel(item.week.metrics.records)}</Text></Pressable>} />
-            : <FlatList data={current.pieces} keyExtractor={(piece) => piece.id} contentContainerStyle={styles.list} ListHeaderComponent={<Text style={styles.note}>{dateLabel(current.weekStart)}–{dateLabel(current.weekEnd)} · Open{source !== 'saved' ? ' · Demo' : ''}{'\n'}Each completed workout is a separate piece until this week closes.</Text>} ListEmptyComponent={<Text style={styles.empty}>Nothing built this week yet. Your next completed session adds a piece here.</Text>} renderItem={({ item: piece }) => <View style={styles.listRow}><View style={[styles.piece, { backgroundColor: piece.color, height: 18 * piece.height }]}>{piece.records.length > 0 && <View style={styles.goldSeam} />}</View><Text style={styles.rowTitle}>{piece.label} · {parseSessionDate(piece.date).toLocaleDateString(undefined, { weekday: 'long' })}</Text><Text style={styles.note}>{volume(piece.metrics.volumeKg)} moved · {piece.metrics.liftsUp} lifts up · {recordLabel(piece.metrics.records)}</Text><Text style={styles.note}>{piece.height.toFixed(2)}× thickness{piece.records.length ? ` · ${piece.records.map((record) => record.exerciseName).join(', ')}` : ''}</Text></View>} />}
+            : <FlatList data={current.pieces} keyExtractor={(piece) => piece.id} contentContainerStyle={styles.list} ListHeaderComponent={<Text style={styles.note}>{dateLabel(current.weekStart)}–{dateLabel(current.weekEnd)} · Open{source !== 'saved' ? ' · Demo' : ''}{'\n'}Each completed workout is a separate piece until this week closes.</Text>} ListEmptyComponent={<Text maxFontSizeMultiplier={2} style={styles.empty}>Nothing built this week yet. Your next completed session adds a piece here.</Text>} renderItem={({ item: piece }) => <View style={styles.listRow}><View style={[styles.piece, { backgroundColor: piece.color, height: 18 * piece.height }]}>{piece.records.length > 0 && <View style={styles.goldSeam} />}</View><Text style={styles.rowTitle}>{piece.label} · {parseSessionDate(piece.date).toLocaleDateString(undefined, { weekday: 'long' })}</Text><Text style={styles.note}>{volume(piece.metrics.volumeKg)} moved · {piece.metrics.liftsUp} lifts up · {recordLabel(piece.metrics.records)}</Text><Text style={styles.note}>{piece.height.toFixed(2)}× thickness{piece.records.length ? ` · ${piece.records.map((record) => record.exerciseName).join(', ')}` : ''}</Text></View>} />}
       </SafeAreaView>
     </Modal>
   </SafeAreaView>;
 }
-function Metric({ value, label }: { value: string; label: string }) { return <View style={styles.metric}><Text style={styles.metricValue}>{value}</Text><Text style={styles.metricLabel}>{label}</Text></View>; }
+function Metric({ value, label }: { value: string; label: string }) { return <View style={styles.metric}><Text maxFontSizeMultiplier={1.5} style={styles.metricValue}>{value}</Text><Text style={styles.metricLabel}>{label}</Text></View>; }
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: c.ink },
-  header: { paddingHorizontal: 20, paddingTop: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  header: { flexWrap: 'wrap', paddingHorizontal: 20, paddingTop: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   icon: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22, backgroundColor: '#241E18' },
   brand: { color: c.bone, fontFamily: f.mono, fontSize: 10, letterSpacing: 2 },
   source: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 10 },
@@ -172,9 +177,9 @@ const styles = StyleSheet.create({
   strata: { flexDirection: 'row', gap: 3, marginTop: 10 },
   stripe: { flex: 1, height: 4, borderRadius: 2 },
   detailButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44, marginTop: 6 },
-  link: { color: c.bone, fontFamily: f.uiSemiBold, fontSize: 13 },
+  link: { flexShrink: 1, color: c.bone, fontFamily: f.uiSemiBold, fontSize: 13 },
   navigation: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  browse: { minHeight: 44, paddingHorizontal: 24, justifyContent: 'center' },
+  browse: { flex: 1, alignItems: 'center', minHeight: 44, paddingHorizontal: 8, justifyContent: 'center' },
   disabled: { opacity: 0.3 },
   metrics: { flexDirection: 'row', gap: 8 },
   metric: { flex: 1, padding: 12, borderRadius: 12, backgroundColor: '#241E18' },

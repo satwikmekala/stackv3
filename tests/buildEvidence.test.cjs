@@ -477,3 +477,34 @@ test('Build introduction storage failures never block entry and dismissal surviv
   await intro.dismiss();
   assert.equal(await intro.shouldShow(), false);
 });
+
+const { createBuildPreferences, shouldSkipBuildReward, BUILD_EFFECTS_KEY } = load('features/build/preferences.ts');
+test('reduced effects persist, publish to all screens and serialize rapid toggles', async () => {
+  const values = new Map();
+  const storage = { getItem: async (key) => values.get(key) ?? null, setItem: async (key, value) => { values.set(key, value); } };
+  const prefs = createBuildPreferences(storage);
+  let updates = 0;
+  const unsubscribe = prefs.subscribe(() => updates++);
+  await prefs.load();
+  await Promise.all([prefs.setReduceEffects(true), prefs.setReduceEffects(false), prefs.setReduceEffects(true)]);
+  assert.deepEqual(prefs.getSnapshot(), { ready: true, reduceEffects: true });
+  assert.equal(values.get(BUILD_EFFECTS_KEY), '1');
+  assert.equal(updates, 4);
+  unsubscribe();
+  const cold = createBuildPreferences(storage);
+  await cold.load();
+  assert.equal(cold.getSnapshot().reduceEffects, true);
+});
+test('late preference reads cannot overwrite an explicit choice; failed storage remains usable', async () => {
+  let resolve;
+  const prefs = createBuildPreferences({ getItem: () => new Promise((done) => { resolve = done; }), setItem: async () => { throw Error('disk unavailable'); } });
+  const load = prefs.load();
+  await prefs.setReduceEffects(true);
+  resolve('0');
+  await load;
+  assert.deepEqual(prefs.getSnapshot(), { ready: true, reduceEffects: true });
+});
+test('all accessibility reward exits bypass the timeline without changing training evidence', () => {
+  assert.equal(shouldSkipBuildReward(false, false, false, 1), false);
+  for (const options of [[true, false, false, 1], [false, true, false, 1], [false, false, true, 1], [false, false, false, 2]]) assert.equal(shouldSkipBuildReward(...options), true);
+});

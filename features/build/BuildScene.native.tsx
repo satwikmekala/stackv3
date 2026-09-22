@@ -16,7 +16,7 @@ class SceneBoundary extends Component<{ children: ReactNode; onError?: () => voi
   componentDidCatch(error: Error) { console.error('[Build renderer]', error); this.props.onError?.(); }
   render() {
     return this.state.failed && this.props.onError ? null : this.state.failed
-      ? <View style={styles.error}><Text style={styles.errorText}>The 3D preview could not open. Close and reopen the sandbox to retry.</Text></View>
+      ? <View style={styles.error}><Text style={styles.errorText}>The 3D preview could not open. Your training is saved. Close and reopen Build to retry.</Text></View>
       : this.props.children;
   }
 }
@@ -90,10 +90,19 @@ function Scene(props: BuildSceneProps) {
   const fusionFinished = useRef(false);
   const target = useRef(new Vector3());
   const positioned = useRef(false);
+  const markerPoint = useRef(new Vector3());
   const lastMarkers = useRef('');
   const measure = useRef<{ start: number; last: number; samples: number[] } | null>(null);
 
   useEffect(() => { if (!paused) invalidate(); }, [overview, top, size, reducedMotion, focusRange, markers, paused, invalidate]);
+  useEffect(() => {
+    if (paused) return;
+    // Native GL can recreate its drawable after the layout commit. Repaint after
+    // that handoff as well as immediately, then return to demand-only rendering.
+    const first = setTimeout(invalidate, 50);
+    const settled = setTimeout(invalidate, 180);
+    return () => { clearTimeout(first); clearTimeout(settled); };
+  }, [size.width, size.height, paused, invalidate]);
   useEffect(() => {
     if (!benchmark) return;
     measure.current = { start: performance.now(), last: 0, samples: [] };
@@ -163,7 +172,7 @@ function Scene(props: BuildSceneProps) {
     positioned.current = true;
     if (onMarkers) {
       const visible = overview ? [] : (markers ?? []).map((marker) => {
-        const projected = new Vector3(-1, marker.y, 1).project(camera);
+        const projected = markerPoint.current.set(-1, marker.y, 1).project(camera);
         return { id: marker.id, top: Math.round((1 - projected.y) * size.height / 2) };
       }).filter((marker) => marker.top > 24 && marker.top < size.height - 24);
       const signature = JSON.stringify(visible);

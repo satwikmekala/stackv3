@@ -10,6 +10,7 @@ import { buildStateToSlabs } from './adapter';
 import { DEFAULT_TUNING } from './model';
 import { FUSION_DURATION_MS, type FusionPhase } from './fusion';
 import BuildScene from './BuildScene';
+import { useBuildAccessibility } from './useBuildAccessibility';
 import type { RenderStats } from './sceneTypes';
 
 export type FusionSnapshot = { state: BuildState; weekId: string; example: boolean };
@@ -21,6 +22,7 @@ class FusionBoundary extends Component<{ children: ReactNode; onFinish: () => vo
   render() { return this.state.failed ? null : this.props.children; }
 }
 export function FusionPresentation({ snapshot, unit, onFinish }: { snapshot: FusionSnapshot; unit: WeightUnit; onFinish: () => void }) {
+  const accessibility = useBuildAccessibility();
   const [phase, setPhase] = useState<FusionPhase>('isolate');
   const [stats, setStats] = useState<RenderStats | null>(null);
   const [ready, setReady] = useState(false);
@@ -32,17 +34,19 @@ export function FusionPresentation({ snapshot, unit, onFinish }: { snapshot: Fus
   const slabs = useMemo(() => buildStateToSlabs(snapshot.state), [snapshot.state]);
   const fusion = useMemo(() => ({ weekId: snapshot.weekId, onPhase: setPhase, onComplete: complete }), [snapshot.weekId, complete]);
   useEffect(() => {
+    if (!accessibility.ready) return;
+    if (accessibility.skipRewards) { finish(); return; }
     let mounted = true;
     void AccessibilityInfo.isReduceMotionEnabled().then((reduced) => {
       if (mounted) { if (reduced || !week) finish(); else setReady(true); }
     }).catch(finish);
-    const timeout = setTimeout(() => { if (!playbackComplete.current) finish(); }, FUSION_DURATION_MS + 1800);
     const app = AppState.addEventListener('change', (state) => { if (state !== 'active') finish(); });
     const motion = AccessibilityInfo.addEventListener('reduceMotionChanged', (reduced) => { if (reduced) finish(); });
     const back = BackHandler.addEventListener('hardwareBackPress', () => { finish(); return true; });
     if (AppState.currentState !== 'active') finish();
-    return () => { mounted = false; clearTimeout(timeout); app.remove(); motion.remove(); back.remove(); };
-  }, [finish, week]);
+    return () => { mounted = false; app.remove(); motion.remove(); back.remove(); };
+  }, [finish, week, accessibility.ready, accessibility.skipRewards]);
+  useEffect(() => { const timeout = setTimeout(() => { if (!playbackComplete.current) finish(); }, FUSION_DURATION_MS + 1800); return () => clearTimeout(timeout); }, [finish]);
   const title = !ready ? 'Your week is sealed.' : phase === 'isolate' ? `${week?.pieces.length ?? 0} workouts.\nOne week.` : phase === 'compress' ? 'Pressing\ntogether.' : phase === 'fuse' ? 'One block.\nEvery colour kept.' : phase === 'seat' ? 'Part of your Stack.' : 'Week sealed.';
   return <Modal visible animationType="none" presentationStyle="fullScreen" onRequestClose={finish}>
     <SafeAreaProvider initialMetrics={initialWindowMetrics}><SafeAreaView style={styles.screen}>

@@ -11,6 +11,7 @@ import { castingGate, CASTING_DURATION_MS, type CastingPhase } from './casting';
 import { EVIDENCE_DEMO_NOW, EVIDENCE_DEMO_SESSIONS } from './evidenceDemo';
 import { DEFAULT_TUNING } from './model';
 import BuildScene from './BuildScene';
+import { useBuildAccessibility } from './useBuildAccessibility';
 
 const titles: Record<CastingPhase, string> = { form: 'Casting.', progress: 'Progress has\nsubstance.', gold: 'A record,\nkept in gold.', reveal: 'Where it goes.', land: 'One more piece.', stacked: 'Stacked.' };
 const ignoreStats = () => {};
@@ -18,6 +19,7 @@ function RendererFailure(): never { throw new Error('Development-only casting fa
 export default function CastingScreen({ sessionId, demo, onFinish, forceFailure = false }: {
   sessionId: string; demo: boolean; onFinish: () => void; forceFailure?: boolean;
 }) {
+  const accessibility = useBuildAccessibility();
   const sessions = useWorkoutStore((state) => state.sessions);
   const unit = useWorkoutStore((state) => state.profile?.weightUnit ?? 'kg');
   const history = useMemo(() => adaptBuildHistory(demo ? EVIDENCE_DEMO_SESSIONS : sessions, demo ? EVIDENCE_DEMO_NOW : new Date()), [demo, sessions]);
@@ -27,6 +29,8 @@ export default function CastingScreen({ sessionId, demo, onFinish, forceFailure 
   const [phase, setPhase] = useState<CastingPhase>('form');
   const preparation = useRef<Promise<boolean> | null>(null);
   useEffect(() => {
+    if (!accessibility.ready) return;
+    if (accessibility.skipRewards || !eligible) { if (!demo) castingGate.discard(sessionId); onFinish(); return; }
     let mounted = true;
     // Claim before rendering. Storage failure, replay, or unknown motion preference skips safely.
     preparation.current ??= Promise.all([
@@ -34,13 +38,16 @@ export default function CastingScreen({ sessionId, demo, onFinish, forceFailure 
       AccessibilityInfo.isReduceMotionEnabled(),
     ]).then(([claimed, reduced]) => eligible && claimed && !reduced).catch(() => false);
     void preparation.current.then((allowed) => { if (mounted) { if (allowed) setReady(true); else onFinish(); } });
-    const watchdog = setTimeout(onFinish, 8000);
     const app = AppState.addEventListener('change', (state) => { if (state !== 'active') onFinish(); });
     const motion = AccessibilityInfo.addEventListener('reduceMotionChanged', (reduced) => { if (reduced) onFinish(); });
     const back = BackHandler.addEventListener('hardwareBackPress', () => { onFinish(); return true; });
     if (AppState.currentState !== 'active') onFinish();
-    return () => { mounted = false; clearTimeout(watchdog); app.remove(); motion.remove(); back.remove(); };
-  }, [demo, eligible, onFinish, sessionId]);
+    return () => { mounted = false; app.remove(); motion.remove(); back.remove(); };
+  }, [demo, eligible, onFinish, sessionId, accessibility.ready, accessibility.skipRewards]);
+  useEffect(() => {
+    const timeout = setTimeout(onFinish, 8000);
+    return () => clearTimeout(timeout);
+  }, [onFinish]);
   useEffect(() => {
     if (!ready) return;
     // Independent of WebGL callbacks: a stalled or failed renderer cannot trap completion.
@@ -61,7 +68,7 @@ export default function CastingScreen({ sessionId, demo, onFinish, forceFailure 
     </View>
     <View style={styles.footer}>
       <Text style={styles.note}>{demo ? 'Illustrative sessions · nothing is written to your history.' : 'Your workout is already saved.'}</Text>
-      {phase === 'stacked' && piece && <Text style={styles.metrics}>{formatWeight(piece.metrics.volumeKg, unit)} {unit} moved · {piece.metrics.liftsUp} lifts up · {piece.metrics.records} {piece.metrics.records === 1 ? 'PR' : 'PRs'}</Text>}
+      {piece && <Text accessibilityElementsHidden={phase !== 'stacked'} style={[styles.metrics, { opacity: phase === 'stacked' ? 1 : 0 }]}>{formatWeight(piece.metrics.volumeKg, unit)} {unit} moved · {piece.metrics.liftsUp} lifts up · {piece.metrics.records} {piece.metrics.records === 1 ? 'PR' : 'PRs'}</Text>}
       <Pressable accessibilityRole="button" onPress={onFinish} style={styles.continue}><Text style={styles.continueText}>{demo ? 'Return to sandbox' : 'View workout summary'}</Text></Pressable>
     </View>
   </SafeAreaView>;
