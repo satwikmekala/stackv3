@@ -6,6 +6,7 @@ import type { BuildSlab, BuildTuning, Lamination } from './model';
 export type RenderStats = { frames: number; fps: number; p95Ms: number; calls: number; triangles: number; geometries: number };
 export type BuildSceneProps = {
   slabs: BuildSlab[];
+  pieceGap?: number;
   focusRange?: FocusRange;
   markers?: { id: string; y: number }[];
   onMarkers?: (markers: { id: string; top: number }[]) => void;

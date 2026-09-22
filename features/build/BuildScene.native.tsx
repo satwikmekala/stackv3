@@ -1,12 +1,12 @@
 /* eslint-disable react/no-unknown-property -- React Three Fiber elements use Three.js properties. */
-import { Component, useEffect, useMemo, useRef, type ReactNode, type RefObject } from 'react';
+import { Component, memo, useEffect, useMemo, useRef, type ReactNode, type RefObject } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Canvas, useFrame, useThree } from '@react-three/fiber/native';
 import { Group, MeshBasicMaterial, OrthographicCamera, Vector3 } from 'three';
 import { cameraFrame } from './monolithModel';
-import { fusionFrame, type FusionPhase } from './fusion';
+import { fusionVisibleHistory, fusionFrame, type FusionPhase } from './fusion';
 import { castingFrame, type CastingPhase } from './casting';
-import { createRecordSeamGeometry, createSlabGeometry } from './geometry';
+import { createHistoryGeometry, createRecordSeamGeometry, createSlabGeometry } from './geometry';
 import { BASE_HEIGHT, layoutSlabs, type BuildSlab, type BuildTuning, type Lamination } from './model';
 import type { BuildSceneProps } from './sceneTypes';
 
@@ -51,10 +51,16 @@ function FusionSlab({ slab, tuning, objectRef, material }: {
   return <group ref={objectRef}>{geometries.map((geometry, index) => <mesh key={index} geometry={geometry} material={material} dispose={null} />)}</group>;
 }
 
+function FusionHistory({ items, tuning, material }: { items: { slab: BuildSlab; y: number }[]; tuning: BuildTuning; material: MeshBasicMaterial }) {
+  const geometry = useMemo(() => createHistoryGeometry(items, tuning), [items, tuning]);
+  useEffect(() => () => geometry.dispose(), [geometry]);
+  return <mesh geometry={geometry} material={material} dispose={null} />;
+}
+
 function Scene(props: BuildSceneProps) {
   const { slabs, tuning, lamination, overview, reducedMotion, benchmark, onStats, focusRange, markers, onMarkers, onSelectSlab, paused, casting, fusion } = props;
   const { size, invalidate, gl } = useThree();
-  const { items, top } = useMemo(() => layoutSlabs(slabs), [slabs]);
+  const { items, top } = useMemo(() => layoutSlabs(slabs, props.pieceGap), [slabs, props.pieceGap]);
   const material = useMemo(() => new MeshBasicMaterial({ vertexColors: true, toneMapped: false }), []);
   useEffect(() => () => material.dispose(), [material]);
   const pieceMaterial = useMemo(() => new MeshBasicMaterial({ vertexColors: true, toneMapped: false }), []);
@@ -71,7 +77,15 @@ function Scene(props: BuildSceneProps) {
   const fusionObject = useRef<Group>(null);
   const futureObject = useRef<Group>(null);
   const fusionItem = fusion ? items.find((item) => item.slab.id === fusion.weekId) : undefined;
-  const fusionStart = useRef<number | null>(null);
+  const fusionBounds = useMemo(() => fusionItem ? { bottom: Math.max(0, fusionItem.y - .4), top: fusionItem.y + 1.1 + fusionFrame(0, fusionItem.slab.layers, fusionItem.slab.height).height + .3 } : undefined, [fusionItem]);
+  const fusionFraming = useMemo(() => cameraFrame(top, size.width, size.height, false, fusionBounds), [top, size.width, size.height, fusionBounds]);
+  // Include a generous viewport margin, but do not upload years of offscreen vertices
+  // into one native GL buffer. Only fusion uses this fixed camera window.
+  const fusionHistory = useMemo(() => fusionItem ? fusionVisibleHistory(items, fusionItem.y, fusionFraming.targetY, size.height, fusionFraming.zoom) : [], [items, fusionItem, fusionFraming, size.height]);
+  const fusionWarmup = useRef(0);
+  const fusionElapsed = useRef(0);
+  const fusionSamples = useRef<number[]>([]);
+  const fusionLast = useRef<number | null>(null);
   const fusionPhase = useRef<FusionPhase | null>(null);
   const fusionFinished = useRef(false);
   const target = useRef(new Vector3());
@@ -108,8 +122,12 @@ function Scene(props: BuildSceneProps) {
     }
     if (fusion && fusionItem) {
       const now = performance.now();
-      fusionStart.current ??= now;
-      const frame = fusionFrame(now - fusionStart.current, fusionItem.slab.layers, fusionItem.slab.height);
+      if (!fusionFinished.current && fusionLast.current !== null) fusionSamples.current.push(now - fusionLast.current);
+      fusionLast.current = now;
+      // Let the first submitted frames upload geometry before starting the motion.
+      // A delayed frame must not jump the object through a large part of a beat.
+      if (fusionWarmup.current++ >= 3) fusionElapsed.current += Math.min(delta * 1000, 34);
+      const frame = fusionFrame(fusionElapsed.current, fusionItem.slab.layers, fusionItem.slab.height);
       const object = fusionObject.current;
       if (object) {
         object.position.y = fusionItem.y + frame.lift;
@@ -122,11 +140,15 @@ function Scene(props: BuildSceneProps) {
         object.children[frame.pieces.length].visible = frame.fused;
       }
       if (futureObject.current) futureObject.current.visible = frame.seated;
-      const framing = cameraFrame(top, size.width, size.height, false, { bottom: Math.max(0, fusionItem.y - 0.4), top: fusionItem.y + frame.lift + frame.height + 0.3 });
+      const framing = fusionFraming;
       targetY = framing.targetY;
       desiredZoom = framing.zoom;
       if (frame.phase !== fusionPhase.current) { fusionPhase.current = frame.phase; fusion.onPhase(frame.phase); }
-      if (frame.done && !fusionFinished.current) { fusionFinished.current = true; fusion.onComplete(); }
+      if (frame.done && !fusionFinished.current) { fusionFinished.current = true;
+        const samples = fusionSamples.current;
+        const sorted = [...samples].sort((a, b) => a - b);
+        if (samples.length) onStats({ frames: samples.length, fps: samples.length * 1000 / samples.reduce((sum, ms) => sum + ms, 0), p95Ms: sorted[Math.floor(sorted.length * .95)], calls: gl.info.render.calls, triangles: gl.info.render.triangles, geometries: gl.info.memory.geometries });
+        fusion.onComplete(); }
       if (!frame.done) invalidate();
     }
     const blend = casting || fusion || reducedMotion || !positioned.current ? 1 : 1 - Math.exp(-Math.min(delta, 0.05) * 9);
@@ -181,7 +203,7 @@ function Scene(props: BuildSceneProps) {
       <boxGeometry args={[2.36, 0.075, 2.36]} />
       <meshBasicMaterial color="#29231B" />
     </mesh>
-    {items.filter(({ slab, y }) => slab.id !== casting?.slabId && slab.id !== fusion?.weekId && (!fusionItem || y < fusionItem.y)).map(({ slab, y }) => <Slab key={slab.id} slab={slab} y={y} onSelect={onSelectSlab} tuning={tuning} lamination={lamination} material={material} />)}
+    {fusionItem ? <FusionHistory items={fusionHistory} tuning={tuning} material={material} /> : items.filter(({ slab }) => slab.id !== casting?.slabId).map(({ slab, y }) => <Slab key={slab.id} slab={slab} y={y} onSelect={onSelectSlab} tuning={tuning} lamination={lamination} material={material} />)}
     </group>
     {fusionItem && <>
       <FusionSlab slab={fusionItem.slab} tuning={tuning} objectRef={fusionObject} material={material} />
@@ -191,6 +213,8 @@ function Scene(props: BuildSceneProps) {
   </>;
 }
 
+const MemoScene = memo(Scene);
+
 export default function BuildScene(props: BuildSceneProps) {
   return <SceneBoundary onError={props.onError}>
     <Canvas
@@ -198,7 +222,7 @@ export default function BuildScene(props: BuildSceneProps) {
       frameloop={props.paused ? 'never' : 'demand'} gl={{ antialias: true, alpha: true }}
       style={styles.canvas}
     >
-      <Scene {...props} />
+      <MemoScene {...props} />
     </Canvas>
   </SceneBoundary>;
 }

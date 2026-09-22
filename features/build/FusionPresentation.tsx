@@ -10,9 +10,10 @@ import { buildStateToSlabs } from './adapter';
 import { DEFAULT_TUNING } from './model';
 import { FUSION_DURATION_MS, type FusionPhase } from './fusion';
 import BuildScene from './BuildScene';
+import type { RenderStats } from './sceneTypes';
 
 export type FusionSnapshot = { state: BuildState; weekId: string; example: boolean };
-const ignoreStats = () => {};
+
 class FusionBoundary extends Component<{ children: ReactNode; onFinish: () => void }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() { return { failed: true }; }
@@ -21,6 +22,7 @@ class FusionBoundary extends Component<{ children: ReactNode; onFinish: () => vo
 }
 export function FusionPresentation({ snapshot, unit, onFinish }: { snapshot: FusionSnapshot; unit: WeightUnit; onFinish: () => void }) {
   const [phase, setPhase] = useState<FusionPhase>('isolate');
+  const [stats, setStats] = useState<RenderStats | null>(null);
   const [ready, setReady] = useState(false);
   const finished = useRef(false);
   const playbackComplete = useRef(false);
@@ -48,9 +50,9 @@ export function FusionPresentation({ snapshot, unit, onFinish }: { snapshot: Fus
       <View style={styles.intro}><Text style={styles.kicker}>{week ? `WEEK OF ${parseSessionDate(week.weekStart).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }).toUpperCase()}` : 'YOUR STACK'}</Text><Text accessibilityLiveRegion="polite" style={styles.title}>{title}</Text><Text style={styles.caption}>Every workout and every record stays inside.</Text></View>
       <View style={styles.stage} accessible accessibilityLabel={`${phase}. ${week?.pieces.length ?? 0} workout pieces becoming one weekly block. ${week?.metrics.records ?? 0} records preserved.`}>
         <LinearGradient colors={['#13110E', '#2C1D12', '#13110E']} style={StyleSheet.absoluteFill} />
-        <FusionBoundary onFinish={finish}>{ready && week && <BuildScene slabs={slabs} tuning={DEFAULT_TUNING} lamination="strata" overview={false} reducedMotion={false} fusion={fusion} onError={finish} benchmark={0} onStats={ignoreStats} />}</FusionBoundary>
+        <FusionBoundary onFinish={finish}>{ready && week && <BuildScene slabs={slabs} tuning={DEFAULT_TUNING} lamination="strata" overview={false} reducedMotion={false} fusion={fusion} onError={finish} benchmark={0} onStats={setStats} />}</FusionBoundary>
       </View>
-      <View style={styles.footer}><Text style={styles.metrics}>{week ? `${week.metrics.workouts} workouts · ${formatWeight(week.metrics.volumeKg, unit)} ${unit} moved · ${week.metrics.records} ${week.metrics.records === 1 ? 'PR' : 'PRs'}` : ''}</Text><Text style={styles.note}>{snapshot.example ? 'Illustrative history · nothing is saved.' : 'Already sealed. Your sessions are preserved.'}</Text><Pressable accessibilityRole="button" onPress={finish} style={styles.continue}><Text style={styles.link}>{snapshot.example ? 'Return to sandbox' : 'View your Stack'}</Text></Pressable></View>
+      <View style={styles.footer}>{snapshot.example && <Text style={styles.note}>{stats ? `Fusion: ${stats.fps.toFixed(1)} fps · p95 ${stats.p95Ms.toFixed(1)} ms · ${stats.calls} draws` : 'Measuring fusion…'}</Text>}<Text style={styles.metrics}>{week ? `${week.metrics.workouts} workouts · ${formatWeight(week.metrics.volumeKg, unit)} ${unit} moved · ${week.metrics.records} ${week.metrics.records === 1 ? 'PR' : 'PRs'}` : ''}</Text><Text style={styles.note}>{snapshot.example ? 'Illustrative history · nothing is saved.' : 'Already sealed. Your sessions are preserved.'}</Text><Pressable accessibilityRole="button" onPress={finish} style={styles.continue}><Text style={styles.link}>{snapshot.example ? 'Return to sandbox' : 'View your Stack'}</Text></Pressable></View>
     </SafeAreaView></SafeAreaProvider>
   </Modal>;
 }

@@ -152,3 +152,21 @@ test('casting gold overlay contains only earned seam triangles and no workout pi
     full.dispose(); seam.dispose();
   }
 });
+
+test('batched fusion history preserves translated vertices and pigments at 260 weeks', () => {
+  const { createHistoryGeometry } = load('features/build/geometry.ts');
+  const { items } = model.layoutSlabs(model.makeHistoryFixture(260));
+  const batched = createHistoryGeometry(items, model.DEFAULT_TUNING);
+  let offset = 0;
+  for (const { slab, y } of items) {
+    const single = createSlabGeometry(slab, model.DEFAULT_TUNING, 'strata').translate(0, y, 0);
+    for (const name of ['position', 'color']) {
+      const expected = single.getAttribute(name).array;
+      assert.deepEqual(batched.getAttribute(name).array.slice(offset, offset + expected.length), expected);
+    }
+    offset += single.getAttribute('position').array.length;
+    single.dispose();
+  }
+  assert.equal(batched.getAttribute('position').array.length, offset);
+  batched.dispose();
+});

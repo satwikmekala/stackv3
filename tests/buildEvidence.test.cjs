@@ -408,3 +408,53 @@ test('fusion compresses preserved color/PR strata to the exact weekly bounds bef
   assert.equal(JSON.stringify(slab), before);
   assert.ok(slab.layers.some((layer) => layer.record));
 });
+
+const { caseEntries, unpackWeek } = load('features/build/caseModel.ts');
+test('Case adds neutral calendar niches only between active weeks', () => {
+  const state = derive([session(1, '2026-08-24', []), session(2, '2026-09-14', [])]);
+  const entries = caseEntries(state);
+  assert.deepEqual(entries.map((entry) => entry.weekStart), ['2026-09-14', '2026-09-07', '2026-08-31', '2026-08-24']);
+  assert.deepEqual(entries.map((entry) => !!entry.week), [true, false, false, true]);
+  assert.deepEqual(caseEntries(derive([])), []);
+});
+test('Case reconstructs each session, height, color and earned PR for 260 weeks', () => {
+  const { makeMonolithDemo, MONOLITH_DEMO_NOW } = load('features/build/monolithDemo.ts');
+  const state = deriveBuildState(makeMonolithDemo(260), MONOLITH_DEMO_NOW);
+  const weeks = caseEntries(state).flatMap((entry) => entry.week ? [entry.week] : []);
+  assert.equal(weeks.reduce((sum, week) => sum + week.metrics.workouts, 0), state.metrics.workouts);
+  assert.equal(weeks.reduce((sum, week) => sum + week.metrics.volumeKg, 0), state.metrics.volumeKg);
+  assert.equal(weeks.reduce((sum, week) => sum + week.metrics.records, 0), state.metrics.records);
+  assert.equal(new Set(weeks.flatMap((week) => week.pieces.map((piece) => piece.sessionId))).size, state.pieces.length);
+  for (const week of weeks) {
+    assert.deepEqual(unpackWeek(week), week.pieces.map((piece) => ({ id: piece.id, height: piece.height, sealed: false, layers: [{ color: piece.color, height: piece.height, record: piece.records.length > 0 }] })));
+  }
+});
+test('Case calendar niches cross year and daylight-saving boundaries without missing Mondays', () => {
+  const previous = process.env.TZ;
+  try {
+    process.env.TZ = 'America/New_York';
+    const state = deriveBuildState([session(1, '2025-12-29', []), session(2, '2026-03-16', [])], new Date(2026, 2, 23));
+    const entries = caseEntries(state);
+    assert.equal(entries.length, 12);
+    assert.equal(entries[0].weekStart, '2026-03-16');
+    assert.equal(entries.at(-1).weekStart, '2025-12-29');
+    assert.ok(entries.every((entry) => new Date(`${entry.weekStart}T12:00:00`).getDay() === 1));
+  } finally { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; }
+});
+
+test('fusion upload window stays bounded for long history and keeps blocks crossing its margin', () => {
+  const { fusionVisibleHistory } = load('features/build/fusion.ts');
+  const { layoutSlabs, makeHistoryFixture } = load('features/build/model.ts');
+  const { cameraFrame } = load('features/build/monolithModel.ts');
+  const { items, top } = layoutSlabs(makeHistoryFixture(260));
+  const selected = items[259];
+  for (const [width, height] of [[393, 350], [850, 250], [320, 800]]) {
+    const framing = cameraFrame(top, width, height, false, { bottom: selected.y - .4, top: selected.y + 3 });
+    const visible = fusionVisibleHistory(items, selected.y, framing.targetY, height, framing.zoom);
+    assert.ok(visible.length > 0 && visible.length < 40);
+    assert.equal(visible.at(-1), items[258]);
+    const bottom = framing.targetY - height / framing.zoom - 4;
+    assert.ok(visible[0].y <= bottom, 'include a slab crossing the lower margin');
+    assert.ok(visible.every((item) => item.y < selected.y));
+  }
+});

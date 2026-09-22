@@ -70,3 +70,9 @@ export function fusionFrame(elapsed: number, layers: readonly BuildLayer[], comp
     seated: elapsed >= 4000, done: elapsed >= FUSION_DURATION_MS,
   };
 }
+
+/** Keep every block intersecting the camera's conservative lower margin. */
+export function fusionVisibleHistory<T extends { y: number; slab: { height: number } }>(items: readonly T[], selectedY: number, targetY: number, viewportHeight: number, zoom: number): T[] {
+  const bottom = targetY - viewportHeight / Math.max(zoom, 0.001) - 4;
+  return items.filter((item) => item.y < selectedY && item.y + item.slab.height * BASE_HEIGHT >= bottom);
+}

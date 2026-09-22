@@ -47,11 +47,11 @@ export function makeObjectFixture(bucket: number, record: boolean, sealed: boole
   return [{ id: 'object', sealed, layers, height: sealed ? weeklyHeight(layers, compression) : layers[0].height }];
 }
 
-export function layoutSlabs(slabs: readonly BuildSlab[]) {
+export function layoutSlabs(slabs: readonly BuildSlab[], gap = SLAB_GAP) {
   let top = 0.12;
   const items = slabs.map((slab) => {
     const y = top;
-    top += slab.height * BASE_HEIGHT + SLAB_GAP;
+    top += slab.height * BASE_HEIGHT + gap;
     return { slab, y };
   });
   return { items, top };

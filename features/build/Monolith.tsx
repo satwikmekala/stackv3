@@ -128,8 +128,10 @@ export default function Monolith() {
         <Text style={styles.weekTitle}>{week.pieces.length ? `${week.pieces.length} ${week.pieces.length === 1 ? 'workout' : 'workouts'}, ${week.sealed ? 'one block.' : 'still taking shape.'}` : 'Room for your next session.'}</Text>
         <View style={styles.strata}>{week.pieces.map((piece) => <View key={piece.id} style={[styles.stripe, { backgroundColor: piece.color }]} />)}</View>
         <Text style={styles.caption}>{week.pieces.length ? `${volume(week.metrics.volumeKg)} moved · ${week.metrics.liftsUp} lifts up · ${recordLabel(week.metrics.records)}` : 'Your history stays exactly as you built it.'}</Text>
+        {week.sealed && <Pressable accessibilityRole="button" onPress={() => router.push({ pathname: '/build-case', params: { source: String(source), week: week.id } })} style={styles.detailButton}><Text style={styles.link}>Unpack this week</Text><ChevronRight size={17} color={c.bone} /></Pressable>}
         {!week.sealed && <Pressable accessibilityRole="button" onPress={() => setSheet('current')} style={styles.detailButton}><Text style={styles.link}>This week’s pieces</Text><ChevronRight size={17} color={c.bone} /></Pressable>}
       </View>}
+      <Pressable accessibilityRole="button" onPress={() => router.push({ pathname: '/build-case', params: { source: String(source) } })} style={styles.detailButton}><Text style={styles.link}>Open the Case</Text><ChevronRight size={17} color={c.bone} /></Pressable>
       <View style={styles.navigation}>
         <Pressable accessibilityRole="button" accessibilityLabel="Previous active week" accessibilityState={{ disabled: selectedIndex === 0 }} disabled={selectedIndex === 0} onPress={() => selectWeek(entries[selectedIndex - 1].week.id)} style={[styles.icon, selectedIndex === 0 && styles.disabled]}><ChevronLeft size={20} color={c.bone} /></Pressable>
         <Pressable accessibilityRole="button" onPress={() => setSheet('weeks')} style={styles.browse}><Text style={styles.link}>Choose a week</Text></Pressable>

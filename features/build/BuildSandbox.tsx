@@ -100,7 +100,7 @@ export default function BuildSandbox() {
     </View>
     <View style={styles.controls}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
-        <Choice text="Fusion preview ↗" selected={false} disabled={running} onPress={() => setFusionSnapshot(makeFusionPreview())} />
+        <Choice text="Fusion preview ↗" selected={false} disabled={running} onPress={() => setFusionSnapshot(makeFusionPreview(mode === 'history' && (weeks === 104 || weeks === 260) ? weeks : 12))} />
         <Choice text="Casting preview ↗" selected={false} disabled={running} onPress={() => router.push({ pathname: '/build-casting', params: { demo: '1' } })} />
         <Choice text="The object" selected={mode === 'object'} disabled={running} onPress={() => configure(() => setMode('object'))} />
         <Choice text="Monolith screen ↗" selected={false} disabled={running} onPress={() => router.push('/build')} />

@@ -95,3 +95,19 @@ export function createRecordSeamGeometry(slab: BuildSlab, tuning: BuildTuning): 
   geometry.computeVertexNormals();
   return geometry;
 }
+
+/** Static surroundings of fusion share one draw call, regardless of history length. */
+export function createHistoryGeometry(items: { slab: BuildSlab; y: number }[], tuning: BuildTuning): BufferGeometry {
+  const sources = items.map(({ slab, y }) => createSlabGeometry(slab, tuning, 'strata').translate(0, y, 0));
+  const result = new BufferGeometry();
+  for (const name of ['position', 'color']) {
+    const length = sources.reduce((sum, source) => sum + source.getAttribute(name).array.length, 0);
+    const values = new Float32Array(length);
+    let offset = 0;
+    for (const source of sources) { const array = source.getAttribute(name).array; values.set(array, offset); offset += array.length; }
+    result.setAttribute(name, new Float32BufferAttribute(values, 3));
+  }
+  sources.forEach((source) => source.dispose());
+  result.computeBoundingSphere();
+  return result;
+}
