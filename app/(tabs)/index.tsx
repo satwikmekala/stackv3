@@ -43,7 +43,12 @@ import { resolveNextCustomWorkoutIndex } from '@/store/customSplitRotation';
 import { toLocalCalendarDate, useWorkoutStore } from '@/store/workoutStore';
 import { resumeWorkout } from '@/utils/workoutResume';
 import type { WorkoutLaunchOrigin } from '@/utils/workoutLaunch';
+import { BUILD_SANDBOX_ENABLED } from '@/features/build/config';
 import '@/global.css';
+
+// Keep experimental Build and its dependencies off the normal Home startup path.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const BuildHome = BUILD_SANDBOX_ENABLED ? require('@/features/build/BuildHome').default : null;
 
 const DAY_LABELS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
 const MONTH_LABELS = [
@@ -437,9 +442,9 @@ export default function Home() {
       />
 
       <ScrollView
-        // Home is a fixed dashboard; sizing above keeps all controls visible
-        // without exposing a draggable content surface.
-        scrollEnabled={false}
+        // Build adds secondary content below the existing workout controls.
+        // Allow it to scroll clear of the floating tabs when enabled.
+        scrollEnabled={BUILD_SANDBOX_ENABLED}
         bounces={false}
         contentContainerStyle={[
           styles.scrollContent,
@@ -567,6 +572,7 @@ export default function Home() {
             onPress={() => router.push('/your-splits')}
           />
         </Animated.View>
+        {BuildHome && <BuildHome />}
       </ScrollView>
 
       <WorkoutPicker

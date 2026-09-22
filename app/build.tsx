@@ -6,5 +6,7 @@ export default function BuildRoute() {
   // Keep the renderer outside normal app startup while Build is experimental.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const Monolith = require('../features/build/Monolith').default;
-  return <Monolith />;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const BuildEntry = require('../features/build/BuildEntry').default;
+  return <BuildEntry><Monolith /></BuildEntry>;
 }

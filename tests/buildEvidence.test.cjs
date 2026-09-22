@@ -458,3 +458,22 @@ test('fusion upload window stays bounded for long history and keeps blocks cross
     assert.ok(visible.every((item) => item.y < selected.y));
   }
 });
+
+const { createBuildIntroduction, BUILD_INTRO_KEY } = load('features/build/introduction.ts');
+test('Build introduction persists completion or skip without consuming history events', async () => {
+  const values = new Map();
+  const storage = { getItem: async (key) => values.get(key) ?? null, setItem: async (key, value) => { values.set(key, value); } };
+  const intro = createBuildIntroduction(storage);
+  assert.equal(await intro.shouldShow(), true);
+  assert.equal(await createBuildIntroduction(storage).shouldShow(), true, 'closing before dismissal allows another introduction');
+  await intro.dismiss();
+  assert.equal(await intro.shouldShow(), false);
+  assert.equal(await createBuildIntroduction(storage).shouldShow(), false, 'cold entry remembers dismissal');
+  assert.deepEqual([...values.entries()], [[BUILD_INTRO_KEY, 'seen']]);
+});
+test('Build introduction storage failures never block entry and dismissal survives in memory', async () => {
+  const intro = createBuildIntroduction({ getItem: async () => { throw Error('read failed'); }, setItem: async () => { throw Error('write failed'); } });
+  assert.equal(await intro.shouldShow(), true);
+  await intro.dismiss();
+  assert.equal(await intro.shouldShow(), false);
+});
