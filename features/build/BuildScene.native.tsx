@@ -4,6 +4,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { Canvas, useFrame, useThree } from '@react-three/fiber/native';
 import { Group, MeshBasicMaterial, OrthographicCamera, Vector3 } from 'three';
 import { cameraFrame } from './monolithModel';
+import { fusionFrame, type FusionPhase } from './fusion';
 import { castingFrame, type CastingPhase } from './casting';
 import { createRecordSeamGeometry, createSlabGeometry } from './geometry';
 import { BASE_HEIGHT, layoutSlabs, type BuildSlab, type BuildTuning, type Lamination } from './model';
@@ -39,8 +40,19 @@ function CastingSlab({ slab, tuning, objectRef, material, goldMaterial }: {
   return <group ref={objectRef}><mesh geometry={pigment} material={material} dispose={null} /><mesh geometry={seams} material={goldMaterial} dispose={null} /></group>;
 }
 
+function FusionSlab({ slab, tuning, objectRef, material }: {
+  slab: BuildSlab; tuning: BuildTuning; objectRef: RefObject<Group | null>; material: MeshBasicMaterial;
+}) {
+  const geometries = useMemo(() => [
+    ...slab.layers.map((layer, index) => createSlabGeometry({ id: `${slab.id}:${index}`, height: layer.height, sealed: false, layers: [layer] }, tuning, 'strata')),
+    createSlabGeometry(slab, tuning, 'strata'),
+  ], [slab, tuning]);
+  useEffect(() => () => geometries.forEach((geometry) => geometry.dispose()), [geometries]);
+  return <group ref={objectRef}>{geometries.map((geometry, index) => <mesh key={index} geometry={geometry} material={material} dispose={null} />)}</group>;
+}
+
 function Scene(props: BuildSceneProps) {
-  const { slabs, tuning, lamination, overview, reducedMotion, benchmark, onStats, focusRange, markers, onMarkers, onSelectSlab, paused, casting } = props;
+  const { slabs, tuning, lamination, overview, reducedMotion, benchmark, onStats, focusRange, markers, onMarkers, onSelectSlab, paused, casting, fusion } = props;
   const { size, invalidate, gl } = useThree();
   const { items, top } = useMemo(() => layoutSlabs(slabs), [slabs]);
   const material = useMemo(() => new MeshBasicMaterial({ vertexColors: true, toneMapped: false }), []);
@@ -56,6 +68,12 @@ function Scene(props: BuildSceneProps) {
   const castStart = useRef<number | null>(null);
   const castPhase = useRef<CastingPhase | null>(null);
   const castFinished = useRef(false);
+  const fusionObject = useRef<Group>(null);
+  const futureObject = useRef<Group>(null);
+  const fusionItem = fusion ? items.find((item) => item.slab.id === fusion.weekId) : undefined;
+  const fusionStart = useRef<number | null>(null);
+  const fusionPhase = useRef<FusionPhase | null>(null);
+  const fusionFinished = useRef(false);
   const target = useRef(new Vector3());
   const positioned = useRef(false);
   const lastMarkers = useRef('');
@@ -88,7 +106,30 @@ function Scene(props: BuildSceneProps) {
       if (frame.done && !castFinished.current) { castFinished.current = true; casting.onComplete(); }
       if (!frame.done) invalidate();
     }
-    const blend = casting || reducedMotion || !positioned.current ? 1 : 1 - Math.exp(-Math.min(delta, 0.05) * 9);
+    if (fusion && fusionItem) {
+      const now = performance.now();
+      fusionStart.current ??= now;
+      const frame = fusionFrame(now - fusionStart.current, fusionItem.slab.layers, fusionItem.slab.height);
+      const object = fusionObject.current;
+      if (object) {
+        object.position.y = fusionItem.y + frame.lift;
+        frame.pieces.forEach((piece, index) => {
+          const child = object.children[index];
+          child.visible = !frame.fused;
+          child.position.y = piece.y;
+          child.scale.y = piece.scaleY;
+        });
+        object.children[frame.pieces.length].visible = frame.fused;
+      }
+      if (futureObject.current) futureObject.current.visible = frame.seated;
+      const framing = cameraFrame(top, size.width, size.height, false, { bottom: Math.max(0, fusionItem.y - 0.4), top: fusionItem.y + frame.lift + frame.height + 0.3 });
+      targetY = framing.targetY;
+      desiredZoom = framing.zoom;
+      if (frame.phase !== fusionPhase.current) { fusionPhase.current = frame.phase; fusion.onPhase(frame.phase); }
+      if (frame.done && !fusionFinished.current) { fusionFinished.current = true; fusion.onComplete(); }
+      if (!frame.done) invalidate();
+    }
+    const blend = casting || fusion || reducedMotion || !positioned.current ? 1 : 1 - Math.exp(-Math.min(delta, 0.05) * 9);
     target.current.y += (targetY - target.current.y) * blend;
     ortho.zoom += (desiredZoom - ortho.zoom) * blend;
     // Move far enough away for very tall orthographic towers; perspective never changes.
@@ -140,8 +181,12 @@ function Scene(props: BuildSceneProps) {
       <boxGeometry args={[2.36, 0.075, 2.36]} />
       <meshBasicMaterial color="#29231B" />
     </mesh>
-    {items.filter(({ slab }) => slab.id !== casting?.slabId).map(({ slab, y }) => <Slab key={slab.id} slab={slab} y={y} onSelect={onSelectSlab} tuning={tuning} lamination={lamination} material={material} />)}
+    {items.filter(({ slab, y }) => slab.id !== casting?.slabId && slab.id !== fusion?.weekId && (!fusionItem || y < fusionItem.y)).map(({ slab, y }) => <Slab key={slab.id} slab={slab} y={y} onSelect={onSelectSlab} tuning={tuning} lamination={lamination} material={material} />)}
     </group>
+    {fusionItem && <>
+      <FusionSlab slab={fusionItem.slab} tuning={tuning} objectRef={fusionObject} material={material} />
+      <group ref={futureObject}>{items.filter(({ y }) => y > fusionItem.y).map(({ slab, y }) => <Slab key={slab.id} slab={slab} y={y} tuning={tuning} lamination={lamination} material={material} />)}</group>
+    </>}
     {castItem && <CastingSlab slab={castItem.slab} tuning={tuning} objectRef={castObject} material={pieceMaterial} goldMaterial={goldMaterial} />}
   </>;
 }

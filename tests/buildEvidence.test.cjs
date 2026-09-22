@@ -295,3 +295,116 @@ test('Focus ruler retains the selected week and never overlaps label touch targe
   assert.ok(visible.length >= 3);
   for (const marker of visible) for (const other of visible) if (marker !== other) assert.ok(Math.abs(marker.top - other.top) >= 44);
 });
+
+const { reconcileFusion, createFusionCoordinator, readFusionMarker, fusionFrame, FUSION_DURATION_MS, FUSION_MARKER_KEY } = load('features/build/fusion.ts');
+const datedHistory = (dates, today) => deriveBuildState(dates.map((date, i) => session(i + 1, date, [lift('Bench', [set(50 + i, 8)])])), new Date(`${today}T12:00:00`));
+const fusionMemory = (initial = null) => {
+  let value = initial;
+  return { getItem: async (key) => { assert.equal(key, FUSION_MARKER_KEY); return value; }, setItem: async (key, next) => { assert.equal(key, FUSION_MARKER_KEY); value = next; } };
+};
+
+test('first Build entry accepts sealed backfill without queuing old fusion rewards', () => {
+  const state = datedHistory(['2026-08-03', '2026-09-14'], '2026-09-23');
+  const result = reconcileFusion(state, null);
+  assert.equal(result.weekId, null);
+  assert.equal(result.marker.observedWeek, '2026-09-21');
+  assert.equal(state.sealedWeeks.length, 2);
+  assert.equal(reconcileFusion(state, result.marker).weekId, null);
+});
+
+test('Monday boundary picks the completed open week, then consumes the transition', async () => {
+  const storage = fusionMemory();
+  const coordinator = createFusionCoordinator(storage);
+  const sunday = datedHistory(['2026-09-20'], '2026-09-20');
+  assert.equal(await coordinator.reconcile(sunday), null);
+  assert.equal(sunday.currentWeek.pieces.length, 1);
+  const monday = datedHistory(['2026-09-20'], '2026-09-21');
+  assert.equal(await coordinator.reconcile(monday), 'week:2026-09-14');
+  assert.equal(monday.currentWeek.pieces.length, 0);
+  assert.equal(monday.sealedWeeks.length, 1);
+  assert.equal(await coordinator.reconcile(monday), null);
+  assert.equal(await createFusionCoordinator(storage).reconcile(monday), null, 'relaunch cannot replay an already claimed transition');
+});
+
+test('long absence seals every elapsed active week but presents only the latest eligible one', () => {
+  const state = datedHistory(['2026-09-14', '2026-09-22', '2026-09-29'], '2026-10-12');
+  deepFreeze(state);
+  const before = JSON.stringify(state);
+  const result = reconcileFusion(state, { version: 1, observedWeek: '2026-09-14' });
+  assert.equal(result.weekId, 'week:2026-09-28');
+  assert.equal(result.marker.observedWeek, '2026-10-12');
+  assert.equal(state.sealedWeeks.length, 3);
+  assert.equal(JSON.stringify(state), before);
+  assert.equal(reconcileFusion(state, result.marker).weekId, null);
+});
+
+test('empty elapsed weeks, older backfills and clock rollback do not create fusion rewards', () => {
+  const previous = { version: 1, observedWeek: '2026-09-21' };
+  assert.equal(reconcileFusion(datedHistory([], '2026-10-05'), previous).weekId, null);
+  assert.equal(reconcileFusion(datedHistory(['2026-09-14'], '2026-09-28'), previous).weekId, null);
+  const rollback = reconcileFusion(datedHistory(['2026-09-14'], '2026-09-14'), previous);
+  assert.deepEqual(rollback.marker, previous);
+  assert.equal(rollback.weekId, null);
+});
+
+test('fusion marker rejects damaged, obsolete, non-Monday and invalid calendar values', () => {
+  for (const raw of [null, '{', '{}', 'null', JSON.stringify({ version: 2, observedWeek: '2026-09-21' }), JSON.stringify({ version: 1, observedWeek: '2026-09-22' }), JSON.stringify({ version: 1, observedWeek: '2026-02-30' })]) assert.equal(readFusionMarker(raw), null);
+  assert.deepEqual(readFusionMarker('{"version":1,"observedWeek":"2026-09-21"}'), { version: 1, observedWeek: '2026-09-21' });
+});
+
+test('simultaneous entries claim only one fusion and persist before returning it', async () => {
+  const state = datedHistory(['2026-09-14'], '2026-09-21');
+  const storage = fusionMemory('{"version":1,"observedWeek":"2026-09-14"}');
+  const coordinator = createFusionCoordinator(storage);
+  assert.deepEqual(await Promise.all([coordinator.reconcile(state), coordinator.reconcile(state)]), ['week:2026-09-14', null]);
+  assert.equal(readFusionMarker(await storage.getItem(FUSION_MARKER_KEY)).observedWeek, '2026-09-21');
+});
+
+test('storage failures suppress the presentation while sealed geometry remains available', async () => {
+  const state = datedHistory(['2026-09-14'], '2026-09-21');
+  const before = JSON.stringify(buildStateToSlabs(state));
+  for (const method of ['getItem', 'setItem']) {
+    const storage = fusionMemory('{"version":1,"observedWeek":"2026-09-14"}');
+    storage[method] = async () => { throw new Error('storage unavailable'); };
+    assert.equal(await createFusionCoordinator(storage).reconcile(state), null);
+    assert.equal(JSON.stringify(buildStateToSlabs(state)), before);
+  }
+});
+
+test('fusion uses Monday-local boundaries across DST and year changes', () => {
+  const oldTimezone = process.env.TZ;
+  try {
+    for (const tz of ['America/New_York', 'Asia/Kolkata', 'UTC']) {
+      process.env.TZ = tz;
+      for (const [sunday, monday, start] of [['2026-03-08', '2026-03-09', '2026-03-02'], ['2026-11-01', '2026-11-02', '2026-10-26'], ['2027-01-03', '2027-01-04', '2026-12-28']]) {
+        const state = datedHistory([sunday], monday);
+        assert.equal(reconcileFusion(state, { version: 1, observedWeek: start }).weekId, `week:${start}`);
+      }
+    }
+  } finally { if (oldTimezone === undefined) delete process.env.TZ; else process.env.TZ = oldTimezone; }
+});
+
+test('fusion compresses preserved color/PR strata to the exact weekly bounds before seating', () => {
+  const { makeFusionPreview } = load('features/build/fusionDemo.ts');
+  const { state, weekId } = makeFusionPreview();
+  const slab = buildStateToSlabs(state).find((item) => item.id === weekId);
+  deepFreeze(slab);
+  const before = JSON.stringify(slab);
+  const atFusion = fusionFrame(2200, slab.layers, slab.height);
+  assert.ok(Math.abs(atFusion.height - slab.height * 0.28) < 1e-9);
+  atFusion.pieces.forEach((piece, i) => {
+    if (i) assert.ok(Math.abs(piece.y - (atFusion.pieces[i - 1].y + slab.layers[i - 1].height * 0.28 * piece.scaleY)) < 1e-9);
+  });
+  const phases = new Set();
+  for (let elapsed = 0; elapsed <= FUSION_DURATION_MS; elapsed += 10) {
+    const frame = fusionFrame(elapsed, slab.layers, slab.height);
+    phases.add(frame.phase);
+    assert.ok(frame.height > 0 && frame.lift >= 0 && frame.lift <= 1.1);
+    assert.equal(frame.pieces.length, slab.layers.length);
+  }
+  assert.deepEqual([...phases], ['isolate', 'compress', 'fuse', 'seat', 'sealed']);
+  assert.equal(fusionFrame(FUSION_DURATION_MS, slab.layers, slab.height).lift, 0);
+  assert.equal(fusionFrame(FUSION_DURATION_MS, slab.layers, slab.height).done, true);
+  assert.equal(JSON.stringify(slab), before);
+  assert.ok(slab.layers.some((layer) => layer.record));
+});

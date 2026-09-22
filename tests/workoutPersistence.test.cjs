@@ -525,3 +525,30 @@ test('casting only follows a committed completion; failure/skip/replay never dup
     assert.equal(adaptBuildHistory(h.database.readCompletedSessionsSync(), new Clock()).state.pieces.length, 1);
   } finally { h.sql.close(); }
 });
+
+test('weekly presentation markers never write workout data and relaunch keeps the same sealed history', async () => {
+  const h = harness();
+  try {
+    h.store.getState().startWorkoutFromArchetype(['push']);
+    h.store.getState().updateExerciseSet(0, 0, 8, 50);
+    h.store.getState().toggleSetCompleted(0, 0);
+    h.store.getState().completeWorkout('medium');
+    const { adaptBuildHistory } = h.load('@/features/build/adapter');
+    const { createFusionCoordinator } = h.load('@/features/build/fusion');
+    let marker = null;
+    const storage = { getItem: async () => marker, setItem: async (_, value) => { marker = value; } };
+    const coordinator = createFusionCoordinator(storage);
+    const sessions = h.database.readCompletedSessionsSync();
+    const before = JSON.stringify(sessions);
+    const changes = h.sql.prepare('SELECT total_changes() AS count').get().count;
+    assert.equal(await coordinator.reconcile(adaptBuildHistory(sessions, new Clock()).state), null);
+    const later = adaptBuildHistory(sessions, new Date(2026, 9, 12, 12));
+    assert.equal(await coordinator.reconcile(later.state), 'week:2026-09-14');
+    assert.equal(await createFusionCoordinator(storage).reconcile(later.state), null);
+    assert.deepEqual(adaptBuildHistory(h.database.readCompletedSessionsSync(), new Date(2026, 9, 12, 12)), later);
+    assert.equal(JSON.stringify(h.database.readCompletedSessionsSync()), before);
+    assert.equal(h.sql.prepare('SELECT total_changes() AS count').get().count, changes);
+    assert.equal(later.state.sealedWeeks.length, 1);
+    assert.equal(later.state.sealedWeeks[0].pieces.length, 1);
+  } finally { h.sql.close(); }
+});

@@ -11,6 +11,8 @@ import type { RenderStats } from './sceneTypes';
 import { useWorkoutStore } from '../../store/workoutStore';
 import { adaptBuildHistory } from './adapter';
 import { EVIDENCE_DEMO_NOW, EVIDENCE_DEMO_SESSIONS } from './evidenceDemo';
+import { FusionPresentation, type FusionSnapshot } from './FusionPresentation';
+import { makeFusionPreview } from './fusionDemo';
 import { EvidenceInspector } from './EvidenceInspector';
 
 function Choice({ text, selected, onPress, disabled = false }: { text: string; selected: boolean; onPress: () => void; disabled?: boolean }) {
@@ -25,6 +27,8 @@ export default function BuildSandbox() {
   const focused = useIsFocused();
   const [active, setActive] = useState(AppState.currentState === 'active');
   const [reducedMotion, setReducedMotion] = useState(false);
+  const [fusionSnapshot, setFusionSnapshot] = useState<FusionSnapshot | null>(null);
+  const finishFusion = useCallback(() => setFusionSnapshot(null), []);
   const [tweaks, setTweaks] = useState(false);
   const [mode, setMode] = useState<'object' | 'history' | 'evidence'>('object');
   const sessions = useWorkoutStore((state) => state.sessions);
@@ -49,7 +53,7 @@ export default function BuildSandbox() {
     const motion = AccessibilityInfo.addEventListener('reduceMotionChanged', setReducedMotion);
     return () => { subscription.remove(); motion.remove(); };
   }, []);
-  useFocusEffect(useCallback(() => () => { setBenchmark(0); setRunning(false); }, []));
+  useFocusEffect(useCallback(() => () => { setBenchmark(0); setRunning(false); finishFusion(); }, [finishFusion]));
   useEffect(() => {
     if (!running) return;
     const timeout = setTimeout(() => { setRunning(false); setBenchmark(0); }, 16000);
@@ -86,7 +90,7 @@ export default function BuildSandbox() {
     </View>
     <View style={styles.stage} accessibilityLabel={slabs.length ? `${mode === 'evidence' ? `${history.state.sealedWeeks.length} sealed weeks and ${history.state.currentWeek.pieces.length} current pieces` : mode === 'history' ? `${weeks} sealed weeks and two current pieces` : 'One keyed slab'}. ${slabs.some((slab) => slab.layers.some((layer) => layer.record)) ? 'Gold record treatment.' : ''}` : 'Empty plinth, no workout geometry'}>
       <LinearGradient colors={['#13110E', '#281B11', '#13110E']} style={StyleSheet.absoluteFill} />
-      {focused && active && <BuildScene slabs={slabs} tuning={tuning} lamination={lamination} overview={overview} reducedMotion={reducedMotion} benchmark={benchmark} onStats={onStats} />}
+      {focused && active && !fusionSnapshot && <BuildScene slabs={slabs} tuning={tuning} lamination={lamination} overview={overview} reducedMotion={reducedMotion} benchmark={benchmark} onStats={onStats} />}
       <View style={styles.viewControl}>
         <Pressable accessibilityRole="button" accessibilityLabel={overview ? 'Show Focus view' : 'Show Overview view'} disabled={running} onPress={() => configure(() => setOverview(!overview))} style={styles.iconButton}>
           {overview ? <Minimize size={19} color={c.bone} /> : <Maximize size={19} color={c.bone} />}
@@ -96,6 +100,7 @@ export default function BuildSandbox() {
     </View>
     <View style={styles.controls}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
+        <Choice text="Fusion preview ↗" selected={false} disabled={running} onPress={() => setFusionSnapshot(makeFusionPreview())} />
         <Choice text="Casting preview ↗" selected={false} disabled={running} onPress={() => router.push({ pathname: '/build-casting', params: { demo: '1' } })} />
         <Choice text="The object" selected={mode === 'object'} disabled={running} onPress={() => configure(() => setMode('object'))} />
         <Choice text="Monolith screen ↗" selected={false} disabled={running} onPress={() => router.push('/build')} />
@@ -121,6 +126,7 @@ export default function BuildSandbox() {
         </Pressable>
       </View>
     </View>
+    {fusionSnapshot && <FusionPresentation snapshot={fusionSnapshot} unit={unit} onFinish={finishFusion} />}
     <EvidenceInspector state={history.state} visible={inspect} onClose={() => setInspect(false)} unit={unit} example={example} />
     <Modal visible={tweaks} animationType={reducedMotion ? 'none' : 'slide'} presentationStyle="pageSheet" onRequestClose={() => setTweaks(false)}>
       <SafeAreaView style={styles.sheet}>

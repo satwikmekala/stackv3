@@ -1,18 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AccessibilityInfo, AppState, FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useIsFocused, useRouter } from 'expo-router';
+import { useFocusEffect, useIsFocused, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ArrowLeft, ChevronLeft, ChevronRight, Maximize, Minimize, X } from 'lucide-react-native';
 import { redesignColors as c, redesignFonts as f } from '../../constants/theme';
 import { useWorkoutStore } from '../../store/workoutStore';
-import { parseSessionDate } from '../../store/workoutCalendar';
+import { getStartOfWeek, parseSessionDate, toLocalCalendarDate } from '../../store/workoutCalendar';
 import { formatWeight } from '../../store/weightUnits';
 import { adaptBuildHistory } from './adapter';
 import { DEFAULT_TUNING, GOLD } from './model';
 import { monolithWeeks, pickRulerMarkers } from './monolithModel';
 import { makeMonolithDemo, MONOLITH_DEMO_NOW } from './monolithDemo';
 import BuildScene from './BuildScene';
+import { fusionCoordinator } from './fusionCoordinator';
+import { FusionPresentation, type FusionSnapshot } from './FusionPresentation';
 
 const dateLabel = (date: string) => parseSessionDate(date).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 const weekLabel = (date: string) => parseSessionDate(date).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
@@ -31,12 +33,17 @@ const sources: { value: Source; title: string; detail: string }[] = [
 export default function Monolith() {
   const router = useRouter();
   const focused = useIsFocused();
+  const hydrated = useWorkoutStore((state) => state.isHydrated);
   const sessions = useWorkoutStore((state) => state.sessions);
   const unit = useWorkoutStore((state) => state.profile?.weightUnit ?? 'kg');
   const [source, setSource] = useState<Source>('saved');
   const [now, setNow] = useState(() => new Date());
   const [active, setActive] = useState(AppState.currentState === 'active');
   const [reducedMotion, setReducedMotion] = useState(true);
+  const [motionReady, setMotionReady] = useState(false);
+  const [fusionSnapshot, setFusionSnapshot] = useState<FusionSnapshot | null>(null);
+  const finishFusion = useCallback(() => setFusionSnapshot(null), []);
+  useFocusEffect(useCallback(() => finishFusion, [finishFusion]));
   const [overview, setOverview] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sheet, setSheet] = useState<Sheet>(null);
@@ -44,7 +51,7 @@ export default function Monolith() {
   useEffect(() => {
     const app = AppState.addEventListener('change', (state) => { setActive(state === 'active'); if (state === 'active') setNow(new Date()); });
     let mounted = true;
-    void AccessibilityInfo.isReduceMotionEnabled().then((value) => { if (mounted) setReducedMotion(value); });
+    void AccessibilityInfo.isReduceMotionEnabled().then((value) => { if (mounted) { setReducedMotion(value); setMotionReady(true); } }).catch(() => { if (mounted) setMotionReady(true); });
     const motion = AccessibilityInfo.addEventListener('reduceMotionChanged', setReducedMotion);
     return () => { mounted = false; app.remove(); motion.remove(); };
   }, []);
@@ -55,7 +62,20 @@ export default function Monolith() {
     return () => { clearTimeout(refresh); clearInterval(timer); };
   }, [active, focused]);
   const demo = useMemo(() => typeof source === 'number' ? makeMonolithDemo(source) : [], [source]);
-  const history = useMemo(() => adaptBuildHistory(source === 'saved' ? sessions : demo, source === 'saved' ? now : MONOLITH_DEMO_NOW), [source, sessions, demo, now]);
+  const currentWeekKey = toLocalCalendarDate(getStartOfWeek(now));
+  const history = useMemo(() => adaptBuildHistory(source === 'saved' ? sessions : demo, source === 'saved' ? parseSessionDate(currentWeekKey) : MONOLITH_DEMO_NOW), [source, sessions, demo, currentWeekKey]);
+  useEffect(() => {
+    if (source !== 'saved' || !hydrated || !active || !focused || !motionReady || sheet || fusionSnapshot) return;
+    let cancelled = false;
+    void fusionCoordinator.reconcile(history.state).then((weekId) => {
+      if (!cancelled && weekId && !reducedMotion) {
+        setSelectedId(weekId);
+        setOverview(false);
+        setFusionSnapshot({ state: history.state, weekId, example: false });
+      }
+    });
+    return () => { cancelled = true; };
+  }, [source, hydrated, active, focused, motionReady, sheet, fusionSnapshot, history.state, reducedMotion]);
   const entries = useMemo(() => monolithWeeks(history.state, history.slabs), [history]);
   const selected = entries.find((entry) => entry.week.id === selectedId) ?? entries[entries.length - 1];
   const selectedIndex = entries.indexOf(selected);
@@ -86,7 +106,7 @@ export default function Monolith() {
     </View>
     <View style={styles.stage}>
       <LinearGradient colors={['#13110E', '#2C1D12', '#13110E']} style={StyleSheet.absoluteFill} />
-      {active && focused && <View style={StyleSheet.absoluteFill} accessible accessibilityLabel={empty ? 'Empty plinth. No completed workouts.' : `${history.state.sealedWeeks.length} sealed weekly blocks and ${current.pieces.length} separate current-week pieces. ${overview ? 'Overview' : `Focused on week of ${weekLabel(week.weekStart)}`}.`}>
+      {active && focused && !fusionSnapshot && <View style={StyleSheet.absoluteFill} accessible accessibilityLabel={empty ? 'Empty plinth. No completed workouts.' : `${history.state.sealedWeeks.length} sealed weekly blocks and ${current.pieces.length} separate current-week pieces. ${overview ? 'Overview' : `Focused on week of ${weekLabel(week.weekStart)}`}.`}>
         <BuildScene slabs={history.slabs} tuning={DEFAULT_TUNING} lamination="strata" paused={sheet !== null} overview={overview} focusRange={focusRange} reducedMotion={reducedMotion} markers={markers} onMarkers={setProjected} onSelectSlab={selectSlab} benchmark={0} onStats={ignoreStats} />
       </View>}
       {!overview && !sheet && <View style={StyleSheet.absoluteFill} pointerEvents="box-none">{markerLabels.map((marker) => {
@@ -116,6 +136,7 @@ export default function Monolith() {
         <Pressable accessibilityRole="button" accessibilityLabel="Next active week" accessibilityState={{ disabled: selectedIndex === entries.length - 1 }} disabled={selectedIndex === entries.length - 1} onPress={() => selectWeek(entries[selectedIndex + 1].week.id)} style={[styles.icon, selectedIndex === entries.length - 1 && styles.disabled]}><ChevronRight size={20} color={c.bone} /></Pressable>
       </View>
     </View>
+    {fusionSnapshot && <FusionPresentation snapshot={fusionSnapshot} unit={unit} onFinish={finishFusion} />}
     <Modal visible={sheet !== null} animationType={reducedMotion ? 'none' : 'slide'} presentationStyle="pageSheet" onRequestClose={close}>
       <SafeAreaView style={styles.screen}>
         <View style={styles.sheetHeader}><Text style={styles.sheetTitle}>{sheet === 'source' ? 'History source' : sheet === 'weeks' ? 'Your weeks' : 'This week’s pieces'}</Text><Pressable accessibilityRole="button" accessibilityLabel="Close Build sheet" onPress={close} style={styles.icon}><X size={20} color={c.bone} /></Pressable></View>
