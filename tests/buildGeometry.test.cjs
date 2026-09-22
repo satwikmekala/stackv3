@@ -86,7 +86,7 @@ test('all treatments and height buckets generate finite, outward-facing geometry
 
 test('gold is present only for records, and survives all weekly material treatments', () => {
   const { Color } = require('three');
-  const gold = new Color(model.GOLD).multiplyScalar(1.16);
+  const gold = new Color(model.GOLD).multiplyScalar(1.35);
   for (const treatment of ['strata-inlay', 'strata', 'edge-grain']) {
     for (const record of [false, true]) {
       const slab = model.makeObjectFixture(0, record, true, 0.35)[0];
@@ -99,5 +99,39 @@ test('gold is present only for records, and survives all weekly material treatme
       assert.equal(found, record);
       geometry.dispose();
     }
+  }
+});
+
+test('PR seams belong only to their source strata, including multiple PRs and the key corner', () => {
+  const { Color } = require('three');
+  const gold = new Color(model.GOLD).multiplyScalar(1.35);
+  for (const flags of [[false, false, false], [false, true, false], [true, false, true]]) {
+    const slab = { id: 'local-pr', sealed: true, height: 2, layers: flags.map((record, i) => ({ color: model.CATEGORY_COLORS[i], height: 1, record })) };
+    const geometry = createSlabGeometry(slab, model.DEFAULT_TUNING, 'strata');
+    const positions = geometry.getAttribute('position');
+    const colors = geometry.getAttribute('color');
+    const normals = geometry.getAttribute('normal');
+    const height = slab.height * model.BASE_HEIGHT;
+    const band = height / flags.length;
+    const seam = Math.min(band * 0.1, model.DEFAULT_TUNING.seam);
+    const seams = new Set();
+    const keyPigments = new Set();
+    for (let i = 0; i < positions.count; i += 3) {
+      const isGold = Math.abs(colors.getX(i) - gold.r) < 1e-5 && Math.abs(colors.getY(i) - gold.g) < 1e-5 && Math.abs(colors.getZ(i) - gold.b) < 1e-5;
+      const ys = [0, 1, 2].map((j) => positions.getY(i + j));
+      const side = Math.abs(normals.getY(i)) < 0.1;
+      if (isGold && side) {
+        const layer = flags.findIndex((record, index) => record && ys.every((y) => y >= (index + 1) * band - seam - 1e-5 && y <= (index + 1) * band + 1e-5));
+        assert.ok(layer >= 0, 'gold side triangles must lie inside a PR layer’s thin upper seam');
+        seams.add(layer);
+      } else if (isGold) {
+        assert.equal(flags.at(-1), true, 'only a top-layer PR can highlight the top perimeter');
+      } else if (side && normals.getX(i) > 0.5 && normals.getZ(i) > 0.5) {
+        keyPigments.add(Math.min(flags.length - 1, Math.floor((Math.min(...ys) + 1e-5) / band)));
+      }
+    }
+    assert.deepEqual([...seams].sort(), flags.flatMap((record, index) => record ? [index] : []));
+    assert.equal(keyPigments.size, flags.length, 'every workout pigment remains on the key corner');
+    geometry.dispose();
   }
 });

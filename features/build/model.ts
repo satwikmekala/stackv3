@@ -15,7 +15,7 @@ export const HEIGHTS = [1, 1.15, 1.3, 1.45] as const;
 export const HISTORY_PRESETS = [0, 1, 10, 50, 104, 260] as const;
 export const BASE_HEIGHT = 0.28;
 export const SLAB_GAP = 0.045;
-export const GOLD = '#FFD35A';
+export const GOLD = '#FFE84A';
 export const CATEGORY_COLORS = Object.values(splitColors);
 
 export function weeklyHeight(layers: readonly BuildLayer[], compression: number, min = 0.75, max = 2.5): number {

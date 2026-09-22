@@ -37,7 +37,7 @@ export default function BuildSandbox() {
   const [record, setRecord] = useState(false);
   const [sealed, setSealed] = useState(false);
   const [overview, setOverview] = useState(false);
-  const [lamination, setLamination] = useState<Lamination>('strata-inlay');
+  const [lamination, setLamination] = useState<Lamination>('strata');
   const [tuning, setTuning] = useState(DEFAULT_TUNING);
   const [benchmark, setBenchmark] = useState(0);
   const [running, setRunning] = useState(false);
@@ -130,7 +130,7 @@ export default function BuildSandbox() {
           <Text style={styles.sectionLabel}>GOLD SEAM</Text><View style={styles.row}>{[0.012, 0.022, 0.035].map((value, index) => <Choice key={value} text={['Fine', 'Classic', 'Bold'][index]} selected={tuning.seam === value} onPress={() => configure(() => setTuning({ ...tuning, seam: value }))} />)}</View>
           <Text style={styles.sectionLabel}>WEEK COMPRESSION</Text><View style={styles.row}>{[0.25, 0.35, 0.5].map((value) => <Choice key={value} text={value.toFixed(2)} selected={tuning.compression === value} onPress={() => configure(() => setTuning({ ...tuning, compression: value }))} />)}</View>
           <Text style={styles.note}>Tuning changes rendered geometry only. No workouts are created or changed. Camera motion respects Reduce Motion.</Text>
-          <Choice text="Reset tuning" selected={false} onPress={() => configure(() => { setTuning(DEFAULT_TUNING); setLamination('strata-inlay'); })} />
+          <Choice text="Reset tuning" selected={false} onPress={() => configure(() => { setTuning(DEFAULT_TUNING); setLamination('strata'); })} />
         </ScrollView>
       </SafeAreaView>
     </Modal>

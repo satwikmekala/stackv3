@@ -13,11 +13,17 @@ export function createSlabGeometry(slab: BuildSlab, tuning: BuildTuning, laminat
   const layers = slab.layers;
   if (!layers.length) throw new Error('A slab needs at least one layer');
   const topColor = layers[layers.length - 1].color;
-  const hasRecord = layers.some((layer) => layer.record);
-  const seam = hasRecord ? Math.min(height * 0.12, tuning.seam) : 0;
+  const topHasRecord = layers[layers.length - 1].record;
   const triangle = (a: Point, b: Point, c: Point, color: string, light = 1) => {
     positions.push(...a, ...b, ...c);
-    const rgb = new Color(color).multiplyScalar(light);
+    const rgb = new Color(color);
+    if (color !== GOLD) {
+      // Preserve category hues; richer pigment belongs to Build, not the app-wide palette.
+      const hsl = { h: 0, s: 0, l: 0 };
+      rgb.getHSL(hsl, 'srgb');
+      rgb.setHSL(hsl.h, Math.min(1, hsl.s * 1.18), Math.min(0.72, hsl.l + 0.035), 'srgb');
+    }
+    rgb.multiplyScalar(light);
     for (let i = 0; i < 3; i++) colors.push(rgb.r, rgb.g, rgb.b);
   };
   const quad = (a: Point, b: Point, c: Point, d: Point, color: string, light = 1) => {
@@ -25,25 +31,26 @@ export function createSlabGeometry(slab: BuildSlab, tuning: BuildTuning, laminat
   };
   const point = ([x, z]: [number, number], y: number): Point => [x, y, z];
   const total = layers.reduce((sum, layer) => sum + layer.height, 0);
-  const bandHeight = slab.sealed && lamination === 'edge-grain' ? height * 0.28 : height - seam;
+  const bandHeight = slab.sealed && lamination === 'edge-grain' ? height * 0.28 : height;
 
   perimeter.forEach((a, edge) => {
     const b = perimeter[(edge + 1) % perimeter.length];
     const key = edge === 2;
-    const light = key ? 1.16 : edge === 1 ? 0.45 : 0.69;
+    const light = key ? 1.08 : edge === 1 ? 0.66 : 0.88;
     let y = 0;
     layers.forEach((layer) => {
       const next = y + bandHeight * layer.height / total;
-      quad(point(a, y), point(a, next), point(b, next), point(b, y), key && hasRecord ? GOLD : layer.color, light);
+      const seam = layer.record ? Math.min((next - y) * 0.10, Math.max(0, tuning.seam)) : 0;
+      quad(point(a, y), point(a, next - seam), point(b, next - seam), point(b, y), layer.color, light);
+      if (seam > 0) quad(point(a, next - seam), point(a, next), point(b, next), point(b, next - seam), GOLD, 1.35);
       y = next;
     });
-    if (height - seam - y > 1e-8) {
-      quad(point(a, y), point(a, height - seam), point(b, height - seam), point(b, y), key && hasRecord ? GOLD : topColor, light);
+    if (height - y > 1e-8) {
+      quad(point(a, y), point(a, height), point(b, height), point(b, y), topColor, light);
     }
-    if (seam > 0) quad(point(a, height - seam), point(a, height), point(b, height), point(b, height - seam), GOLD, key ? 1.2 : 0.95);
 
     // Thin top perimeter inlay carries each source colour; the centre stays solid pigment.
-    const inset = slab.sealed && lamination === 'strata-inlay' ? 0.09 : hasRecord ? 0.014 : 0;
+    const inset = slab.sealed && lamination === 'strata-inlay' ? 0.09 : topHasRecord && tuning.seam > 0 ? 0.014 : 0;
     const innerA: [number, number] = [a[0] * (1 - inset), a[1] * (1 - inset)];
     const innerB: [number, number] = [b[0] * (1 - inset), b[1] * (1 - inset)];
     triangle([0, height, 0], point(innerB, height), point(innerA, height), topColor, 1.05);
@@ -52,7 +59,7 @@ export function createSlabGeometry(slab: BuildSlab, tuning: BuildTuning, laminat
       layers.forEach((layer, index) => {
         const start = index / layers.length; const end = (index + 1) / layers.length;
         quad(lerp(a, b, start), lerp(innerA, innerB, start), lerp(innerA, innerB, end), lerp(a, b, end),
-          hasRecord && (key || lamination !== 'strata-inlay') ? GOLD : layer.color, 1.1);
+          lamination !== 'strata-inlay' && topHasRecord ? GOLD : layer.color, lamination !== 'strata-inlay' && topHasRecord ? 1.35 : 1.1);
       });
     }
     triangle([0, 0, 0], point(a, 0), point(b, 0), topColor, 0.4);

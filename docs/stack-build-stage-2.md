@@ -45,3 +45,11 @@ Start the sandbox using the commands in `stack-build-stage-1.md`. If a cold laun
 This is the Stage 2 inspection harness, not the final Monolith or Case UI. Stage 3 adds the composed Monolith screens, week selection, and current-week detail. Workout reward navigation and fusion presentation remain later stages.
 
 Physical-iPhone visual/performance acceptance from Stage 1 is still pending. The user explicitly requested proceeding to this independent data stage while that checkpoint remains open.
+
+## Visual tuning checkpoint
+
+Full Strata is now the initial and reset lamination, with key corner 0.24 and weekly compression 0.35. Build rendering preserves the existing category hues while increasing saturation, brightness, and side-face illumination. Gold is brighter yellow and remains independent of workout pigment.
+
+Each PR workout gets a thin seam at the upper edge of its own stratum (at most 10% of that stratum's height). Key-corner faces retain all workout colors. Only a PR in the top workout can add a thin gold top perimeter; a lower workout's PR never highlights the entire block. Multiple PR workouts produce separate seams; no PRs produce no gold.
+
+Validation: 38 tests pass, including spatial checks for single/multiple PR seams and retained key-corner pigment; type checking and targeted lint pass. Simulator visual review confirmed the Full Strata defaults and the bright seam on the example's purple layer without a gold corner panel.
