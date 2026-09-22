@@ -1,19 +1,20 @@
 /* eslint-disable react/no-unknown-property -- React Three Fiber elements use Three.js properties. */
-import { Component, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { Component, useEffect, useMemo, useRef, type ReactNode, type RefObject } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Canvas, useFrame, useThree } from '@react-three/fiber/native';
-import { MeshBasicMaterial, OrthographicCamera, Vector3 } from 'three';
+import { Group, MeshBasicMaterial, OrthographicCamera, Vector3 } from 'three';
 import { cameraFrame } from './monolithModel';
-import { createSlabGeometry } from './geometry';
-import { layoutSlabs, type BuildSlab, type BuildTuning, type Lamination } from './model';
+import { castingFrame, type CastingPhase } from './casting';
+import { createRecordSeamGeometry, createSlabGeometry } from './geometry';
+import { BASE_HEIGHT, layoutSlabs, type BuildSlab, type BuildTuning, type Lamination } from './model';
 import type { BuildSceneProps } from './sceneTypes';
 
-class SceneBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+class SceneBoundary extends Component<{ children: ReactNode; onError?: () => void }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() { return { failed: true }; }
-  componentDidCatch(error: Error) { console.error('[Build renderer]', error); }
+  componentDidCatch(error: Error) { console.error('[Build renderer]', error); this.props.onError?.(); }
   render() {
-    return this.state.failed
+    return this.state.failed && this.props.onError ? null : this.state.failed
       ? <View style={styles.error}><Text style={styles.errorText}>The 3D preview could not open. Close and reopen the sandbox to retry.</Text></View>
       : this.props.children;
   }
@@ -27,12 +28,34 @@ function Slab({ slab, tuning, lamination, y, material, onSelect }: {
   return <mesh onClick={onSelect ? (event) => { event.stopPropagation(); onSelect(slab.id); } : undefined} position={[0, y, 0]} geometry={geometry} material={material} dispose={null} />;
 }
 
+function CastingSlab({ slab, tuning, objectRef, material, goldMaterial }: {
+  slab: BuildSlab; tuning: BuildTuning; objectRef: RefObject<Group | null>; material: MeshBasicMaterial; goldMaterial: MeshBasicMaterial;
+}) {
+  const [pigment, seams] = useMemo(() => [
+    createSlabGeometry({ ...slab, layers: slab.layers.map((layer) => ({ ...layer, record: false })) }, tuning, 'strata'),
+    createRecordSeamGeometry(slab, tuning),
+  ], [slab, tuning]);
+  useEffect(() => () => { pigment.dispose(); seams.dispose(); }, [pigment, seams]);
+  return <group ref={objectRef}><mesh geometry={pigment} material={material} dispose={null} /><mesh geometry={seams} material={goldMaterial} dispose={null} /></group>;
+}
+
 function Scene(props: BuildSceneProps) {
-  const { slabs, tuning, lamination, overview, reducedMotion, benchmark, onStats, focusRange, markers, onMarkers, onSelectSlab, paused } = props;
+  const { slabs, tuning, lamination, overview, reducedMotion, benchmark, onStats, focusRange, markers, onMarkers, onSelectSlab, paused, casting } = props;
   const { size, invalidate, gl } = useThree();
   const { items, top } = useMemo(() => layoutSlabs(slabs), [slabs]);
   const material = useMemo(() => new MeshBasicMaterial({ vertexColors: true, toneMapped: false }), []);
   useEffect(() => () => material.dispose(), [material]);
+  const pieceMaterial = useMemo(() => new MeshBasicMaterial({ vertexColors: true, toneMapped: false }), []);
+  const goldMaterial = useMemo(() => new MeshBasicMaterial({ vertexColors: true, toneMapped: false, transparent: true, opacity: 0, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }), []);
+  useEffect(() => () => { pieceMaterial.dispose(); goldMaterial.dispose(); }, [pieceMaterial, goldMaterial]);
+  // GPU resources are intentionally imperative; React state only tracks phase labels.
+  const animationMaterials = useRef({ history: material, gold: goldMaterial });
+  const castObject = useRef<Group>(null);
+  const historyObject = useRef<Group>(null);
+  const castItem = casting ? items.find((item) => item.slab.id === casting.slabId) : undefined;
+  const castStart = useRef<number | null>(null);
+  const castPhase = useRef<CastingPhase | null>(null);
+  const castFinished = useRef(false);
   const target = useRef(new Vector3());
   const positioned = useRef(false);
   const lastMarkers = useRef('');
@@ -48,8 +71,24 @@ function Scene(props: BuildSceneProps) {
 
   useFrame(({ camera }, delta) => {
     const ortho = camera as OrthographicCamera;
-    const { targetY, zoom: desiredZoom } = cameraFrame(top, size.width, size.height, overview, focusRange);
-    const blend = reducedMotion || !positioned.current ? 1 : 1 - Math.exp(-Math.min(delta, 0.05) * 9);
+    let { targetY, zoom: desiredZoom } = cameraFrame(top, size.width, size.height, overview, focusRange);
+    if (casting && castItem) {
+      const now = performance.now();
+      castStart.current ??= now;
+      const frame = castingFrame(now - castStart.current, castItem.slab.height);
+      if (castObject.current) { castObject.current.position.y = castItem.y + frame.lift; castObject.current.scale.y = frame.scaleY; }
+      if (historyObject.current) historyObject.current.visible = frame.reveal > 0;
+      animationMaterials.current.history.transparent = true;
+      animationMaterials.current.history.opacity = frame.reveal;
+      animationMaterials.current.gold.opacity = frame.gold;
+      const isolatedY = castItem.y + 1.3 + castItem.slab.height * BASE_HEIGHT * frame.scaleY / 2;
+      targetY = isolatedY + (targetY - isolatedY) * frame.reveal;
+      desiredZoom = size.width / 4.6 + (desiredZoom - size.width / 4.6) * frame.reveal;
+      if (frame.phase !== castPhase.current) { castPhase.current = frame.phase; casting.onPhase(frame.phase); }
+      if (frame.done && !castFinished.current) { castFinished.current = true; casting.onComplete(); }
+      if (!frame.done) invalidate();
+    }
+    const blend = casting || reducedMotion || !positioned.current ? 1 : 1 - Math.exp(-Math.min(delta, 0.05) * 9);
     target.current.y += (targetY - target.current.y) * blend;
     ortho.zoom += (desiredZoom - ortho.zoom) * blend;
     // Move far enough away for very tall orthographic towers; perspective never changes.
@@ -92,6 +131,7 @@ function Scene(props: BuildSceneProps) {
   });
 
   return <>
+    <group ref={historyObject}>
     <mesh position={[0, 0, 0]}>
       <boxGeometry args={[2.22, 0.15, 2.22]} />
       <meshBasicMaterial color="#51483A" />
@@ -100,12 +140,14 @@ function Scene(props: BuildSceneProps) {
       <boxGeometry args={[2.36, 0.075, 2.36]} />
       <meshBasicMaterial color="#29231B" />
     </mesh>
-    {items.map(({ slab, y }) => <Slab key={slab.id} slab={slab} y={y} onSelect={onSelectSlab} tuning={tuning} lamination={lamination} material={material} />)}
+    {items.filter(({ slab }) => slab.id !== casting?.slabId).map(({ slab, y }) => <Slab key={slab.id} slab={slab} y={y} onSelect={onSelectSlab} tuning={tuning} lamination={lamination} material={material} />)}
+    </group>
+    {castItem && <CastingSlab slab={castItem.slab} tuning={tuning} objectRef={castObject} material={pieceMaterial} goldMaterial={goldMaterial} />}
   </>;
 }
 
 export default function BuildScene(props: BuildSceneProps) {
-  return <SceneBoundary>
+  return <SceneBoundary onError={props.onError}>
     <Canvas
       orthographic camera={{ position: [8, 6, 10], zoom: 70, near: 0.1, far: 2000 }}
       frameloop={props.paused ? 'never' : 'demand'} gl={{ antialias: true, alpha: true }}

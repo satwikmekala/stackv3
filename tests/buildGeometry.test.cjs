@@ -135,3 +135,20 @@ test('PR seams belong only to their source strata, including multiple PRs and th
     geometry.dispose();
   }
 });
+
+test('casting gold overlay contains only earned seam triangles and no workout pigment faces', () => {
+  const { createRecordSeamGeometry } = load('features/build/geometry.ts');
+  for (const record of [false, true]) {
+    const slab = model.makeObjectFixture(2, record, false, 0.35)[0];
+    const full = createSlabGeometry(slab, model.DEFAULT_TUNING, 'strata');
+    const seam = createRecordSeamGeometry(slab, model.DEFAULT_TUNING);
+    const mask = full.getAttribute('recordMask');
+    const source = full.getAttribute('position');
+    const expected = [];
+    for (let i = 0; i < mask.count; i++) if (mask.getX(i)) expected.push(source.getX(i), source.getY(i), source.getZ(i));
+    assert.deepEqual([...seam.getAttribute('position').array], expected);
+    assert.equal(expected.length > 0, record);
+    assert.ok(seam.getAttribute('position').count < source.count);
+    full.dispose(); seam.dispose();
+  }
+});

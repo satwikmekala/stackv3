@@ -1,3 +1,4 @@
+import type { CastingPhase } from './casting';
 import type { FocusRange } from './monolithModel';
 import type { BuildSlab, BuildTuning, Lamination } from './model';
 
@@ -12,6 +13,8 @@ export type BuildSceneProps = {
   lamination: Lamination;
   overview: boolean;
   paused?: boolean;
+  onError?: () => void;
+  casting?: { slabId: string; onPhase: (phase: CastingPhase) => void; onComplete: () => void };
   reducedMotion: boolean;
   benchmark: number;
   onStats: (stats: RenderStats) => void;

@@ -35,7 +35,7 @@ export default function RootLayout() {
   const inOnboarding = segments[0] === '(onboarding)';
   const inCustomSplitFlow = segments[0] === 'custom-split';
   const onSplash = pathname === '/' && segments[0] !== '(tabs)';
-  const inBuildSandbox = BUILD_SANDBOX_ENABLED && (pathname === '/build-sandbox' || pathname === '/build');
+  const inBuildSandbox = BUILD_SANDBOX_ENABLED && (pathname === '/build-sandbox' || pathname === '/build' || pathname === '/build-casting');
   const needsOnboardingRedirect =
     isHydrated &&
     !profile?.onboardingCompleted &&
@@ -139,6 +139,7 @@ export default function RootLayout() {
             animationTypeForReplace: 'pop',
           })}
         />
+        <Stack.Screen name="build-casting" options={{ headerShown: false, gestureEnabled: false, animation: 'fade' }} />
         <Stack.Screen
           name="workout-summary"
           options={({ route }) => ({

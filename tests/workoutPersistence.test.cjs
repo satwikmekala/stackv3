@@ -489,3 +489,39 @@ test('retroactive sessions do not seed swap or append exercise history', () => {
   assert.equal(h.store.getState().currentSession.exercises[1].sets[0].targetWeight, 60.5);
   h.sql.close();
 });
+
+test('casting only follows a committed completion; failure/skip/replay never duplicate saved pieces', async () => {
+  const h = harness();
+  try {
+    const { completionDestination, castingGate, once } = h.load('@/features/build/casting');
+    h.store.getState().startWorkoutFromArchetype(['push']);
+    h.store.getState().updateExerciseSet(0, 0, 8, 50);
+    h.store.getState().toggleSetCompleted(0, 0);
+    const id = h.store.getState().currentSession.id;
+    h.sql.exec("CREATE TRIGGER fail_completion BEFORE UPDATE OF completed ON sessions WHEN NEW.completed = 1 BEGIN SELECT RAISE(ABORT, 'save failed'); END;");
+    const failed = h.store.getState().completeWorkout('medium');
+    assert.equal(failed, undefined);
+    assert.equal(completionDestination(failed, true), null);
+    assert.equal(h.database.readCompletedSessionsSync().length, 0);
+    assert.equal(h.store.getState().currentSession.id, id);
+    h.sql.exec('DROP TRIGGER fail_completion');
+    const saved = h.store.getState().completeWorkout('medium');
+    assert.equal(h.database.readCompletedSessionsSync().length, 1);
+    const before = JSON.stringify(h.database.readCompletedSessionsSync());
+    const changes = h.sql.prepare('SELECT total_changes() AS count').get().count;
+    const target = completionDestination(saved, true);
+    assert.equal(target.pathname, '/build-casting');
+    assert.equal(target.params.sessionId, id);
+    assert.equal(await castingGate.claim(id, { getItem: async () => null, setItem: async () => {} }), true);
+    let summaryCalls = 0;
+    const finish = once(() => { summaryCalls++; });
+    finish(); finish(); finish();
+    assert.equal(summaryCalls, 1);
+    assert.equal(await castingGate.claim(id, { getItem: async () => null, setItem: async () => {} }), false);
+    assert.equal(h.store.getState().completeWorkout('medium'), undefined);
+    assert.equal(JSON.stringify(h.database.readCompletedSessionsSync()), before);
+    assert.equal(h.sql.prepare('SELECT total_changes() AS count').get().count, changes);
+    const { adaptBuildHistory } = h.load('@/features/build/adapter');
+    assert.equal(adaptBuildHistory(h.database.readCompletedSessionsSync(), new Clock()).state.pieces.length, 1);
+  } finally { h.sql.close(); }
+});

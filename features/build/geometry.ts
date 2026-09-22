@@ -7,6 +7,7 @@ type Point = [number, number, number];
 export function createSlabGeometry(slab: BuildSlab, tuning: BuildTuning, lamination: Lamination): BufferGeometry {
   const positions: number[] = [];
   const colors: number[] = [];
+  const recordMask: number[] = [];
   const height = slab.height * BASE_HEIGHT;
   const cut = Math.min(0.55, Math.max(0.08, tuning.chamfer));
   const perimeter: [number, number][] = [[-1, -1], [1, -1], [1, 1 - cut], [1 - cut, 1], [-1, 1]];
@@ -16,6 +17,7 @@ export function createSlabGeometry(slab: BuildSlab, tuning: BuildTuning, laminat
   const topHasRecord = layers[layers.length - 1].record;
   const triangle = (a: Point, b: Point, c: Point, color: string, light = 1) => {
     positions.push(...a, ...b, ...c);
+    recordMask.push(...Array(3).fill(color === GOLD ? 1 : 0));
     const rgb = new Color(color);
     if (color !== GOLD) {
       // Preserve category hues; richer pigment belongs to Build, not the app-wide palette.
@@ -67,8 +69,29 @@ export function createSlabGeometry(slab: BuildSlab, tuning: BuildTuning, laminat
   const geometry = new BufferGeometry();
   geometry.setAttribute('position', new Float32BufferAttribute(positions, 3));
   geometry.setAttribute('color', new Float32BufferAttribute(colors, 3));
+  geometry.setAttribute('recordMask', new Float32BufferAttribute(recordMask, 1));
   geometry.computeVertexNormals();
   geometry.computeBoundingSphere();
   geometry.computeBoundingBox();
+  return geometry;
+}
+
+/** Only the earned seams, for casting's late gold reveal over the unchanged pigment. */
+export function createRecordSeamGeometry(slab: BuildSlab, tuning: BuildTuning): BufferGeometry {
+  const full = createSlabGeometry(slab, tuning, 'strata');
+  const positions: number[] = [];
+  const colors: number[] = [];
+  const source = full.getAttribute('position');
+  const pigment = full.getAttribute('color');
+  const mask = full.getAttribute('recordMask');
+  for (let i = 0; i < source.count; i++) if (mask.getX(i)) {
+    positions.push(source.getX(i), source.getY(i), source.getZ(i));
+    colors.push(pigment.getX(i), pigment.getY(i), pigment.getZ(i));
+  }
+  full.dispose();
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new Float32BufferAttribute(colors, 3));
+  geometry.computeVertexNormals();
   return geometry;
 }
