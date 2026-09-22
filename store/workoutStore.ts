@@ -40,6 +40,7 @@ import {
   moveWorkoutSync,
   readCompletedSessionsSync,
   readCustomSplitWorkoutLabelSync,
+  readExerciseLoadTypeSync,
   readExerciseWorkoutTypeSync,
   readLastCompletedCustomWorkoutIdSync,
   readInitialWorkoutSnapshot,
@@ -84,9 +85,11 @@ export type WorkoutType = 'chest' | 'back' | 'shoulders' | 'arms' | 'legs' | 'co
 export type IntensityLevel = 'easy' | 'medium' | 'hard';
 export type ExperienceLevel = 'beginner' | 'intermediate' | 'advanced';
 export type BonusSetType = 'extra' | 'dropset' | 'pr';
+export type ExerciseLoadType = 'external_weight' | 'bodyweight';
 
 export interface Exercise {
   name: string;
+  loadType: ExerciseLoadType;
   sets: ExerciseSet[];
 }
 
@@ -248,6 +251,9 @@ const seedSplitTemplates = (): Record<WorkoutType, Exercise[]> => {
   for (const seed of SPLIT_TEMPLATE_SEEDS) {
     templates[seed.workoutType].push({
       name: seed.name,
+      loadType:
+        EXERCISE_SEEDS.find((exercise) => exercise.name === seed.name)?.loadType ??
+        'external_weight',
       sets: Array.from({ length: 3 }, () => ({
         reps: seed.targetReps,
         weight: seed.targetWeight,
@@ -598,7 +604,11 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
     if (!session) return;
     const exercises = cloneExercises(session.exercises);
     const target = exercises[exerciseIndex].sets[setIndex];
-    const updated = { ...target, reps, weight };
+    const updated = {
+      ...target,
+      reps,
+      weight: exercises[exerciseIndex].loadType === 'bodyweight' ? 0 : weight,
+    };
     updateCurrentSet(exerciseIndex, setIndex, updated);
     exercises[exerciseIndex].sets[setIndex] = updated;
     set({ currentSession: { ...session, exercises } });
@@ -611,8 +621,9 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
     const exercise = exercises[exerciseIndex];
     if (!exercise) return;
 
-    appendCurrentBonusSet(exerciseIndex, type, reps, weight);
-    exercise.sets.push({ type, reps, weight, completed: true, skipped: false });
+    const storedWeight = exercise.loadType === 'bodyweight' ? 0 : weight;
+    appendCurrentBonusSet(exerciseIndex, type, reps, storedWeight);
+    exercise.sets.push({ type, reps, weight: storedWeight, completed: true, skipped: false });
     set({ currentSession: { ...session, exercises } });
   }),
 
@@ -634,11 +645,21 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
     if (nowCompleted && nextSet && !nextSet.completed && !nextSet.skipped) {
       const profile = get().profile;
       if (!profile) throw new Error('A profile is required to progress a set');
-      const bumpKg = getWeightIncrementKg(profile);
+      const increaseBetweenSetsEnabled = profile.autoIncreaseWeight;
+      const nextReps = increaseBetweenSetsEnabled ? nextSet.reps : target.reps;
+      const nextWeight = exercises[exerciseIndex].loadType === 'bodyweight'
+        ? 0
+        : increaseBetweenSetsEnabled
+          ? target.weight + getWeightIncrementKg(profile)
+          : target.weight;
       const nextUpdated = {
         ...nextSet,
-        weight: target.weight + bumpKg,
-        targetWeight: target.weight + bumpKg,
+        reps: nextReps,
+        weight: nextWeight,
+        targetReps: increaseBetweenSetsEnabled
+          ? nextSet.targetReps
+          : target.reps,
+        targetWeight: nextWeight,
       };
       updateCurrentSet(exerciseIndex, setIndex + 1, nextUpdated);
       exercises[exerciseIndex].sets[setIndex + 1] = nextUpdated;
@@ -658,7 +679,9 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
           completed: true,
           skipped: true,
           reps: target.targetReps ?? target.reps,
-          weight: target.targetWeight ?? target.weight,
+          weight: exercises[exerciseIndex].loadType === 'bodyweight'
+            ? 0
+            : target.targetWeight ?? target.weight,
         };
 
     updateCurrentSet(exerciseIndex, setIndex, updated);
@@ -690,7 +713,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
     const templateExercise =
       readSplitTemplatesSync()[type].find((exercise) => exercise.name === name) ??
       lastExercise ??
-      makeDefaultExercise(name);
+      makeDefaultExercise(name, readExerciseLoadTypeSync(name));
     const profile = readProfileSync();
     if (!profile) throw new Error('A profile is required to swap an exercise');
     const replacement = createSessionExercise(
@@ -715,7 +738,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
     const templateExercise =
       readSplitTemplatesSync()[type].find((exercise) => exercise.name === name) ??
       lastExercise ??
-      makeDefaultExercise(name);
+      makeDefaultExercise(name, readExerciseLoadTypeSync(name));
     const profile = readProfileSync();
     if (!profile) throw new Error('A profile is required to append an exercise');
     const newExercise = createSessionExercise(

@@ -49,6 +49,7 @@ import { workoutMeta } from '@/constants/workouts';
 import {
   IntensityLevel,
   type Exercise,
+  type ExerciseLoadType,
   type ExerciseSet,
   useWorkoutStore,
 } from '@/store/workoutStore';
@@ -149,6 +150,7 @@ function SetPip({
   weight,
   reps,
   weightUnit,
+  loadType,
   accent,
   currentLabel = 'NOW',
   setNumber,
@@ -158,6 +160,7 @@ function SetPip({
   weight: number;
   reps: number;
   weightUnit: WeightUnit;
+  loadType: ExerciseLoadType;
   accent: string;
   currentLabel?: string;
   setNumber: number;
@@ -247,7 +250,13 @@ function SetPip({
           color: state === 'current' ? accent : redesignColors.ash,
         }}
       >
-        {state === 'completed' ? `${formatWeight(weight, weightUnit)}·${reps}` : state === 'current' ? currentLabel : '–'}
+        {state === 'completed'
+          ? loadType === 'bodyweight'
+            ? `${reps} reps`
+            : `${formatWeight(weight, weightUnit)}·${reps}`
+          : state === 'current'
+            ? currentLabel
+            : '–'}
       </Text>
     </>
   );
@@ -272,6 +281,7 @@ function SetProgress({
   sets,
   currentSetIndex,
   weightUnit,
+  loadType,
   accent,
   currentAccent = accent,
   currentLabel,
@@ -280,6 +290,7 @@ function SetProgress({
   sets: ExerciseSet[];
   currentSetIndex: number;
   weightUnit: WeightUnit;
+  loadType: ExerciseLoadType;
   accent: string;
   currentAccent?: string;
   currentLabel?: string;
@@ -312,6 +323,7 @@ function SetProgress({
             weight={set.weight}
             reps={set.reps}
             weightUnit={weightUnit}
+            loadType={loadType}
             accent={index === currentSetIndex ? currentAccent : accent}
             currentLabel={currentLabel}
             setNumber={index + 1}
@@ -483,14 +495,21 @@ export default function Workout() {
   );
   const exerciseComplete = isExerciseComplete(exercise);
 
+  const updateActiveSet = (reps: number, weight: number) => {
+    updateExerciseSet(
+      exerciseIndex,
+      setIndex,
+      Math.max(1, reps),
+      exercise.loadType === 'bodyweight' ? 0 : Math.max(0, weight)
+    );
+  };
+
   const handleRepsChange = (delta: number) => {
-    const newReps = Math.max(1, activeSet.reps + delta);
-    updateExerciseSet(exerciseIndex, setIndex, newReps, activeSet.weight);
+    updateActiveSet(activeSet.reps + delta, activeSet.weight);
   };
 
   const handleWeightChange = (delta: number) => {
-    const newWeight = Math.max(0, activeSet.weight + delta);
-    updateExerciseSet(exerciseIndex, setIndex, activeSet.reps, newWeight);
+    updateActiveSet(activeSet.reps, activeSet.weight + delta);
   };
 
   const handleToggleSet = () => {
@@ -826,6 +845,7 @@ export default function Workout() {
                 <BonusSetAcknowledgement
                   set={loggedBonusSet}
                   weightUnit={weightUnit}
+                  loadType={exercise.loadType}
                   onAdvance={() => {
                     setStageDirection(1);
                     setLoggedBonusSet(null);
@@ -841,6 +861,7 @@ export default function Workout() {
                     ]}
                     currentSetIndex={exercise.sets.length}
                     weightUnit={weightUnit}
+                    loadType={exercise.loadType}
                     accent={accent}
                     currentAccent={BONUS_SET_META[bonusSelection.type].color}
                     currentLabel={BONUS_SET_META[bonusSelection.type].shortTitle}
@@ -851,6 +872,7 @@ export default function Workout() {
                       selection={bonusSelection}
                       weightIncrement={weightIncrement}
                       weightUnit={weightUnit}
+                      loadType={exercise.loadType}
                       onCancel={() => {
                         setStageDirection(-1);
                         setBonusSelection(null);
@@ -877,6 +899,7 @@ export default function Workout() {
                   sets={exercise.sets}
                   nextExerciseName={nextExercise?.name}
                   weightUnit={weightUnit}
+                  loadType={exercise.loadType}
                   onAdvance={handleAdvanceExercise}
                   onEditSet={(completedSetIndex) => {
                     loggingSetRef.current = false;
@@ -895,6 +918,7 @@ export default function Workout() {
                     sets={exercise.sets}
                     currentSetIndex={setIndex}
                     weightUnit={weightUnit}
+                    loadType={exercise.loadType}
                     accent={accent}
                     onEditCompletedSet={(completedSetIndex) => {
                       loggingSetRef.current = false;
@@ -913,6 +937,7 @@ export default function Workout() {
                       setNumber={setIndex + 1}
                       reps={activeSet.reps}
                       weight={activeSet.weight}
+                      loadType={exercise.loadType}
                       weightIncrement={weightIncrement}
                       weightUnit={weightUnit}
                       onWeightUnitChange={(unit) => updateProfile({ weightUnit: unit })}
@@ -920,6 +945,8 @@ export default function Workout() {
                       accent={accent}
                       onRepsChange={handleRepsChange}
                       onWeightChange={handleWeightChange}
+                      onRepsCommit={(reps) => updateActiveSet(reps, activeSet.weight)}
+                      onWeightCommit={(weight) => updateActiveSet(activeSet.reps, weight)}
                       onLog={handleToggleSet}
                       onSkip={handleSkipSet}
                     />

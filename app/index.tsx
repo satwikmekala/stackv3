@@ -4,12 +4,12 @@ import {
   Easing,
   Image,
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 import { usePathname, useRouter } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { redesignColors, redesignFonts } from '@/constants/theme';
 import { initializeWorkoutStore, useWorkoutStore } from '@/store/workoutStore';
 

@@ -5,7 +5,7 @@ import Animated, { ReduceMotion, ZoomIn } from 'react-native-reanimated';
 import { ActiveSetCard } from '@/components/ActiveSetCard';
 import { redesignColors, redesignFonts } from '@/constants/theme';
 import { formatWeight, unitLabel, type WeightUnit } from '@/store/weightUnits';
-import type { BonusSetType } from '@/store/workoutStore';
+import type { BonusSetType, ExerciseLoadType } from '@/store/workoutStore';
 
 export type BonusSetSelection = {
   type: BonusSetType;
@@ -28,12 +28,14 @@ export function BonusSet({
   selection,
   weightIncrement,
   weightUnit,
+  loadType,
   onDone,
   onCancel,
 }: {
   selection: BonusSetSelection;
   weightIncrement: number;
   weightUnit?: WeightUnit;
+  loadType: ExerciseLoadType;
   onDone: (set: BonusSetSelection) => void;
   onCancel: () => void;
 }) {
@@ -47,6 +49,7 @@ export function BonusSet({
       badgeLabel="Bonus set"
       reps={reps}
       weight={weight}
+      loadType={loadType}
       weightIncrement={weightIncrement}
       weightUnit={weightUnit}
       accent={meta.color}
@@ -54,6 +57,8 @@ export function BonusSet({
       secondaryLabel="Cancel"
       onRepsChange={(delta) => setReps((current) => Math.max(1, current + delta))}
       onWeightChange={(delta) => setWeight((current) => Math.max(0, current + delta))}
+      onRepsCommit={setReps}
+      onWeightCommit={setWeight}
       onLog={() => onDone({ type: selection.type, reps, weight })}
       onSkip={onCancel}
     />
@@ -63,10 +68,12 @@ export function BonusSet({
 export function BonusSetAcknowledgement({
   set,
   weightUnit = 'kg',
+  loadType,
   onAdvance,
 }: {
   set: BonusSetSelection;
   weightUnit?: WeightUnit;
+  loadType: ExerciseLoadType;
   onAdvance: () => void;
 }) {
   const meta = BONUS_SET_META[set.type];
@@ -86,7 +93,11 @@ export function BonusSetAcknowledgement({
   return (
     <TouchableOpacity
       accessibilityRole="button"
-      accessibilityLabel={`Well done. ${formatWeight(set.weight, weightUnit)} ${unitLabel(weightUnit)} by ${set.reps}. Continue.`}
+      accessibilityLabel={
+        loadType === 'bodyweight'
+          ? `Well done. ${set.reps} reps. Continue.`
+          : `Well done. ${formatWeight(set.weight, weightUnit)} ${unitLabel(weightUnit)} by ${set.reps}. Continue.`
+      }
       activeOpacity={0.92}
       onPress={advanceOnce}
       style={{
@@ -140,7 +151,9 @@ export function BonusSetAcknowledgement({
           color: meta.color,
         }}
       >
-        {formatWeight(set.weight, weightUnit)} {unitLabel(weightUnit)} × {set.reps}
+        {loadType === 'bodyweight'
+          ? `${set.reps} reps`
+          : `${formatWeight(set.weight, weightUnit)} ${unitLabel(weightUnit)} × ${set.reps}`}
       </Text>
       <Text
         allowFontScaling={false}

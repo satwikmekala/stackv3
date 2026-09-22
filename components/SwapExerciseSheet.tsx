@@ -58,6 +58,7 @@ type ExerciseSwapRowProps = {
   accent: string;
   isCurrent: boolean;
   isCompleted?: boolean;
+  isAdded?: boolean;
   action?: 'navigate' | 'replace';
   isLast: boolean;
   onPress: () => void;
@@ -99,6 +100,7 @@ function ExerciseSwapRow({
   accent,
   isCurrent,
   isCompleted = false,
+  isAdded = false,
   action = 'navigate',
   isLast,
   onPress,
@@ -188,14 +190,24 @@ function ExerciseSwapRow({
           <>
             <TouchableOpacity
               accessibilityRole="button"
-              accessibilityLabel={`Add ${name} to today's workout`}
+              accessibilityLabel={
+                isAdded
+                  ? `${name} is already in today's workout`
+                  : `Add ${name} to today's workout`
+              }
+              accessibilityState={{ disabled: isAdded }}
+              disabled={isAdded}
               onPress={() => {
                 selectionFeedback();
                 onAdd?.();
               }}
               style={styles.rowIconButton}
             >
-              <Plus color={accent} size={22} strokeWidth={2.4} />
+              {isAdded ? (
+                <Check color={accent} size={21} strokeWidth={2.7} />
+              ) : (
+                <Plus color={accent} size={22} strokeWidth={2.4} />
+              )}
             </TouchableOpacity>
             <TouchableOpacity
               accessibilityRole="button"
@@ -328,7 +340,13 @@ export function SwapExerciseSheet({
   const translateY = useRef(new Animated.Value(0)).current;
   const confirmPressScale = usePressScale();
   const onCloseRef = useRef(onClose);
+  const scrollRef = useRef<ScrollView>(null);
   const scrollOffsetRef = useRef(0);
+  const otherSectionYRef = useRef<number | null>(null);
+  const pendingScrollCompensationRef = useRef<{
+    offset: number;
+    otherSectionY: number;
+  } | null>(null);
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
   const addExerciseToSplit = useWorkoutStore((state) => state.addExerciseToSplit);
   const appendExerciseToSession = useWorkoutStore((state) => state.appendExerciseToSession);
@@ -569,6 +587,41 @@ export function SwapExerciseSheet({
       selectionFeedback();
       onReplace(pendingExerciseName);
     }
+  };
+
+  const addExerciseToSession = (name: string) => {
+    if (scheduledNames.has(name)) return;
+
+    const previousExerciseCount = useWorkoutStore.getState().currentSession?.exercises.length;
+    const otherSectionY = otherSectionYRef.current;
+    pendingScrollCompensationRef.current =
+      scrollOffsetRef.current > 0 && otherSectionY !== null
+        ? { offset: scrollOffsetRef.current, otherSectionY }
+        : null;
+
+    appendExerciseToSession(name);
+
+    const updatedExercises = useWorkoutStore.getState().currentSession?.exercises;
+    const wasAdded =
+      previousExerciseCount !== undefined &&
+      updatedExercises?.length === previousExerciseCount + 1 &&
+      updatedExercises.some((exercise) => exercise.name === name);
+    if (!wasAdded) pendingScrollCompensationRef.current = null;
+  };
+
+  const handleOtherSectionLayout = (nextY: number) => {
+    const pendingCompensation = pendingScrollCompensationRef.current;
+    otherSectionYRef.current = nextY;
+    if (!pendingCompensation) return;
+
+    pendingScrollCompensationRef.current = null;
+    const insertedHeight = nextY - pendingCompensation.otherSectionY;
+    if (insertedHeight <= 0) return;
+
+    scrollRef.current?.scrollTo({
+      y: pendingCompensation.offset + insertedHeight,
+      animated: false,
+    });
   };
 
   const requestDeleteExercise = (exercise: ExerciseCatalogItem, close: () => void) => {
@@ -866,6 +919,7 @@ export function SwapExerciseSheet({
           ) : null}
 
           <ScrollView
+            ref={scrollRef}
             style={styles.scroll}
             bounces={false}
             keyboardShouldPersistTaps="handled"
@@ -881,6 +935,8 @@ export function SwapExerciseSheet({
                 TODAY&apos;S WORKOUT
               </Text>
             </View>
+            {/* Session-exercise IDs are not exposed in the UI model yet, so
+                these append-only rows currently use name + index keys. */}
             {sessionExercises.map((exercise, index) => {
               const isCurrent = index === currentExerciseIndex;
               const isCompleted = exercise.sets.every((set) => set.completed);
@@ -916,7 +972,10 @@ export function SwapExerciseSheet({
               );
             })}
 
-            <View style={[styles.sectionHeader, styles.otherSectionHeader]}>
+            <View
+              onLayout={(event) => handleOtherSectionLayout(event.nativeEvent.layout.y)}
+              style={[styles.sectionHeader, styles.otherSectionHeader]}
+            >
               <Text allowFontScaling={false} style={styles.sectionTitle}>
                 OTHER EXERCISES
               </Text>
@@ -973,13 +1032,15 @@ export function SwapExerciseSheet({
                 name={exercise.name}
                 accent={accent}
                 isCurrent={false}
+                isAdded={scheduledNames.has(exercise.name)}
                 action="replace"
                 isLast={index === otherMatches.length - 1}
                 onPress={() => chooseExercise(exercise.name)}
                 onAdd={() => {
                   try {
-                    appendExerciseToSession(exercise.name);
+                    addExerciseToSession(exercise.name);
                   } catch (error) {
+                    pendingScrollCompensationRef.current = null;
                     Alert.alert('Couldn’t Add Exercise', errorMessage(error));
                   }
                 }}
@@ -1005,7 +1066,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   backdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0, 0, 0, 0.68)',
   },
   sheet: {

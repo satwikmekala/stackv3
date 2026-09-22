@@ -5,7 +5,7 @@ import Animated from 'react-native-reanimated';
 import { BONUS_SET_META, type BonusSetSelection } from '@/components/BonusSet';
 import { redesignColors, redesignFonts } from '@/constants/theme';
 import { usePressScale } from '@/hooks/usePressScale';
-import type { ExerciseSet } from '@/store/workoutStore';
+import type { ExerciseLoadType, ExerciseSet } from '@/store/workoutStore';
 import { formatWeight, unitLabel, type WeightUnit } from '@/store/weightUnits';
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
@@ -105,11 +105,13 @@ export function ExerciseFinisher({
   onEditSet,
   onSelectBonus,
   weightUnit = 'kg',
+  loadType,
 }: {
   sets: ExerciseSet[];
   nextExerciseName?: string;
   // Display unit only — the plate/PR math below stays kg-based.
   weightUnit?: WeightUnit;
+  loadType: ExerciseLoadType;
   onAdvance: () => void;
   onEditSet: (setIndex: number) => void;
   onSelectBonus: (selection: BonusSetSelection) => void;
@@ -118,9 +120,10 @@ export function ExerciseFinisher({
   const lastSet = [...sets].reverse().find((set) => !set.type);
   const lastWeight = lastSet?.weight ?? 0;
   const lastReps = lastSet?.reps ?? 1;
-  const dropWeight = Math.max(0, roundToPlate(lastWeight * 0.8));
+  const isBodyweight = loadType === 'bodyweight';
+  const dropWeight = isBodyweight ? 0 : Math.max(0, roundToPlate(lastWeight * 0.8));
   const prJump = Math.max(2.5, roundToPlate(lastWeight * 0.1));
-  const prWeight = lastWeight + prJump;
+  const prWeight = isBodyweight ? 0 : lastWeight + prJump;
   const prReps = Math.max(1, lastReps - Math.max(2, Math.ceil(lastReps * 0.35)));
   return (
     <View>
@@ -167,7 +170,9 @@ export function ExerciseFinisher({
                 color: redesignColors.bone,
               }}
             >
-              {formatWeight(set.weight, weightUnit)} {unitLabel(weightUnit)}
+              {isBodyweight
+                ? `${set.reps} reps`
+                : `${formatWeight(set.weight, weightUnit)} ${unitLabel(weightUnit)}`}
             </Text>
             <Text
               allowFontScaling={false}
@@ -178,7 +183,7 @@ export function ExerciseFinisher({
               color: redesignColors.ash,
             }}
           >
-            × {set.reps} reps
+            {isBodyweight ? 'Completed' : `× ${set.reps} reps`}
           </Text>
           </TouchableOpacity>
         ))}
@@ -200,21 +205,27 @@ export function ExerciseFinisher({
       <View style={{ flexDirection: 'row', gap: 9 }}>
         <FinisherOption
           title="Extra Set"
-          metric={`${formatWeight(lastWeight, weightUnit)} ${unitLabel(weightUnit)} × ${lastReps}`}
+          metric={isBodyweight
+            ? `${lastReps} reps`
+            : `${formatWeight(lastWeight, weightUnit)} ${unitLabel(weightUnit)} × ${lastReps}`}
           color={BONUS_SET_META.extra.color}
           icon={<Plus color={BONUS_SET_META.extra.color} size={25} strokeWidth={2.6} />}
           onPress={() => onSelectBonus({ type: 'extra', reps: lastReps, weight: lastWeight })}
         />
         <FinisherOption
           title="Drop Set"
-          metric={`${formatWeight(dropWeight, weightUnit)} ${unitLabel(weightUnit)} × ${lastReps}`}
+          metric={isBodyweight
+            ? `${lastReps} reps`
+            : `${formatWeight(dropWeight, weightUnit)} ${unitLabel(weightUnit)} × ${lastReps}`}
           color={BONUS_SET_META.dropset.color}
           icon={<ArrowDown color={BONUS_SET_META.dropset.color} size={25} strokeWidth={2.6} />}
           onPress={() => onSelectBonus({ type: 'dropset', reps: lastReps, weight: dropWeight })}
         />
         <FinisherOption
           title="PR Attempt"
-          metric={`${formatWeight(prWeight, weightUnit)} ${unitLabel(weightUnit)} × ${prReps}`}
+          metric={isBodyweight
+            ? `${prReps} reps`
+            : `${formatWeight(prWeight, weightUnit)} ${unitLabel(weightUnit)} × ${prReps}`}
           color={BONUS_SET_META.pr.color}
           icon={<Trophy color={BONUS_SET_META.pr.color} size={23} strokeWidth={2.4} />}
           onPress={() => onSelectBonus({ type: 'pr', reps: prReps, weight: prWeight })}
