@@ -18,6 +18,7 @@ import { unitLabel, type WeightUnit } from '@/store/weightUnits';
 import { Button } from '@/components/Button';
 import { colors, fonts, redesignColors } from '@/constants/theme';
 import '@/global.css';
+import { BUILD_SANDBOX_ENABLED } from '@/features/build/config';
 
 // Supported weekly-goal range.
 const GOAL_OPTIONS = [1, 2, 3, 4, 5, 6];
@@ -446,6 +447,11 @@ export default function Settings() {
             This will clear all your workout data and return you to onboarding
           </Text>
         </View>
+        {BUILD_SANDBOX_ENABLED && (
+          <View style={{ marginTop: 24 }}>
+            <Button title="Build · Object sandbox" variant="secondary" onPress={() => router.push('/build-sandbox')} />
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );

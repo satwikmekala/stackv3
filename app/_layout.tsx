@@ -18,6 +18,7 @@ import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { ActiveWorkoutBar } from '@/components/ActiveWorkoutBar';
 import { initializeWorkoutStore, useWorkoutStore } from '@/store/workoutStore';
 import '@/global.css';
+import { BUILD_SANDBOX_ENABLED } from '@/features/build/config';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -34,11 +35,13 @@ export default function RootLayout() {
   const inOnboarding = segments[0] === '(onboarding)';
   const inCustomSplitFlow = segments[0] === 'custom-split';
   const onSplash = pathname === '/' && segments[0] !== '(tabs)';
+  const inBuildSandbox = BUILD_SANDBOX_ENABLED && pathname === '/build-sandbox';
   const needsOnboardingRedirect =
     isHydrated &&
     !profile?.onboardingCompleted &&
     !inOnboarding &&
     !inCustomSplitFlow &&
+    !inBuildSandbox &&
     !onSplash;
   const needsAppRedirect =
     isHydrated &&
