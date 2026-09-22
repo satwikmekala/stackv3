@@ -246,3 +246,52 @@ test('260 weeks retain all workouts while adapting to one mesh input per histori
   assert.equal(result.state.sealedWeeks.flatMap((week) => week.pieces).length, 1040);
   assert.ok(result.slabs.every((slab) => slab.sealed && slab.layers.length === 4));
 });
+
+test('Monolith selection maps each week onto the same slabs used by both cameras', () => {
+  const { monolithWeeks, cameraFrame } = load('features/build/monolithModel.ts');
+  const { layoutSlabs, BASE_HEIGHT } = load('features/build/model.ts');
+  const { makeMonolithDemo, MONOLITH_DEMO_NOW } = load('features/build/monolithDemo.ts');
+  for (const count of [0, 12, 104, 260]) {
+    const sessions = makeMonolithDemo(count);
+    assert.deepEqual(sessions, makeMonolithDemo(count));
+    const history = adaptBuildHistory(sessions, MONOLITH_DEMO_NOW);
+    deepFreeze(history);
+    const before = JSON.stringify(history);
+    const entries = monolithWeeks(history.state, history.slabs);
+    const { items, top } = layoutSlabs(history.slabs);
+    assert.equal(entries.length, history.state.sealedWeeks.length + 1);
+    assert.deepEqual(entries.flatMap((entry) => entry.slabIds), history.slabs.map((slab) => slab.id));
+    for (const entry of entries) {
+      const members = items.filter((item) => entry.slabIds.includes(item.slab.id));
+      if (!members.length) { assert.equal(entry.bottom, null); assert.equal(entry.top, null); continue; }
+      assert.equal(entry.bottom, members[0].y);
+      assert.equal(entry.top, members.at(-1).y + members.at(-1).slab.height * BASE_HEIGHT);
+      const range = { bottom: entry.bottom, top: entry.top };
+      for (const overview of [true, false]) {
+        const frame = cameraFrame(top, 390, 430, overview, range);
+        assert.ok(Number.isFinite(frame.zoom) && frame.zoom > 0);
+        assert.equal(frame.targetY, overview ? top / 2 : (entry.top + entry.bottom) / 2);
+      }
+    }
+    assert.equal(JSON.stringify(history), before, 'selection and cameras cannot mutate geometry or evidence');
+    if (count) {
+      assert.equal(history.state.currentWeek.pieces.length, 2);
+      assert.ok(history.state.metrics.records > 0);
+      assert.ok(history.state.sealedWeeks.length < count, 'demo includes genuine empty weeks');
+    } else {
+      assert.equal(history.slabs.length, 0);
+      assert.equal(entries.length, 1);
+      const frame = cameraFrame(top, 390, 430, false);
+      assert.ok(frame.zoom > 0 && frame.targetY >= 0);
+    }
+  }
+});
+
+test('Focus ruler retains the selected week and never overlaps label touch targets', () => {
+  const { pickRulerMarkers } = load('features/build/monolithModel.ts');
+  const markers = Array.from({ length: 12 }, (_, i) => ({ id: String(i), top: i * 20 + 25 }));
+  const visible = pickRulerMarkers(markers, '5');
+  assert.equal(visible[0].id, '5');
+  assert.ok(visible.length >= 3);
+  for (const marker of visible) for (const other of visible) if (marker !== other) assert.ok(Math.abs(marker.top - other.top) >= 44);
+});

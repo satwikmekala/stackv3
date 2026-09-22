@@ -97,7 +97,8 @@ export default function BuildSandbox() {
     <View style={styles.controls}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
         <Choice text="The object" selected={mode === 'object'} disabled={running} onPress={() => configure(() => setMode('object'))} />
-        <Choice text="The Monolith" selected={mode === 'history'} disabled={running} onPress={() => configure(() => setMode('history'))} />
+        <Choice text="Monolith screen ↗" selected={false} disabled={running} onPress={() => router.push('/build')} />
+        <Choice text="Tower fixtures" selected={mode === 'history'} disabled={running} onPress={() => configure(() => setMode('history'))} />
         <Choice text="Evidence" selected={mode === 'evidence'} disabled={running} onPress={() => configure(() => { setNow(new Date()); setMode('evidence'); })} />
       </ScrollView>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.options}>

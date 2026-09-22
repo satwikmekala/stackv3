@@ -35,7 +35,7 @@ export default function RootLayout() {
   const inOnboarding = segments[0] === '(onboarding)';
   const inCustomSplitFlow = segments[0] === 'custom-split';
   const onSplash = pathname === '/' && segments[0] !== '(tabs)';
-  const inBuildSandbox = BUILD_SANDBOX_ENABLED && pathname === '/build-sandbox';
+  const inBuildSandbox = BUILD_SANDBOX_ENABLED && (pathname === '/build-sandbox' || pathname === '/build');
   const needsOnboardingRedirect =
     isHydrated &&
     !profile?.onboardingCompleted &&

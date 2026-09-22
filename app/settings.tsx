@@ -449,6 +449,8 @@ export default function Settings() {
         </View>
         {BUILD_SANDBOX_ENABLED && (
           <View style={{ marginTop: 24 }}>
+            <Button title="Build · Monolith" variant="secondary" onPress={() => router.push('/build')} />
+            <View style={{ height: 12 }} />
             <Button title="Build · Object sandbox" variant="secondary" onPress={() => router.push('/build-sandbox')} />
           </View>
         )}

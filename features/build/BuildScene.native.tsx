@@ -3,6 +3,7 @@ import { Component, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Canvas, useFrame, useThree } from '@react-three/fiber/native';
 import { MeshBasicMaterial, OrthographicCamera, Vector3 } from 'three';
+import { cameraFrame } from './monolithModel';
 import { createSlabGeometry } from './geometry';
 import { layoutSlabs, type BuildSlab, type BuildTuning, type Lamination } from './model';
 import type { BuildSceneProps } from './sceneTypes';
@@ -18,25 +19,26 @@ class SceneBoundary extends Component<{ children: ReactNode }, { failed: boolean
   }
 }
 
-function Slab({ slab, tuning, lamination, y, material }: {
-  slab: BuildSlab; tuning: BuildTuning; lamination: Lamination; y: number; material: MeshBasicMaterial;
+function Slab({ slab, tuning, lamination, y, material, onSelect }: {
+  slab: BuildSlab; tuning: BuildTuning; lamination: Lamination; y: number; material: MeshBasicMaterial; onSelect?: (id: string) => void;
 }) {
   const geometry = useMemo(() => createSlabGeometry(slab, tuning, lamination), [slab, tuning, lamination]);
   useEffect(() => () => geometry.dispose(), [geometry]);
-  return <mesh position={[0, y, 0]} geometry={geometry} material={material} dispose={null} />;
+  return <mesh onClick={onSelect ? (event) => { event.stopPropagation(); onSelect(slab.id); } : undefined} position={[0, y, 0]} geometry={geometry} material={material} dispose={null} />;
 }
 
 function Scene(props: BuildSceneProps) {
-  const { slabs, tuning, lamination, overview, reducedMotion, benchmark, onStats } = props;
+  const { slabs, tuning, lamination, overview, reducedMotion, benchmark, onStats, focusRange, markers, onMarkers, onSelectSlab, paused } = props;
   const { size, invalidate, gl } = useThree();
   const { items, top } = useMemo(() => layoutSlabs(slabs), [slabs]);
   const material = useMemo(() => new MeshBasicMaterial({ vertexColors: true, toneMapped: false }), []);
   useEffect(() => () => material.dispose(), [material]);
   const target = useRef(new Vector3());
   const positioned = useRef(false);
+  const lastMarkers = useRef('');
   const measure = useRef<{ start: number; last: number; samples: number[] } | null>(null);
 
-  useEffect(() => { invalidate(); }, [overview, top, size, reducedMotion, invalidate]);
+  useEffect(() => { if (!paused) invalidate(); }, [overview, top, size, reducedMotion, focusRange, markers, paused, invalidate]);
   useEffect(() => {
     if (!benchmark) return;
     measure.current = { start: performance.now(), last: 0, samples: [] };
@@ -46,11 +48,8 @@ function Scene(props: BuildSceneProps) {
 
   useFrame(({ camera }, delta) => {
     const ortho = camera as OrthographicCamera;
-    const targetY = overview ? top / 2 : Math.max(0.3, top - 1.65);
-    const desiredZoom = overview
-      ? Math.min(size.width / 4.6, size.height / (top * 0.91 + 3.1))
-      : Math.min(size.width / 4.6, size.height / Math.min(top + 3.1, 6.5));
-    const blend = reducedMotion || !positioned.current ? 1 : 1 - Math.exp(-delta * 9);
+    const { targetY, zoom: desiredZoom } = cameraFrame(top, size.width, size.height, overview, focusRange);
+    const blend = reducedMotion || !positioned.current ? 1 : 1 - Math.exp(-Math.min(delta, 0.05) * 9);
     target.current.y += (targetY - target.current.y) * blend;
     ortho.zoom += (desiredZoom - ortho.zoom) * blend;
     // Move far enough away for very tall orthographic towers; perspective never changes.
@@ -58,7 +57,16 @@ function Scene(props: BuildSceneProps) {
     camera.position.set(8 * distance, target.current.y + 6 * distance, 10 * distance);
     camera.lookAt(target.current);
     ortho.updateProjectionMatrix();
+    camera.updateMatrixWorld();
     positioned.current = true;
+    if (onMarkers) {
+      const visible = overview ? [] : (markers ?? []).map((marker) => {
+        const projected = new Vector3(-1, marker.y, 1).project(camera);
+        return { id: marker.id, top: Math.round((1 - projected.y) * size.height / 2) };
+      }).filter((marker) => marker.top > 24 && marker.top < size.height - 24);
+      const signature = JSON.stringify(visible);
+      if (signature !== lastMarkers.current) { lastMarkers.current = signature; onMarkers(visible); }
+    }
     const moving = Math.abs(targetY - target.current.y) > 0.001 || Math.abs(desiredZoom - ortho.zoom) > 0.01;
     if (moving) invalidate();
 
@@ -92,7 +100,7 @@ function Scene(props: BuildSceneProps) {
       <boxGeometry args={[2.36, 0.075, 2.36]} />
       <meshBasicMaterial color="#29231B" />
     </mesh>
-    {items.map(({ slab, y }) => <Slab key={slab.id} slab={slab} y={y} tuning={tuning} lamination={lamination} material={material} />)}
+    {items.map(({ slab, y }) => <Slab key={slab.id} slab={slab} y={y} onSelect={onSelectSlab} tuning={tuning} lamination={lamination} material={material} />)}
   </>;
 }
 
@@ -100,7 +108,7 @@ export default function BuildScene(props: BuildSceneProps) {
   return <SceneBoundary>
     <Canvas
       orthographic camera={{ position: [8, 6, 10], zoom: 70, near: 0.1, far: 2000 }}
-      frameloop="demand" gl={{ antialias: true, alpha: true }}
+      frameloop={props.paused ? 'never' : 'demand'} gl={{ antialias: true, alpha: true }}
       style={styles.canvas}
     >
       <Scene {...props} />
