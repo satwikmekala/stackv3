@@ -8,6 +8,10 @@ import { redesignColors as c, redesignFonts as f } from '../../constants/theme';
 import BuildScene from './BuildScene';
 import { DEFAULT_TUNING, HEIGHTS, HISTORY_PRESETS, makeHistoryFixture, makeObjectFixture, type Lamination } from './model';
 import type { RenderStats } from './sceneTypes';
+import { useWorkoutStore } from '../../store/workoutStore';
+import { adaptBuildHistory } from './adapter';
+import { EVIDENCE_DEMO_NOW, EVIDENCE_DEMO_SESSIONS } from './evidenceDemo';
+import { EvidenceInspector } from './EvidenceInspector';
 
 function Choice({ text, selected, onPress, disabled = false }: { text: string; selected: boolean; onPress: () => void; disabled?: boolean }) {
   return <Pressable accessibilityRole="button" accessibilityState={{ selected, disabled }} disabled={disabled} onPress={onPress}
@@ -22,7 +26,12 @@ export default function BuildSandbox() {
   const [active, setActive] = useState(AppState.currentState === 'active');
   const [reducedMotion, setReducedMotion] = useState(false);
   const [tweaks, setTweaks] = useState(false);
-  const [mode, setMode] = useState<'object' | 'history'>('object');
+  const [mode, setMode] = useState<'object' | 'history' | 'evidence'>('object');
+  const sessions = useWorkoutStore((state) => state.sessions);
+  const unit = useWorkoutStore((state) => state.profile?.weightUnit ?? 'kg');
+  const [example, setExample] = useState(false);
+  const [inspect, setInspect] = useState(false);
+  const [now, setNow] = useState(() => new Date());
   const [weeks, setWeeks] = useState(10);
   const [bucket, setBucket] = useState(0);
   const [record, setRecord] = useState(false);
@@ -35,7 +44,7 @@ export default function BuildSandbox() {
   const [stats, setStats] = useState<RenderStats | null>(null);
 
   useEffect(() => {
-    const subscription = AppState.addEventListener('change', (state) => { setActive(state === 'active'); setRunning(false); setBenchmark(0); });
+    const subscription = AppState.addEventListener('change', (state) => { setActive(state === 'active'); if (state === 'active') setNow(new Date()); setRunning(false); setBenchmark(0); });
     void AccessibilityInfo.isReduceMotionEnabled().then(setReducedMotion);
     const motion = AccessibilityInfo.addEventListener('reduceMotionChanged', setReducedMotion);
     return () => { subscription.remove(); motion.remove(); };
@@ -47,12 +56,22 @@ export default function BuildSandbox() {
     return () => clearTimeout(timeout);
   }, [running]);
 
-  const slabs = useMemo(() => mode === 'history'
+  useEffect(() => {
+    if (mode !== 'evidence' || !focused || !active || running) return;
+    const timer = setInterval(() => setNow(new Date()), 60_000);
+    return () => clearInterval(timer);
+  }, [mode, focused, active, running]);
+  const history = useMemo(() => adaptBuildHistory(
+    mode === 'evidence' ? example ? EVIDENCE_DEMO_SESSIONS : sessions : [],
+    example ? EVIDENCE_DEMO_NOW : now,
+    { compressionFactor: tuning.compression },
+  ), [mode, example, sessions, now, tuning.compression]);
+  const slabs = useMemo(() => mode === 'evidence' ? history.slabs : mode === 'history'
     ? makeHistoryFixture(weeks, tuning.compression)
-    : makeObjectFixture(bucket, record, sealed, tuning.compression), [mode, weeks, bucket, record, sealed, tuning.compression]);
+    : makeObjectFixture(bucket, record, sealed, tuning.compression), [mode, history.slabs, weeks, bucket, record, sealed, tuning.compression]);
   const onStats = useCallback((result: RenderStats) => { setStats(result); setRunning(false); }, []);
   const configure = (change: () => void) => { setStats(null); setBenchmark(0); setRunning(false); change(); };
-  const title = mode === 'history' ? weeks === 0 ? 'An empty plinth.' : 'Time,\nmade tangible.' : sealed ? 'One week.\nEvery colour kept.' : record ? 'A record,\ncast in gold.' : bucket ? 'Progress has\nsubstance.' : 'You showed up.\nIt has weight.';
+  const title = mode === 'evidence' ? history.state.pieces.length ? 'Your work,\naccounted for.' : 'An empty plinth.' : mode === 'history' ? weeks === 0 ? 'An empty plinth.' : 'Time,\nmade tangible.' : sealed ? 'One week.\nEvery colour kept.' : record ? 'A record,\ncast in gold.' : bucket ? 'Progress has\nsubstance.' : 'You showed up.\nIt has weight.';
 
   return <SafeAreaView style={styles.screen}>
     <View style={styles.header}>
@@ -61,11 +80,11 @@ export default function BuildSandbox() {
       <Pressable accessibilityRole="button" accessibilityLabel="Open object tuning" disabled={running} onPress={() => setTweaks(true)} style={styles.iconButton}><SlidersHorizontal size={19} color={c.bone} /></Pressable>
     </View>
     <View style={styles.intro}>
-      <Text style={styles.kicker}>OBJECT STUDY · 01</Text>
+      <Text style={styles.kicker}>{mode === 'evidence' ? 'TRAINING EVIDENCE · 02' : 'OBJECT STUDY · 01'}</Text>
       <Text style={styles.title}>{title}</Text>
-      <Text style={styles.caption}>Development sandbox · illustrative history</Text>
+      <Text style={styles.caption}>{mode === 'evidence' && !example ? 'Development sandbox · saved history' : 'Development sandbox · illustrative history'}</Text>
     </View>
-    <View style={styles.stage} accessibilityLabel={slabs.length ? `${mode === 'history' ? `${weeks} sealed weeks and two current pieces` : 'One keyed slab'}. ${record ? 'Gold record treatment.' : ''}` : 'Empty plinth, no workout geometry'}>
+    <View style={styles.stage} accessibilityLabel={slabs.length ? `${mode === 'evidence' ? `${history.state.sealedWeeks.length} sealed weeks and ${history.state.currentWeek.pieces.length} current pieces` : mode === 'history' ? `${weeks} sealed weeks and two current pieces` : 'One keyed slab'}. ${slabs.some((slab) => slab.layers.some((layer) => layer.record)) ? 'Gold record treatment.' : ''}` : 'Empty plinth, no workout geometry'}>
       <LinearGradient colors={['#13110E', '#281B11', '#13110E']} style={StyleSheet.absoluteFill} />
       {focused && active && <BuildScene slabs={slabs} tuning={tuning} lamination={lamination} overview={overview} reducedMotion={reducedMotion} benchmark={benchmark} onStats={onStats} />}
       <View style={styles.viewControl}>
@@ -76,16 +95,20 @@ export default function BuildSandbox() {
       </View>
     </View>
     <View style={styles.controls}>
-      <View style={styles.row}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
         <Choice text="The object" selected={mode === 'object'} disabled={running} onPress={() => configure(() => setMode('object'))} />
         <Choice text="The Monolith" selected={mode === 'history'} disabled={running} onPress={() => configure(() => setMode('history'))} />
-      </View>
+        <Choice text="Evidence" selected={mode === 'evidence'} disabled={running} onPress={() => configure(() => { setNow(new Date()); setMode('evidence'); })} />
+      </ScrollView>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.options}>
-        {mode === 'object'
+        {mode === 'evidence' ? <>
+          <Choice text="Saved workouts" selected={!example} disabled={running} onPress={() => configure(() => setExample(false))} />
+          <Choice text="Example history" selected={example} disabled={running} onPress={() => configure(() => setExample(true))} />
+        </> : mode === 'object'
           ? HEIGHTS.map((height, index) => <Choice key={height} text={`${height.toFixed(2)}×`} selected={bucket === index} disabled={running || sealed} onPress={() => configure(() => setBucket(index))} />)
           : HISTORY_PRESETS.map((count) => <Choice key={count} text={`${count} wk`} selected={weeks === count} disabled={running} onPress={() => configure(() => { setWeeks(count); setOverview(true); })} />)}
       </ScrollView>
-      {mode === 'object' ? <View style={styles.switchRow}>
+      {mode === 'evidence' ? <Pressable accessibilityRole="button" disabled={running} onPress={() => setInspect(true)} style={{ minHeight: 36, justifyContent: 'center' }}><Text style={styles.label}>Inspect evidence · {history.state.metrics.workouts} {history.state.metrics.workouts === 1 ? 'workout' : 'workouts'} →</Text></Pressable> : mode === 'object' ? <View style={styles.switchRow}>
         <Text style={styles.label}>Record</Text><Switch accessibilityLabel="Gold record treatment" value={record} disabled={running} onValueChange={(value) => configure(() => setRecord(value))} trackColor={{ true: '#8E7131' }} />
         <View style={{ flex: 1 }} /><Text style={styles.label}>Sealed week</Text><Switch accessibilityLabel="Weekly composite" value={sealed} disabled={running} onValueChange={(value) => configure(() => setSealed(value))} trackColor={{ true: c.hi }} />
       </View> : <Text style={styles.note}>{weeks ? `${weeks} sealed blocks · 2 loose pieces · no hidden session meshes` : 'Nothing built in advance. The first workout creates the first piece.'}</Text>}
@@ -96,6 +119,7 @@ export default function BuildSandbox() {
         </Pressable>
       </View>
     </View>
+    <EvidenceInspector state={history.state} visible={inspect} onClose={() => setInspect(false)} unit={unit} example={example} />
     <Modal visible={tweaks} animationType={reducedMotion ? 'none' : 'slide'} presentationStyle="pageSheet" onRequestClose={() => setTweaks(false)}>
       <SafeAreaView style={styles.sheet}>
         <View style={styles.sheetHeader}><Text style={styles.sheetTitle}>Object tuning</Text><Pressable accessibilityRole="button" accessibilityLabel="Close tuning" onPress={() => setTweaks(false)} style={styles.iconButton}><X color={c.bone} size={20} /></Pressable></View>
@@ -105,7 +129,7 @@ export default function BuildSandbox() {
           <Text style={styles.sectionLabel}>KEY CORNER</Text><View style={styles.row}>{[0.14, 0.24, 0.4].map((value) => <Choice key={value} text={value.toFixed(2)} selected={tuning.chamfer === value} onPress={() => configure(() => setTuning({ ...tuning, chamfer: value }))} />)}</View>
           <Text style={styles.sectionLabel}>GOLD SEAM</Text><View style={styles.row}>{[0.012, 0.022, 0.035].map((value, index) => <Choice key={value} text={['Fine', 'Classic', 'Bold'][index]} selected={tuning.seam === value} onPress={() => configure(() => setTuning({ ...tuning, seam: value }))} />)}</View>
           <Text style={styles.sectionLabel}>WEEK COMPRESSION</Text><View style={styles.row}>{[0.25, 0.35, 0.5].map((value) => <Choice key={value} text={value.toFixed(2)} selected={tuning.compression === value} onPress={() => configure(() => setTuning({ ...tuning, compression: value }))} />)}</View>
-          <Text style={styles.note}>Tuning changes illustrative geometry only. No workouts are created or changed. Camera motion respects Reduce Motion.</Text>
+          <Text style={styles.note}>Tuning changes rendered geometry only. No workouts are created or changed. Camera motion respects Reduce Motion.</Text>
           <Choice text="Reset tuning" selected={false} onPress={() => configure(() => { setTuning(DEFAULT_TUNING); setLamination('strata-inlay'); })} />
         </ScrollView>
       </SafeAreaView>

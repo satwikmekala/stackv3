@@ -1,5 +1,6 @@
 // Run with Node 22+: node --test tests/workoutPersistence.test.cjs
 // Production store/actions and SQL, adapted to a disposable real SQLite database.
+/* global __dirname */
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const fs = require('node:fs');
@@ -61,7 +62,7 @@ function harness() {
     }).outputText;
     new Function('exports', 'require', 'testDatabase', 'Date', '__DEV__', code)(
       exports,
-      load,
+      (request) => load(request.startsWith('.') ? path.posix.normalize(path.posix.join(path.posix.dirname(id), request)) : request),
       adapter,
       Clock,
       false,
@@ -112,6 +113,34 @@ function harness() {
     });
   return { sql, adapter, database, store, load, alerts, lifts };
 }
+
+test('Build projects persisted completions identically to store history without changing SQLite', () => {
+  const h = harness();
+  try {
+    const finish = (weight) => {
+      h.store.getState().startWorkoutFromArchetype(['push']);
+      h.store.getState().updateExerciseSet(0, 0, 8, weight);
+      h.store.getState().toggleSetCompleted(0, 0);
+      return h.store.getState().completeWorkout('medium');
+    };
+    const first = finish(50);
+    h.store.getState().logArchetypeCompletedRetroactively(['push'], '2026-09-15');
+    const second = finish(55);
+    h.store.getState().startWorkoutFromArchetype(['push']); // Incomplete sessions never cast.
+    const { adaptBuildHistory } = h.load('@/features/build/adapter');
+    const saved = h.database.readCompletedSessionsSync();
+    const changes = h.sql.prepare('SELECT total_changes() AS count').get().count;
+    const result = adaptBuildHistory(saved, new Clock());
+    assert.deepEqual(result.state.pieces.map((piece) => piece.sessionId), [first.id, second.id]);
+    assert.equal(result.state.pieces[1].height, 1.15);
+    assert.equal(result.state.pieces[1].records.length, 1);
+    assert.equal(result.state.metrics.volumeKg, 840);
+    assert.deepEqual(result.state.metrics, adaptBuildHistory(h.store.getState().sessions, new Clock()).state.metrics);
+    assert.equal(h.sql.prepare('SELECT total_changes() AS count').get().count, changes);
+    h.store.getState().updateProfile({ weightUnit: 'lbs' });
+    assert.deepEqual(adaptBuildHistory(h.database.readCompletedSessionsSync(), new Clock()), result);
+  } finally { h.sql.close(); }
+});
 test('Legacy fabricated action still persists template-derived completed sets through its existing store API', () => {
   const h = harness();
   h.store.getState().logArchetypeCompletedRetroactively(['push'], '2026-09-15');

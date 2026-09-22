@@ -2,7 +2,7 @@
 
 ## Scope
 
-This branch stops at the isolated object sandbox. It does not implement evidence derivation, rewards, week reconciliation, Case, or Home integration. All sandbox history is deterministic fixture data and is never written to the workout database.
+The Stage 0–1 checkpoint delivered the isolated object sandbox with deterministic fixtures, without evidence derivation, rewards, week reconciliation, Case, or Home integration. Fixture history is never written to the workout database. The subsequent evidence engine and saved-history inspection are documented in [Stage 2](stack-build-stage-2.md).
 
 The baseline commit `abae5cd` preserves the original checkout's tracked and non-ignored untracked files, including its uncommitted app changes. Feature changes follow that snapshot on `codex/stack-build-prototype`. The original checkout remains untouched.
 

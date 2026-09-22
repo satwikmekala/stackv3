@@ -1,6 +1,6 @@
 import { splitColors } from '../../constants/theme';
 
-/** Scene inputs only. Stage 2 will adapt training evidence into this contract. */
+/** Scene inputs only. Training evidence is adapted into this contract. */
 export type BuildLayer = { color: string; height: number; record: boolean };
 export type BuildSlab = {
   id: string;
@@ -18,8 +18,8 @@ export const SLAB_GAP = 0.045;
 export const GOLD = '#FFD35A';
 export const CATEGORY_COLORS = Object.values(splitColors);
 
-export function weeklyHeight(layers: readonly BuildLayer[], compression: number): number {
-  return Math.min(2.5, Math.max(0.75, layers.reduce((sum, layer) => sum + layer.height, 0) * compression));
+export function weeklyHeight(layers: readonly BuildLayer[], compression: number, min = 0.75, max = 2.5): number {
+  return Math.min(max, Math.max(min, layers.reduce((sum, layer) => sum + layer.height, 0) * compression));
 }
 
 /** Deterministic demo data; never inserted into SQLite or the workout store. */

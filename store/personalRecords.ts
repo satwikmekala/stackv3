@@ -1,6 +1,7 @@
 import { redesignColors, splitColors } from '@/constants/theme';
 import type { ExerciseCatalogItem } from '@/store/workoutDatabase';
-import { parseSessionDate, toLocalCalendarDate, type WorkoutSession } from '@/store/workoutStore';
+import type { WorkoutSession } from '@/store/workoutStore';
+import { parseSessionDate, toLocalCalendarDate } from '@/store/workoutCalendar';
 import { getVerifiedSessions } from '@/store/verifiedSessions';
 
 export type RecordSet = {
