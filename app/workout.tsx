@@ -1,5 +1,7 @@
 import { confirmationEnter, confirmationExit, workoutMotion, workoutTiming } from '@/constants/workoutMotion';
 import { WorkoutTouchable } from '@/components/WorkoutTouchable';
+import { BUILD_SANDBOX_ENABLED } from '../features/build/config';
+import { completionDestination } from '../features/build/casting';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
@@ -615,6 +617,7 @@ export default function Workout() {
   };
 
   const handleFeedbackSelect = (intensity: IntensityLevel) => {
+    if (exitingRef.current) return;
     exitingRef.current = true;
     const completedSession = completeWorkout(intensity);
     if (!completedSession) {
@@ -622,10 +625,8 @@ export default function Workout() {
       return;
     }
     setShowFeedbackModal(false);
-    router.replace({
-      pathname: '/workout-summary',
-      params: { sessionId: completedSession.id },
-    } as Parameters<typeof router.replace>[0]);
+    const destination = completionDestination(completedSession, BUILD_SANDBOX_ENABLED)!;
+    router.replace(destination as Parameters<typeof router.replace>[0]);
   };
 
   const previousWeight = setIndex > 0 ? exercise.sets[setIndex - 1].weight : null;

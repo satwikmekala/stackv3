@@ -1,5 +1,6 @@
 // Run with Node 22+: node --test tests/workoutPersistence.test.cjs
 // Production store/actions and SQL, adapted to a disposable real SQLite database.
+/* global __dirname */
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const fs = require('node:fs');
@@ -61,7 +62,7 @@ function harness() {
     }).outputText;
     new Function('exports', 'require', 'testDatabase', 'Date', '__DEV__', code)(
       exports,
-      load,
+      (request) => load(request.startsWith('.') ? path.posix.normalize(path.posix.join(path.posix.dirname(id), request)) : request),
       adapter,
       Clock,
       false,
@@ -112,6 +113,70 @@ function harness() {
     });
   return { sql, adapter, database, store, load, alerts, lifts };
 }
+
+test('Build projects persisted completions identically to store history without changing SQLite', () => {
+  const h = harness();
+  try {
+    const finish = (weight) => {
+      h.store.getState().startWorkoutFromArchetype(['push']);
+      h.store.getState().updateExerciseSet(0, 0, 8, weight);
+      h.store.getState().toggleSetCompleted(0, 0);
+      return h.store.getState().completeWorkout('medium');
+    };
+    const first = finish(50);
+    h.store.getState().logArchetypeCompletedRetroactively(['push'], '2026-09-15');
+    const second = finish(55);
+    h.store.getState().startWorkoutFromArchetype(['push']); // Incomplete sessions never cast.
+    const { adaptBuildHistory } = h.load('@/features/build/adapter');
+    const saved = h.database.readCompletedSessionsSync();
+    const changes = h.sql.prepare('SELECT total_changes() AS count').get().count;
+    const result = adaptBuildHistory(saved, new Clock());
+    assert.deepEqual(result.state.pieces.map((piece) => piece.sessionId), [first.id, second.id]);
+    assert.equal(result.state.pieces[1].height, 1.15);
+    assert.equal(result.state.pieces[1].records.length, 1);
+    assert.equal(result.state.metrics.volumeKg, 840);
+    assert.deepEqual(result.state.metrics, adaptBuildHistory(h.store.getState().sessions, new Clock()).state.metrics);
+    assert.equal(h.sql.prepare('SELECT total_changes() AS count').get().count, changes);
+    h.store.getState().updateProfile({ weightUnit: 'lbs' });
+    assert.deepEqual(adaptBuildHistory(h.database.readCompletedSessionsSync(), new Clock()), result);
+  } finally { h.sql.close(); }
+});
+test('Build keeps a completed custom split session when the active split changes', () => {
+  const h = harness();
+  try {
+    const splitA = h.database.createCustomSplitSync('Split A');
+    const workoutA = h.database.addWorkoutToSplitSync(splitA, 'Workout A');
+    h.database.addExerciseToWorkoutSync(workoutA, h.lifts[0].id);
+    const splitB = h.database.createCustomSplitSync('Split B');
+    h.store.getState().setActiveSplit(splitA);
+    assert.equal(h.store.getState().startWorkoutFromCustomWorkout(splitA, workoutA), true);
+    h.store.getState().updateExerciseSet(0, 0, 8, 50);
+    h.store.getState().toggleSetCompleted(0, 0);
+    const completed = h.store.getState().completeWorkout('medium');
+    assert.ok(completed);
+    assert.equal(completed.customSplitId, splitA);
+    assert.equal(completed.customSplitWorkoutId, workoutA);
+
+    const project = () => {
+      const saved = h.database.readCompletedSessionsSync();
+      const historical = saved.find((item) => item.id === completed.id);
+      const piece = h.load('@/features/build/adapter')
+        .adaptBuildHistory(saved, new Clock()).state.pieces
+        .find((item) => item.sessionId === completed.id);
+      assert.ok(historical);
+      assert.ok(piece);
+      assert.equal(historical.customSplitId, splitA);
+      assert.equal(historical.customSplitWorkoutId, workoutA);
+      return piece;
+    };
+    const originalPiece = project();
+    h.store.getState().setActiveSplit(splitB);
+    assert.equal(h.store.getState().profile.activeSplitId, splitB);
+    assert.deepEqual(project(), originalPiece);
+    h.store.getState().setActiveSplit(splitA);
+    assert.deepEqual(project(), originalPiece);
+  } finally { h.sql.close(); }
+});
 test('Legacy fabricated action still persists template-derived completed sets through its existing store API', () => {
   const h = harness();
   h.store.getState().logArchetypeCompletedRetroactively(['push'], '2026-09-15');
@@ -459,4 +524,67 @@ test('retroactive sessions do not seed swap or append exercise history', () => {
   h.store.getState().appendExerciseToSession(replacementExercise.name);
   assert.equal(h.store.getState().currentSession.exercises[1].sets[0].targetWeight, 60.5);
   h.sql.close();
+});
+
+test('casting only follows a committed completion; failure/skip/replay never duplicate saved pieces', async () => {
+  const h = harness();
+  try {
+    const { completionDestination, castingGate, once } = h.load('@/features/build/casting');
+    h.store.getState().startWorkoutFromArchetype(['push']);
+    h.store.getState().updateExerciseSet(0, 0, 8, 50);
+    h.store.getState().toggleSetCompleted(0, 0);
+    const id = h.store.getState().currentSession.id;
+    h.sql.exec("CREATE TRIGGER fail_completion BEFORE UPDATE OF completed ON sessions WHEN NEW.completed = 1 BEGIN SELECT RAISE(ABORT, 'save failed'); END;");
+    const failed = h.store.getState().completeWorkout('medium');
+    assert.equal(failed, undefined);
+    assert.equal(completionDestination(failed, true), null);
+    assert.equal(h.database.readCompletedSessionsSync().length, 0);
+    assert.equal(h.store.getState().currentSession.id, id);
+    h.sql.exec('DROP TRIGGER fail_completion');
+    const saved = h.store.getState().completeWorkout('medium');
+    assert.equal(h.database.readCompletedSessionsSync().length, 1);
+    const before = JSON.stringify(h.database.readCompletedSessionsSync());
+    const changes = h.sql.prepare('SELECT total_changes() AS count').get().count;
+    const target = completionDestination(saved, true);
+    assert.equal(target.pathname, '/build-casting');
+    assert.equal(target.params.sessionId, id);
+    assert.equal(await castingGate.claim(id, { getItem: async () => null, setItem: async () => {} }), true);
+    let summaryCalls = 0;
+    const finish = once(() => { summaryCalls++; });
+    finish(); finish(); finish();
+    assert.equal(summaryCalls, 1);
+    assert.equal(await castingGate.claim(id, { getItem: async () => null, setItem: async () => {} }), false);
+    assert.equal(h.store.getState().completeWorkout('medium'), undefined);
+    assert.equal(JSON.stringify(h.database.readCompletedSessionsSync()), before);
+    assert.equal(h.sql.prepare('SELECT total_changes() AS count').get().count, changes);
+    const { adaptBuildHistory } = h.load('@/features/build/adapter');
+    assert.equal(adaptBuildHistory(h.database.readCompletedSessionsSync(), new Clock()).state.pieces.length, 1);
+  } finally { h.sql.close(); }
+});
+
+test('weekly presentation markers never write workout data and relaunch keeps the same sealed history', async () => {
+  const h = harness();
+  try {
+    h.store.getState().startWorkoutFromArchetype(['push']);
+    h.store.getState().updateExerciseSet(0, 0, 8, 50);
+    h.store.getState().toggleSetCompleted(0, 0);
+    h.store.getState().completeWorkout('medium');
+    const { adaptBuildHistory } = h.load('@/features/build/adapter');
+    const { createFusionCoordinator } = h.load('@/features/build/fusion');
+    let marker = null;
+    const storage = { getItem: async () => marker, setItem: async (_, value) => { marker = value; } };
+    const coordinator = createFusionCoordinator(storage);
+    const sessions = h.database.readCompletedSessionsSync();
+    const before = JSON.stringify(sessions);
+    const changes = h.sql.prepare('SELECT total_changes() AS count').get().count;
+    assert.equal(await coordinator.reconcile(adaptBuildHistory(sessions, new Clock()).state), null);
+    const later = adaptBuildHistory(sessions, new Date(2026, 9, 12, 12));
+    assert.equal(await coordinator.reconcile(later.state), 'week:2026-09-14');
+    assert.equal(await createFusionCoordinator(storage).reconcile(later.state), null);
+    assert.deepEqual(adaptBuildHistory(h.database.readCompletedSessionsSync(), new Date(2026, 9, 12, 12)), later);
+    assert.equal(JSON.stringify(h.database.readCompletedSessionsSync()), before);
+    assert.equal(h.sql.prepare('SELECT total_changes() AS count').get().count, changes);
+    assert.equal(later.state.sealedWeeks.length, 1);
+    assert.equal(later.state.sealedWeeks[0].pieces.length, 1);
+  } finally { h.sql.close(); }
 });

@@ -43,7 +43,12 @@ import { resolveNextCustomWorkoutIndex } from '@/store/customSplitRotation';
 import { toLocalCalendarDate, useWorkoutStore } from '@/store/workoutStore';
 import { resumeWorkout } from '@/utils/workoutResume';
 import type { WorkoutLaunchOrigin } from '@/utils/workoutLaunch';
+import { BUILD_SANDBOX_ENABLED } from '@/features/build/config';
 import '@/global.css';
+
+// Keep experimental Build and its dependencies off the normal Home startup path.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const BuildHome = BUILD_SANDBOX_ENABLED ? require('@/features/build/BuildHome').default : null;
 
 const DAY_LABELS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
 const MONTH_LABELS = [
@@ -87,6 +92,9 @@ function buildHomeEnter(delay: number) {
 const HEADER_ENTER = buildHomeEnter(0);
 const HERO_ENTER = buildHomeEnter(80);
 const CHANGE_BUTTON_ENTER = buildHomeEnter(150);
+// Build's card sits between the change button and the split card in the entrance sequence.
+const BUILD_CARD_DELAY = 195;
+const BUILD_CARD_ENTER = buildHomeEnter(BUILD_CARD_DELAY);
 const SPLIT_CARD_ENTER = buildHomeEnter(240);
 
 // The 6.1-inch and 6.3-inch phones are close in width but have meaningfully
@@ -437,9 +445,9 @@ export default function Home() {
       />
 
       <ScrollView
-        // Home is a fixed dashboard; sizing above keeps all controls visible
-        // without exposing a draggable content surface.
-        scrollEnabled={false}
+        // Build adds secondary content below the existing workout controls.
+        // Allow it to scroll clear of the floating tabs when enabled.
+        scrollEnabled={BUILD_SANDBOX_ENABLED}
         bounces={false}
         contentContainerStyle={[
           styles.scrollContent,
@@ -551,6 +559,13 @@ export default function Home() {
             </Text>
           </Pressable>
         </Animated.View>
+
+        {BuildHome && (
+          <BuildHome
+            entering={shouldAnimateHomeEntrance ? BUILD_CARD_ENTER : undefined}
+            previewDelayMs={shouldAnimateHomeEntrance ? BUILD_CARD_DELAY + motionDuration.entrance : 0}
+          />
+        )}
 
         <Animated.View
           entering={shouldAnimateHomeEntrance ? SPLIT_CARD_ENTER : undefined}
