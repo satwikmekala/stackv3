@@ -2,22 +2,25 @@ import React, { useState } from 'react';
 import {
   View,
   Text,
-  SafeAreaView,
   ScrollView,
   TextInput,
   Alert,
+  Platform,
   Pressable,
   Switch,
   TouchableOpacity,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { X } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { useWorkoutStore } from '@/store/workoutStore';
 import { unitLabel, type WeightUnit } from '@/store/weightUnits';
 import { Button } from '@/components/Button';
 import { colors, fonts, redesignColors } from '@/constants/theme';
+import { TestLiveActivityControls } from '@/components/dev/TestLiveActivityControls';
 import '@/global.css';
+import { BUILD_SANDBOX_ENABLED } from '@/features/build/config';
 
 // Supported weekly-goal range.
 const GOAL_OPTIONS = [1, 2, 3, 4, 5, 6];
@@ -133,8 +136,8 @@ export default function Settings() {
     );
   };
 
-  const handleAutoIncreaseWeightChange = (autoIncreaseWeight: boolean) => {
-    updateProfile({ autoIncreaseWeight });
+  const handleIncreaseBetweenSetsChange = (increaseBetweenSetsEnabled: boolean) => {
+    updateProfile({ autoIncreaseWeight: increaseBetweenSetsEnabled });
   };
 
   const handleReset = () => {
@@ -392,7 +395,7 @@ export default function Settings() {
                 marginBottom: 4,
               }}
             >
-              Auto-increase Weight
+              Increase Between Sets
             </Text>
             <Text
               style={{
@@ -401,19 +404,21 @@ export default function Settings() {
                 color: colors.ash,
               }}
             >
-              Raise next session&apos;s target after you hit your reps
+              When enabled, Stack automatically increases your target during consecutive sets of the same exercise.
             </Text>
           </View>
           <Switch
-            accessibilityLabel="Auto-increase weight"
-            accessibilityHint="Raises next session's target weight after you hit your reps"
+            accessibilityLabel="Increase Between Sets"
+            accessibilityHint="Automatically increases your target during consecutive sets of the same exercise"
             value={profile.autoIncreaseWeight}
-            onValueChange={handleAutoIncreaseWeightChange}
+            onValueChange={handleIncreaseBetweenSetsChange}
             trackColor={{ false: colors.surfaceRaised, true: redesignColors.accent }}
             thumbColor={colors.bone}
             ios_backgroundColor={colors.surfaceRaised}
           />
         </View>
+
+        {__DEV__ && Platform.OS === 'ios' && <TestLiveActivityControls />}
 
         {/* Danger zone — moved as-is from the old Profile */}
         <View
@@ -446,6 +451,13 @@ export default function Settings() {
             This will clear all your workout data and return you to onboarding
           </Text>
         </View>
+        {BUILD_SANDBOX_ENABLED && (
+          <View style={{ marginTop: 24 }}>
+            <Button title="Build · Monolith" variant="secondary" onPress={() => router.push('/build')} />
+            <View style={{ height: 12 }} />
+            <Button title="Build · Object sandbox" variant="secondary" onPress={() => router.push('/build-sandbox')} />
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );

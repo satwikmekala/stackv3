@@ -5,8 +5,8 @@ import {
 } from 'react-native';
 import { ARCHETYPE_COMPOSITIONS } from '@/constants/archetypes';
 import { redesignColors, redesignFonts, workoutLoggingColors } from '@/constants/theme';
-import type { WorkoutSession } from '@/store/workoutStore';
-import { getInitialExerciseIndex } from '@/utils/workoutResume';
+import { useWorkoutStore, type WorkoutSession } from '@/store/workoutStore';
+import { getCurrentWorkoutExerciseIndex } from '@/utils/workoutResume';
 
 export function ActiveWorkoutCard({ session, onPress, onLayout, style }: {
   session: WorkoutSession;
@@ -14,7 +14,8 @@ export function ActiveWorkoutCard({ session, onPress, onLayout, style }: {
   onLayout?: (event: LayoutChangeEvent) => void;
   style?: StyleProp<ViewStyle>;
 }) {
-  const exercise = session.exercises[getInitialExerciseIndex(session.exercises)];
+  const workoutFocus = useWorkoutStore((state) => state.workoutFocus);
+  const exercise = session.exercises[getCurrentWorkoutExerciseIndex(session, workoutFocus)];
   const nextSetIndex = exercise?.sets.findIndex((set) => !set.completed) ?? -1;
   const progress = nextSetIndex >= 0
     ? `Set ${nextSetIndex + 1} of ${exercise.sets.length}`

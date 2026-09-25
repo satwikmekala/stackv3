@@ -1,3 +1,5 @@
+import Animated from 'react-native-reanimated';
+import { recordReveal } from '@/constants/workoutMotion';
 import { useMemo } from 'react';
 import { Platform, Pressable, SectionList, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -78,11 +80,12 @@ export default function RecordDetail() {
         renderSectionHeader={({ section }) => (
           <View style={styles.dateHeader}>
             <Text accessibilityRole="header" style={styles.dateText}>{formatRecordDate(section.date, true)}</Text>
-            {section.hasPR ? <Text accessibilityLabel="Personal record set on this date" style={styles.prLabel}>PR</Text> : null}
+            {section.hasPR ? <Animated.Text entering={recordReveal} accessibilityLabel="Personal record set on this date" style={styles.prLabel}>PR</Animated.Text> : null}
           </View>
         )}
         renderItem={({ item, index, section }) => (
-          <View
+          <Animated.View
+            entering={item.isPR ? recordReveal : undefined}
             accessibilityLabel={`Set ${item.setIndex + 1}, ${item.weight === 0 ? 'bodyweight' : `${formatWeight(item.weight, weightUnit)} ${unitLabel(weightUnit)}`}, ${item.reps} reps${item.isPR ? ', personal record' : ''}`}
             style={[styles.setRow, index < section.data.length - 1 && styles.setBorder]}>
             <Text style={[styles.setLabel, item.isPR && styles.accent]}>SET {item.setIndex + 1}</Text>
@@ -91,7 +94,7 @@ export default function RecordDetail() {
               {item.weight !== 0 ? <Text style={item.isPR ? styles.accent : styles.muted}> {unitLabel(weightUnit)}</Text> : null}
             </Text>
             <Text style={[styles.setReps, item.isPR && styles.accent]}>× {item.reps}</Text>
-          </View>
+          </Animated.View>
         )}
         renderSectionFooter={() => <View style={styles.groupGap} />}
         ListEmptyComponent={

@@ -1,3 +1,4 @@
+import { WorkoutTouchable } from '@/components/WorkoutTouchable';
 import { useEffect, useMemo, useRef } from 'react';
 import {
   Animated,
@@ -7,7 +8,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TouchableOpacity,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -169,7 +169,7 @@ export function UpNextSheet({
                 : accent;
 
               return (
-                <TouchableOpacity
+                <WorkoutTouchable
                   key={`${exercise.name}-${index}`}
                   accessibilityRole="button"
                   accessibilityLabel={`${exercise.name}, ${exercise.sets.length} ${
@@ -188,7 +188,7 @@ export function UpNextSheet({
                     {exercise.sets.length} {exercise.sets.length === 1 ? 'SET' : 'SETS'}
                   </Text>
                   <ChevronRight color={redesignColors.ashDim} size={18} />
-                </TouchableOpacity>
+                </WorkoutTouchable>
               );
             })}
           </ScrollView>
@@ -204,7 +204,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   backdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0, 0, 0, 0.68)',
   },
   sheet: {

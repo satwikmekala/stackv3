@@ -13,6 +13,7 @@ import type {
 import type {
   BonusSetType,
   Exercise,
+  ExerciseLoadType,
   ExerciseSet,
   ExperienceLevel,
   IntensityLevel,
@@ -30,7 +31,7 @@ import {
 } from '@/store/workoutProgression';
 
 const DATABASE_NAME = 'workouts.db';
-const CURRENT_SCHEMA_VERSION = 13;
+const CURRENT_SCHEMA_VERSION = 14;
 
 // Kg-native step assigned only when a brand-new profile is created. Legacy
 // profiles that predate this column retain the historical 2.5 kg migration
@@ -49,7 +50,20 @@ export interface ExerciseSeed {
   workoutType: WorkoutType;
   primaryMuscle: string;
   secondaryMuscle: string | null;
+  loadType: ExerciseLoadType;
 }
+
+type ExerciseSeedDefinition = Omit<ExerciseSeed, 'loadType'> & {
+  loadType?: ExerciseLoadType;
+};
+
+const defineExerciseSeeds = (
+  seeds: ExerciseSeedDefinition[]
+): ExerciseSeed[] =>
+  seeds.map((seed) => ({
+    ...seed,
+    loadType: seed.loadType ?? 'external_weight',
+  }));
 
 export interface SplitTemplateSeed {
   workoutType: WorkoutType;
@@ -74,15 +88,16 @@ export interface ExerciseCatalogItem {
   primaryMuscle: string;
   isCustom: boolean;
   equipment: string | null;
+  loadType: ExerciseLoadType;
 }
 
-export const EXERCISE_SEEDS: ExerciseSeed[] = [
+export const EXERCISE_SEEDS: ExerciseSeed[] = defineExerciseSeeds([
   { name: 'Bench Press', workoutType: 'chest', primaryMuscle: 'Chest', secondaryMuscle: 'Triceps, Front Delts' },
   { name: 'Incline Dumbbell Press', workoutType: 'chest', primaryMuscle: 'Upper Chest', secondaryMuscle: 'Front Delts, Triceps' },
-  { name: 'Chest Dips', workoutType: 'chest', primaryMuscle: 'Lower Chest, Triceps', secondaryMuscle: 'Front Delts' },
+  { name: 'Chest Dips', workoutType: 'chest', primaryMuscle: 'Lower Chest, Triceps', secondaryMuscle: 'Front Delts', loadType: 'bodyweight' },
   { name: 'Cable Fly', workoutType: 'chest', primaryMuscle: 'Chest', secondaryMuscle: 'Front Delts' },
   { name: 'Incline Bench Press', workoutType: 'chest', primaryMuscle: 'Upper Chest', secondaryMuscle: 'Front Delts, Triceps' },
-  { name: 'Push-ups', workoutType: 'chest', primaryMuscle: 'Chest', secondaryMuscle: 'Triceps, Front Delts, Core' },
+  { name: 'Push-ups', workoutType: 'chest', primaryMuscle: 'Chest', secondaryMuscle: 'Triceps, Front Delts, Core', loadType: 'bodyweight' },
   { name: 'Pec Deck', workoutType: 'chest', primaryMuscle: 'Chest', secondaryMuscle: null },
   { name: 'Decline Press', workoutType: 'chest', primaryMuscle: 'Lower Chest', secondaryMuscle: 'Triceps' },
   { name: 'Machine Chest Press', workoutType: 'chest', primaryMuscle: 'Chest', secondaryMuscle: 'Triceps' },
@@ -96,12 +111,13 @@ export const EXERCISE_SEEDS: ExerciseSeed[] = [
   { name: 'Smith Machine Bench Press', workoutType: 'chest', primaryMuscle: 'Chest', secondaryMuscle: 'Triceps, Front Delts' },
   { name: 'Smith Machine Incline Press', workoutType: 'chest', primaryMuscle: 'Chest', secondaryMuscle: 'Triceps, Front Delts' },
   { name: 'Decline Dumbbell Press', workoutType: 'chest', primaryMuscle: 'Chest', secondaryMuscle: 'Triceps, Front Delts' },
+  { name: 'Decline Dumbbell Fly', workoutType: 'chest', primaryMuscle: 'Lower Chest', secondaryMuscle: 'Front Delts' },
   { name: 'Incline Machine Chest Press', workoutType: 'chest', primaryMuscle: 'Chest', secondaryMuscle: 'Triceps, Front Delts' },
   { name: 'Flat Machine Chest Press', workoutType: 'chest', primaryMuscle: 'Chest', secondaryMuscle: 'Triceps' },
   { name: 'Svend Press', workoutType: 'chest', primaryMuscle: 'Chest', secondaryMuscle: 'Front Delts, Triceps' },
 
   { name: 'Deadlift', workoutType: 'back', primaryMuscle: 'Back, Hamstrings, Glutes', secondaryMuscle: 'Traps, Forearms' },
-  { name: 'Pull-ups', workoutType: 'back', primaryMuscle: 'Lats', secondaryMuscle: 'Biceps' },
+  { name: 'Pull-ups', workoutType: 'back', primaryMuscle: 'Lats', secondaryMuscle: 'Biceps', loadType: 'bodyweight' },
   { name: 'Barbell Rows', workoutType: 'back', primaryMuscle: 'Lats, Mid-back', secondaryMuscle: 'Biceps, Rear Delts' },
   { name: 'Lat Pulldown', workoutType: 'back', primaryMuscle: 'Lats', secondaryMuscle: 'Biceps' },
   { name: 'Seated Cable Row', workoutType: 'back', primaryMuscle: 'Mid-back, Lats', secondaryMuscle: 'Biceps' },
@@ -110,7 +126,7 @@ export const EXERCISE_SEEDS: ExerciseSeed[] = [
   { name: 'Back Extensions', workoutType: 'back', primaryMuscle: 'Lower Back', secondaryMuscle: 'Glutes, Hamstrings' },
   { name: 'Chest-Supported Row', workoutType: 'back', primaryMuscle: 'Mid-back', secondaryMuscle: 'Rear Delts, Biceps' },
   { name: 'Straight-Arm Pulldown', workoutType: 'back', primaryMuscle: 'Lats', secondaryMuscle: null },
-  { name: 'Chin-ups', workoutType: 'back', primaryMuscle: 'Back', secondaryMuscle: 'Biceps' },
+  { name: 'Chin-ups', workoutType: 'back', primaryMuscle: 'Back', secondaryMuscle: 'Biceps', loadType: 'bodyweight' },
   { name: 'Wide-Grip Lat Pulldown', workoutType: 'back', primaryMuscle: 'Back', secondaryMuscle: 'Biceps' },
   { name: 'Close-Grip Lat Pulldown', workoutType: 'back', primaryMuscle: 'Back', secondaryMuscle: 'Biceps' },
   { name: 'Neutral-Grip Lat Pulldown', workoutType: 'back', primaryMuscle: 'Back', secondaryMuscle: 'Biceps' },
@@ -123,7 +139,7 @@ export const EXERCISE_SEEDS: ExerciseSeed[] = [
   { name: 'Cable Pullover', workoutType: 'back', primaryMuscle: 'Back', secondaryMuscle: null },
   { name: 'Seal Row', workoutType: 'back', primaryMuscle: 'Back', secondaryMuscle: 'Biceps, Rear Delts' },
   { name: 'Rack Pull', workoutType: 'back', primaryMuscle: 'Back', secondaryMuscle: 'Glutes, Hamstrings, Traps' },
-  { name: 'Inverted Row', workoutType: 'back', primaryMuscle: 'Back', secondaryMuscle: 'Biceps, Rear Delts' },
+  { name: 'Inverted Row', workoutType: 'back', primaryMuscle: 'Back', secondaryMuscle: 'Biceps, Rear Delts', loadType: 'bodyweight' },
 
   { name: 'Overhead Press', workoutType: 'shoulders', primaryMuscle: 'Front/Side Delts', secondaryMuscle: 'Triceps' },
   { name: 'Lateral Raises', workoutType: 'shoulders', primaryMuscle: 'Side Delts', secondaryMuscle: null },
@@ -154,7 +170,7 @@ export const EXERCISE_SEEDS: ExerciseSeed[] = [
   { name: 'Preacher Curls', workoutType: 'arms', primaryMuscle: 'Biceps', secondaryMuscle: null },
   { name: 'Cable Curls', workoutType: 'arms', primaryMuscle: 'Biceps', secondaryMuscle: null },
   { name: 'Tricep Extensions', workoutType: 'arms', primaryMuscle: 'Triceps', secondaryMuscle: null },
-  { name: 'Tricep Dips', workoutType: 'arms', primaryMuscle: 'Triceps', secondaryMuscle: 'Chest, Front Delts' },
+  { name: 'Tricep Dips', workoutType: 'arms', primaryMuscle: 'Triceps', secondaryMuscle: 'Chest, Front Delts', loadType: 'bodyweight' },
   { name: 'Tricep Pushdown', workoutType: 'arms', primaryMuscle: 'Triceps', secondaryMuscle: null },
   { name: 'Skull Crushers', workoutType: 'arms', primaryMuscle: 'Triceps', secondaryMuscle: null },
   { name: 'Close-Grip Bench Press', workoutType: 'arms', primaryMuscle: 'Triceps', secondaryMuscle: 'Chest' },
@@ -202,7 +218,7 @@ export const EXERCISE_SEEDS: ExerciseSeed[] = [
   { name: 'Walking Dumbbell Lunge', workoutType: 'legs', primaryMuscle: 'Legs', secondaryMuscle: 'Glutes' },
   { name: 'Seated Leg Curl', workoutType: 'legs', primaryMuscle: 'Legs', secondaryMuscle: null },
   { name: 'Lying Leg Curl', workoutType: 'legs', primaryMuscle: 'Legs', secondaryMuscle: null },
-  { name: 'Nordic Hamstring Curl', workoutType: 'legs', primaryMuscle: 'Legs', secondaryMuscle: null },
+  { name: 'Nordic Hamstring Curl', workoutType: 'legs', primaryMuscle: 'Legs', secondaryMuscle: null, loadType: 'bodyweight' },
   { name: 'Single-Leg Curl', workoutType: 'legs', primaryMuscle: 'Legs', secondaryMuscle: null },
   { name: 'Adductor Machine', workoutType: 'legs', primaryMuscle: 'Legs', secondaryMuscle: null },
   { name: 'Abductor Machine', workoutType: 'legs', primaryMuscle: 'Legs', secondaryMuscle: null },
@@ -215,32 +231,32 @@ export const EXERCISE_SEEDS: ExerciseSeed[] = [
   { name: 'Pendulum Squat', workoutType: 'legs', primaryMuscle: 'Legs', secondaryMuscle: 'Glutes' },
   { name: 'Single-Leg Press', workoutType: 'legs', primaryMuscle: 'Legs', secondaryMuscle: 'Glutes' },
 
-  { name: 'Plank', workoutType: 'core', primaryMuscle: 'Abs / Core Stability', secondaryMuscle: null },
-  { name: 'Crunches', workoutType: 'core', primaryMuscle: 'Abs', secondaryMuscle: null },
+  { name: 'Plank', workoutType: 'core', primaryMuscle: 'Abs / Core Stability', secondaryMuscle: null, loadType: 'bodyweight' },
+  { name: 'Crunches', workoutType: 'core', primaryMuscle: 'Abs', secondaryMuscle: null, loadType: 'bodyweight' },
   { name: 'Cable Crunch', workoutType: 'core', primaryMuscle: 'Abs', secondaryMuscle: null },
-  { name: 'Hanging Leg Raise', workoutType: 'core', primaryMuscle: 'Abs', secondaryMuscle: 'Hip Flexors' },
-  { name: 'Leg Raises', workoutType: 'core', primaryMuscle: 'Lower Abs', secondaryMuscle: 'Hip Flexors' },
+  { name: 'Hanging Leg Raise', workoutType: 'core', primaryMuscle: 'Abs', secondaryMuscle: 'Hip Flexors', loadType: 'bodyweight' },
+  { name: 'Leg Raises', workoutType: 'core', primaryMuscle: 'Lower Abs', secondaryMuscle: 'Hip Flexors', loadType: 'bodyweight' },
   { name: 'Russian Twists', workoutType: 'core', primaryMuscle: 'Obliques', secondaryMuscle: null },
-  { name: 'Ab Wheel Rollout', workoutType: 'core', primaryMuscle: 'Abs', secondaryMuscle: 'Lower Back, Shoulders' },
-  { name: 'Mountain Climbers', workoutType: 'core', primaryMuscle: 'Abs', secondaryMuscle: 'Hip Flexors' },
-  { name: 'Side Plank', workoutType: 'core', primaryMuscle: 'Obliques', secondaryMuscle: null },
+  { name: 'Ab Wheel Rollout', workoutType: 'core', primaryMuscle: 'Abs', secondaryMuscle: 'Lower Back, Shoulders', loadType: 'bodyweight' },
+  { name: 'Mountain Climbers', workoutType: 'core', primaryMuscle: 'Abs', secondaryMuscle: 'Hip Flexors', loadType: 'bodyweight' },
+  { name: 'Side Plank', workoutType: 'core', primaryMuscle: 'Obliques', secondaryMuscle: null, loadType: 'bodyweight' },
   { name: 'Cable Woodchopper', workoutType: 'core', primaryMuscle: 'Obliques', secondaryMuscle: 'Core Rotation' },
-  { name: 'Hanging Knee Raise', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: 'Hip Flexors' },
-  { name: 'Reverse Crunch', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: null },
-  { name: 'Bicycle Crunch', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: 'Hip Flexors' },
-  { name: 'Dead Bug', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: null },
+  { name: 'Hanging Knee Raise', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: 'Hip Flexors', loadType: 'bodyweight' },
+  { name: 'Reverse Crunch', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: null, loadType: 'bodyweight' },
+  { name: 'Bicycle Crunch', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: 'Hip Flexors', loadType: 'bodyweight' },
+  { name: 'Dead Bug', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: null, loadType: 'bodyweight' },
   { name: 'Pallof Press', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: 'Shoulders' },
-  { name: 'V-Ups', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: 'Hip Flexors' },
-  { name: 'Hollow Body Hold', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: null },
-  { name: 'Decline Crunch', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: null },
+  { name: 'V-Ups', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: 'Hip Flexors', loadType: 'bodyweight' },
+  { name: 'Hollow Body Hold', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: null, loadType: 'bodyweight' },
+  { name: 'Decline Crunch', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: null, loadType: 'bodyweight' },
   { name: 'Ab Crunch Machine', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: null },
-  { name: 'Toe Touches', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: null },
+  { name: 'Toe Touches', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: null, loadType: 'bodyweight' },
   { name: 'Kneeling Cable Crunch', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: null },
   { name: 'Weighted Sit-Up', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: null },
-  { name: 'Bird Dog', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: 'Glutes' },
+  { name: 'Bird Dog', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: 'Glutes', loadType: 'bodyweight' },
   { name: 'Suitcase Carry', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: 'Forearms' },
   { name: 'Farmer Carry', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: 'Forearms, Traps' },
-];
+]);
 
 export const SPLIT_TEMPLATE_SEEDS: SplitTemplateSeed[] = [
   { workoutType: 'chest', name: 'Bench Press', targetReps: 8, targetWeight: 40 },
@@ -345,12 +361,12 @@ const ARCHETYPE_TEMPLATE_SEEDS: ArchetypeTemplateSeed[] = [
   { archetype: 'full_body', variant: 'c', exerciseName: 'Calf Raise', matchingExerciseName: 'Calf Raises', targetReps: 15, targetWeight: 40 },
 ];
 
-const ARCHETYPE_EXERCISE_SEEDS: ExerciseSeed[] = [
+const ARCHETYPE_EXERCISE_SEEDS: ExerciseSeed[] = defineExerciseSeeds([
   { name: 'Back Squat', workoutType: 'legs', primaryMuscle: 'Quads, Glutes', secondaryMuscle: 'Core' },
   { name: 'Barbell Curl', workoutType: 'arms', primaryMuscle: 'Biceps', secondaryMuscle: 'Forearms' },
   { name: 'Walking Lunge', workoutType: 'legs', primaryMuscle: 'Quads, Glutes', secondaryMuscle: 'Hamstrings' },
   { name: 'Overhead Triceps Extension', workoutType: 'arms', primaryMuscle: 'Triceps', secondaryMuscle: null },
-];
+]);
 
 export const WORKOUT_DATABASE_SCHEMA = `
 PRAGMA foreign_keys = ON;
@@ -362,7 +378,9 @@ CREATE TABLE IF NOT EXISTS exercises (
   primary_muscle TEXT NOT NULL,
   secondary_muscle TEXT,
   is_custom INTEGER NOT NULL DEFAULT 0,
-  equipment TEXT
+  equipment TEXT,
+  load_type TEXT NOT NULL DEFAULT 'external_weight'
+    CHECK (load_type IN ('external_weight', 'bodyweight'))
 );
 
 CREATE TABLE IF NOT EXISTS custom_splits (
@@ -511,6 +529,7 @@ interface SessionJoinRow {
   session_retroactive: number;
   session_exercise_id: number | null;
   exercise_name: string | null;
+  exercise_load_type: ExerciseLoadType | null;
   exercise_position: number | null;
   set_id: number | null;
   set_index: number | null;
@@ -526,12 +545,14 @@ interface SessionJoinRow {
 interface SplitTemplateRow {
   workout_type: WorkoutType;
   name: string;
+  load_type: ExerciseLoadType;
   target_reps: number;
   target_weight: number;
 }
 
 interface ArchetypeTemplateRow {
   name: string;
+  load_type: ExerciseLoadType;
   target_reps: number;
   target_weight: number;
 }
@@ -551,6 +572,7 @@ interface ExerciseCatalogRow {
   primary_muscle: string;
   is_custom: number;
   equipment: string | null;
+  load_type: ExerciseLoadType;
 }
 
 interface PositionedIdRow {
@@ -584,6 +606,7 @@ interface CustomSplitDetailRow {
   exercise_name: string | null;
   primary_muscle: string | null;
   equipment: string | null;
+  load_type: ExerciseLoadType | null;
   workout_type: WorkoutType | null;
   is_custom: number | null;
   exercise_position: number | null;
@@ -617,6 +640,7 @@ const sessionJoinSql = (where = '') => `
     s.retroactive AS session_retroactive,
     se.id AS session_exercise_id,
     e.name AS exercise_name,
+    e.load_type AS exercise_load_type,
     se.position AS exercise_position,
     st.id AS set_id,
     st.set_index,
@@ -704,7 +728,11 @@ const sessionsFromRows = (rows: SessionJoinRow[]): WorkoutSession[] => {
 
     let exercise = exercises.get(row.session_exercise_id);
     if (!exercise) {
-      exercise = { name: row.exercise_name, sets: [] };
+      exercise = {
+        name: row.exercise_name,
+        loadType: row.exercise_load_type ?? 'external_weight',
+        sets: [],
+      };
       exercises.set(row.session_exercise_id, exercise);
       session.exercises.push(exercise);
     }
@@ -742,6 +770,7 @@ const splitTemplatesFromRows = (
   for (const row of rows) {
     templates[row.workout_type].push({
       name: row.name,
+      loadType: row.load_type,
       sets: Array.from({ length: 3 }, () => ({
         reps: row.target_reps,
         weight: row.target_weight,
@@ -755,12 +784,13 @@ const insertSeedDataAsync = async (db: SQLiteDatabase): Promise<void> => {
   for (const seed of EXERCISE_SEEDS) {
     await db.runAsync(
       `INSERT INTO exercises
-        (name, workout_type, primary_muscle, secondary_muscle, is_custom)
-       VALUES (?, ?, ?, ?, 0)`,
+        (name, workout_type, primary_muscle, secondary_muscle, is_custom, load_type)
+       VALUES (?, ?, ?, ?, 0, ?)`,
       seed.name,
       seed.workoutType,
       seed.primaryMuscle,
-      seed.secondaryMuscle
+      seed.secondaryMuscle,
+      seed.loadType
     );
   }
 
@@ -793,12 +823,13 @@ const insertSeedDataSync = (db: SQLiteDatabase): void => {
   for (const seed of EXERCISE_SEEDS) {
     db.runSync(
       `INSERT INTO exercises
-        (name, workout_type, primary_muscle, secondary_muscle, is_custom)
-       VALUES (?, ?, ?, ?, 0)`,
+        (name, workout_type, primary_muscle, secondary_muscle, is_custom, load_type)
+       VALUES (?, ?, ?, ?, 0, ?)`,
       seed.name,
       seed.workoutType,
       seed.primaryMuscle,
-      seed.secondaryMuscle
+      seed.secondaryMuscle,
+      seed.loadType
     );
   }
 
@@ -837,12 +868,13 @@ const insertMissingExerciseSeedsAsync = async (db: SQLiteDatabase): Promise<void
     for (const seed of EXERCISE_SEEDS) {
       await db.runAsync(
         `INSERT OR IGNORE INTO exercises
-          (name, workout_type, primary_muscle, secondary_muscle, is_custom)
-         VALUES (?, ?, ?, ?, 0)`,
+          (name, workout_type, primary_muscle, secondary_muscle, is_custom, load_type)
+         VALUES (?, ?, ?, ?, 0, ?)`,
         seed.name,
         seed.workoutType,
         seed.primaryMuscle,
-        seed.secondaryMuscle
+        seed.secondaryMuscle,
+        seed.loadType
       );
     }
   });
@@ -861,12 +893,13 @@ const insertArchetypeTemplateSeedsAsync = async (
     if (!existing) {
       await db.runAsync(
         `INSERT INTO exercises
-          (name, workout_type, primary_muscle, secondary_muscle, is_custom)
-         VALUES (?, ?, ?, ?, 0)`,
+          (name, workout_type, primary_muscle, secondary_muscle, is_custom, load_type)
+         VALUES (?, ?, ?, ?, 0, ?)`,
         seed.name,
         seed.workoutType,
         seed.primaryMuscle,
-        seed.secondaryMuscle
+        seed.secondaryMuscle,
+        seed.loadType
       );
     }
   }
@@ -919,12 +952,13 @@ const insertArchetypeTemplateSeedsSync = (db: SQLiteDatabase): void => {
     if (!existing) {
       db.runSync(
         `INSERT INTO exercises
-          (name, workout_type, primary_muscle, secondary_muscle, is_custom)
-         VALUES (?, ?, ?, ?, 0)`,
+          (name, workout_type, primary_muscle, secondary_muscle, is_custom, load_type)
+         VALUES (?, ?, ?, ?, 0, ?)`,
         seed.name,
         seed.workoutType,
         seed.primaryMuscle,
-        seed.secondaryMuscle
+        seed.secondaryMuscle,
+        seed.loadType
       );
     }
   }
@@ -1144,6 +1178,32 @@ const ensureProfileWeightIncrementLbsColumnAsync = async (
   }
 };
 
+const ensureExerciseLoadTypeColumnAsync = async (
+  db: SQLiteDatabase
+): Promise<void> => {
+  if (!(await tableHasColumnAsync(db, 'exercises', 'load_type'))) {
+    await db.execAsync(
+      "ALTER TABLE exercises ADD COLUMN load_type TEXT NOT NULL DEFAULT 'external_weight';"
+    );
+  }
+};
+
+const reconcileExerciseLoadTypesAsync = async (
+  db: SQLiteDatabase
+): Promise<void> => {
+  await db.withTransactionAsync(async () => {
+    for (const seed of [...EXERCISE_SEEDS, ...ARCHETYPE_EXERCISE_SEEDS]) {
+      await db.runAsync(
+        `UPDATE exercises
+         SET load_type = ?
+         WHERE name = ? AND is_custom = 0`,
+        seed.loadType,
+        seed.name
+      );
+    }
+  });
+};
+
 const ensureCustomSplitsSchemaAsync = async (
   db: SQLiteDatabase
 ): Promise<void> => {
@@ -1360,6 +1420,9 @@ export const initializeWorkoutDatabase = async (): Promise<SQLiteDatabase> => {
   databasePromise = (async () => {
     const opened = await openDatabaseAsync(DATABASE_NAME);
     await opened.execAsync(WORKOUT_DATABASE_SCHEMA);
+    // Older databases need this before any migration path inserts newly shipped
+    // archetype or catalog exercises using the canonical load classification.
+    await ensureExerciseLoadTypeColumnAsync(opened);
 
     const schemaVersion = await opened.getFirstAsync<{ user_version: number }>(
       'PRAGMA user_version'
@@ -1399,6 +1462,7 @@ export const initializeWorkoutDatabase = async (): Promise<SQLiteDatabase> => {
     await ensureCustomSplitsSchemaAsync(opened);
     await ensureSessionCustomSplitColumnsAsync(opened);
     await insertMissingExerciseSeedsAsync(opened);
+    await reconcileExerciseLoadTypesAsync(opened);
     if (!hasLegacyWorkoutType && version > 0 && version < CURRENT_SCHEMA_VERSION) {
       await opened.execAsync(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION}`);
     }
@@ -1433,7 +1497,7 @@ const readSplitTemplatesAsync = async (
 ): Promise<Record<WorkoutType, Exercise[]>> =>
   splitTemplatesFromRows(
     await db.getAllAsync<SplitTemplateRow>(`
-      SELECT st.workout_type, e.name, st.target_reps, st.target_weight
+      SELECT st.workout_type, e.name, e.load_type, st.target_reps, st.target_weight
       FROM split_templates st
       JOIN exercises e ON e.id = st.exercise_id
       ORDER BY st.workout_type, st.position
@@ -1443,7 +1507,7 @@ const readSplitTemplatesAsync = async (
 export const readSplitTemplatesSync = (): Record<WorkoutType, Exercise[]> =>
   splitTemplatesFromRows(
     getDatabase().getAllSync<SplitTemplateRow>(`
-      SELECT st.workout_type, e.name, st.target_reps, st.target_weight
+      SELECT st.workout_type, e.name, e.load_type, st.target_reps, st.target_weight
       FROM split_templates st
       JOIN exercises e ON e.id = st.exercise_id
       ORDER BY st.workout_type, st.position
@@ -1503,7 +1567,7 @@ export const readArchetypeTemplateSync = (
   variant = 'a'
 ): Exercise[] =>
   getDatabase().getAllSync<ArchetypeTemplateRow>(
-    `SELECT e.name, at.target_reps, at.target_weight
+    `SELECT e.name, e.load_type, at.target_reps, at.target_weight
      FROM archetype_templates at
      JOIN exercises e ON e.id = at.exercise_id
      WHERE at.archetype = ? AND at.variant = ?
@@ -1512,6 +1576,7 @@ export const readArchetypeTemplateSync = (
     variant
   ).map((row) => ({
     name: row.name,
+    loadType: row.load_type,
     sets: Array.from({ length: 3 }, () => ({
       reps: row.target_reps,
       weight: row.target_weight,
@@ -1530,7 +1595,7 @@ export const readArchetypeTemplateCatalogSync = (
   getDatabase()
     .getAllSync<ArchetypeTemplateCatalogRow>(
       `SELECT e.id, e.name, e.workout_type, e.primary_muscle,
-              e.is_custom, e.equipment, at.position
+              e.is_custom, e.equipment, e.load_type, at.position
        FROM archetype_templates at
        JOIN exercises e ON e.id = at.exercise_id
        WHERE at.archetype = ? AND at.variant = ?
@@ -1545,6 +1610,7 @@ export const readArchetypeTemplateCatalogSync = (
       primaryMuscle: row.primary_muscle,
       isCustom: Boolean(row.is_custom),
       equipment: row.equipment,
+      loadType: row.load_type,
     }));
 
 interface SelectedArchetypeVariant {
@@ -1856,6 +1922,7 @@ export const getCustomSplitDetailAsync = async (
        e.name AS exercise_name,
        e.primary_muscle,
        e.equipment,
+       e.load_type,
        e.workout_type,
        e.is_custom,
        cswe.position AS exercise_position
@@ -1900,6 +1967,7 @@ export const getCustomSplitDetailAsync = async (
       name: row.exercise_name,
       primaryMuscle: row.primary_muscle,
       equipment: row.equipment,
+      loadType: row.load_type ?? 'external_weight',
       workoutType: row.workout_type,
       isCustom: Boolean(row.is_custom),
       position: row.exercise_position,
@@ -2131,8 +2199,8 @@ export const createCustomExerciseSync = (
   if (!normalizedName) throw new Error('Exercise name cannot be empty.');
   return getDatabase().runSync(
     `INSERT INTO exercises
-      (name, workout_type, primary_muscle, secondary_muscle, is_custom, equipment)
-     VALUES (?, ?, ?, NULL, 1, ?)`,
+      (name, workout_type, primary_muscle, secondary_muscle, is_custom, equipment, load_type)
+     VALUES (?, ?, ?, NULL, 1, ?, 'external_weight')`,
     normalizedName,
     workoutType,
     primaryMuscle,
@@ -2449,21 +2517,31 @@ const customWorkoutTemplateExerciseSync = (
   db: SQLiteDatabase,
   name: string
 ): Exercise => {
-  const row = db.getFirstSync<{ target_reps: number; target_weight: number }>(
-    `SELECT st.target_reps, st.target_weight
-     FROM split_templates st
-     JOIN exercises e ON e.id = st.exercise_id
+  const row = db.getFirstSync<{
+    load_type: ExerciseLoadType;
+    target_reps: number | null;
+    target_weight: number | null;
+  }>(
+    `SELECT e.load_type, st.target_reps, st.target_weight
+     FROM exercises e
+     LEFT JOIN split_templates st ON st.exercise_id = e.id
      WHERE e.name = ?
      ORDER BY st.position ASC
      LIMIT 1`,
     name
   );
   if (!row) return makeDefaultExercise(name);
+  if (row.target_reps === null || row.target_weight === null) {
+    return makeDefaultExercise(name, row.load_type);
+  }
+  const targetReps = row.target_reps;
+  const targetWeight = row.target_weight;
   return {
     name,
+    loadType: row.load_type,
     sets: Array.from({ length: 3 }, () => ({
-      reps: row.target_reps,
-      weight: row.target_weight,
+      reps: targetReps,
+      weight: targetWeight,
     })),
   };
 };
@@ -2755,7 +2833,7 @@ export const updateCurrentSet = (
 ): void => {
   const db = getDatabase();
   const id = currentSetIdSync(db, exerciseIndex, setIndex);
-  if (id === null) return;
+  if (id === null) throw new Error('The current set no longer exists');
   db.runSync(
     `UPDATE sets
      SET reps = ?, weight = ?, completed = ?, skipped = ?
@@ -2766,6 +2844,40 @@ export const updateCurrentSet = (
     updates.skipped ? 1 : 0,
     id
   );
+};
+
+// No schema change: expose the existing persisted identities for external actions.
+export const readCurrentSetTarget = (exerciseIndex: number, setIndex: number) => {
+  const row = getDatabase().getFirstSync<{
+    workoutId: number; workoutStartedAt: string; exerciseId: number; setId: number; exerciseName: string;
+  }>(
+    `SELECT s.id AS workoutId, s.date AS workoutStartedAt, se.id AS exerciseId, st.id AS setId, e.name AS exerciseName
+     FROM sets st JOIN session_exercises se ON se.id = st.session_exercise_id
+     JOIN sessions s ON s.id = se.session_id JOIN exercises e ON e.id = se.exercise_id
+     WHERE s.completed = 0 AND se.position = ? AND st.set_index = ? LIMIT 1`,
+    exerciseIndex, setIndex
+  );
+  return row ? {
+    workoutId: String(row.workoutId), workoutStartedAt: row.workoutStartedAt, exerciseId: String(row.exerciseId),
+    setId: String(row.setId), exerciseName: row.exerciseName, exerciseIndex, setIndex,
+  } : null;
+};
+
+// Completion and Increase Between Sets must either both commit or both roll back.
+export const updateCurrentSets = (
+  exerciseIndex: number,
+  updates: { setIndex: number; set: ExerciseSet }[]
+) => {
+  getDatabase().withTransactionSync(() => {
+    for (const update of updates) {
+      updateCurrentSet(exerciseIndex, update.setIndex, update.set);
+      const id = currentSetIdSync(getDatabase(), exerciseIndex, update.setIndex);
+      getDatabase().runSync(
+        'UPDATE sets SET target_reps = ?, target_weight = ? WHERE id = ?',
+        update.set.targetReps ?? null, update.set.targetWeight ?? null, id
+      );
+    }
+  });
 };
 
 export const appendCurrentBonusSet = (
@@ -2911,7 +3023,7 @@ export const readExercisesForWorkoutTypeSync = (
 ): ExerciseCatalogItem[] =>
   getDatabase()
     .getAllSync<ExerciseCatalogRow>(
-      `SELECT id, name, workout_type, primary_muscle, is_custom, equipment
+      `SELECT id, name, workout_type, primary_muscle, is_custom, equipment, load_type
        FROM exercises
        WHERE workout_type = ?
        ORDER BY id`,
@@ -2924,13 +3036,14 @@ export const readExercisesForWorkoutTypeSync = (
       primaryMuscle: row.primary_muscle,
       isCustom: Boolean(row.is_custom),
       equipment: row.equipment,
+      loadType: row.load_type,
     }));
 
 /** Read-only catalog used by the Custom Split draft builder. */
 export const readExerciseCatalogSync = (): ExerciseCatalogItem[] =>
   getDatabase()
     .getAllSync<ExerciseCatalogRow>(
-      `SELECT id, name, workout_type, primary_muscle, is_custom, equipment
+      `SELECT id, name, workout_type, primary_muscle, is_custom, equipment, load_type
        FROM exercises
        ORDER BY id`
     )
@@ -2941,6 +3054,7 @@ export const readExerciseCatalogSync = (): ExerciseCatalogItem[] =>
       primaryMuscle: row.primary_muscle,
       isCustom: Boolean(row.is_custom),
       equipment: row.equipment,
+      loadType: row.load_type,
     }));
 
 export const readExerciseWorkoutTypeSync = (name: string): WorkoutType | undefined =>
@@ -2948,6 +3062,14 @@ export const readExerciseWorkoutTypeSync = (name: string): WorkoutType | undefin
     'SELECT workout_type FROM exercises WHERE name = ?',
     name
   )?.workout_type;
+
+export const readExerciseLoadTypeSync = (
+  name: string
+): ExerciseLoadType =>
+  getDatabase().getFirstSync<{ load_type: ExerciseLoadType }>(
+    'SELECT load_type FROM exercises WHERE name = ?',
+    name
+  )?.load_type ?? 'external_weight';
 
 export const readPrimaryMusclesForWorkoutTypeSync = (type: WorkoutType): string[] => {
   const primaryMuscles = getDatabase()
@@ -3060,8 +3182,8 @@ const ensureExerciseSync = (
 
   return db.runSync(
     `INSERT INTO exercises
-      (name, workout_type, primary_muscle, secondary_muscle, is_custom)
-     VALUES (?, ?, ?, NULL, 1)`,
+      (name, workout_type, primary_muscle, secondary_muscle, is_custom, load_type)
+     VALUES (?, ?, ?, NULL, 1, 'external_weight')`,
     name,
     type,
     primaryMuscle

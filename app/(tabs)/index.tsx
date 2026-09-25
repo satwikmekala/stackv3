@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useIsFocused } from '@react-navigation/native';
+import { useIsFocused } from 'expo-router/react-navigation';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { ArrowLeftRight } from 'lucide-react-native';
@@ -35,7 +43,12 @@ import { resolveNextCustomWorkoutIndex } from '@/store/customSplitRotation';
 import { toLocalCalendarDate, useWorkoutStore } from '@/store/workoutStore';
 import { resumeWorkout } from '@/utils/workoutResume';
 import type { WorkoutLaunchOrigin } from '@/utils/workoutLaunch';
+import { BUILD_SANDBOX_ENABLED } from '@/features/build/config';
 import '@/global.css';
+
+// Keep experimental Build and its dependencies off the normal Home startup path.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const BuildHome = BUILD_SANDBOX_ENABLED ? require('@/features/build/BuildHome').default : null;
 
 const DAY_LABELS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
 const MONTH_LABELS = [
@@ -79,7 +92,28 @@ function buildHomeEnter(delay: number) {
 const HEADER_ENTER = buildHomeEnter(0);
 const HERO_ENTER = buildHomeEnter(80);
 const CHANGE_BUTTON_ENTER = buildHomeEnter(150);
+// Build's card sits between the change button and the split card in the entrance sequence.
+const BUILD_CARD_DELAY = 195;
+const BUILD_CARD_ENTER = buildHomeEnter(BUILD_CARD_DELAY);
 const SPLIT_CARD_ENTER = buildHomeEnter(240);
+
+// The 6.1-inch and 6.3-inch phones are close in width but have meaningfully
+// different vertical room. Keep the Home hierarchy intact while tightening it
+// gradually on the shorter viewport; this deliberately keys off layout space,
+// never a device model.
+const COMPACT_HOME_HEIGHT = 852;
+const ROOMY_HOME_HEIGHT = 874;
+
+function compactnessForHeight(height: number) {
+  return Math.max(
+    0,
+    Math.min(1, (ROOMY_HOME_HEIGHT - height) / (ROOMY_HOME_HEIGHT - COMPACT_HOME_HEIGHT))
+  );
+}
+
+function blend(roomy: number, compact: number, compactness: number) {
+  return roomy + (compact - roomy) * compactness;
+}
 
 /** Eyebrow for the hero card: which day the queued workout actually belongs to. */
 function scheduleEyebrow(nextUpDate: string | null) {
@@ -124,6 +158,8 @@ export default function Home() {
   const router = useRouter();
   const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const compactness = compactnessForHeight(windowHeight);
   const profile = useWorkoutStore((state) => state.profile);
   useWorkoutStore((state) => state.sessions);
   const currentSession = useWorkoutStore((state) => state.currentSession);
@@ -409,10 +445,16 @@ export default function Home() {
       />
 
       <ScrollView
+        // Build adds secondary content below the existing workout controls.
+        // Allow it to scroll clear of the floating tabs when enabled.
+        scrollEnabled={BUILD_SANDBOX_ENABLED}
         bounces={false}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 128 },
+          {
+            paddingTop: insets.top + blend(24, 20, compactness),
+            paddingBottom: insets.bottom + 128,
+          },
         ]}
         showsVerticalScrollIndicator={false}
       >
@@ -421,7 +463,9 @@ export default function Home() {
           style={styles.header}
         >
           <View style={styles.greetingColumn}>
-            <Text style={styles.date}>{todayLabel()}</Text>
+            <Text style={[styles.date, { marginBottom: blend(16, 12, compactness) }]}>
+              {todayLabel()}
+            </Text>
             <Text
               adjustsFontSizeToFit
               minimumFontScale={0.72}
@@ -435,7 +479,7 @@ export default function Home() {
 
         <Animated.View
           entering={shouldAnimateHomeEntrance ? HERO_ENTER : undefined}
-          style={styles.heroWrap}
+          style={{ marginTop: blend(16, 12, compactness) }}
         >
           {isCustomMode ? (
             <WorkoutHeroCard
@@ -461,6 +505,7 @@ export default function Home() {
                   ? customWorkoutAccent(selectedCustomWorkout)
                   : redesignColors.ash
               }
+              verticalCompactness={compactness}
               onPress={
                 customSplitBroken
                   ? () => router.push('/your-splits')
@@ -476,6 +521,7 @@ export default function Home() {
               exerciseCount={exerciseCount}
               whenLabel={heroEyebrow}
               completed={nextUp.length === 0}
+              verticalCompactness={compactness}
               onPress={nextUp.length > 0 ? handleStartWorkout : handleOpenWorkoutPicker}
             />
           )}
@@ -493,7 +539,14 @@ export default function Home() {
             accessibilityRole="button"
             accessibilityLabel="Change workout"
             onPress={handleOpenWorkoutPicker}
-            style={styles.changeButton}
+            style={[
+              styles.changeButton,
+              {
+                marginTop: blend(10, 8, compactness),
+                minHeight: blend(58, 54, compactness),
+                paddingVertical: blend(15, 13, compactness),
+              },
+            ]}
           >
             <ArrowLeftRight color={redesignColors.ash} size={18} strokeWidth={2} />
             <Text
@@ -507,9 +560,20 @@ export default function Home() {
           </Pressable>
         </Animated.View>
 
+        {BuildHome && (
+          <BuildHome
+            entering={shouldAnimateHomeEntrance ? BUILD_CARD_ENTER : undefined}
+            previewDelayMs={shouldAnimateHomeEntrance ? BUILD_CARD_DELAY + motionDuration.entrance : 0}
+          />
+        )}
+
         <Animated.View
           entering={shouldAnimateHomeEntrance ? SPLIT_CARD_ENTER : undefined}
-          style={styles.splitCardWrap}
+          // When there is spare height, marginTop: 'auto' holds this card at a
+          // consistent, intentional distance above the floating tab control.
+          // On a compact screen the hero tightens first, then the page remains
+          // scrollable rather than letting the controls overlap.
+          style={[styles.splitCardWrap, { paddingTop: blend(20, 16, compactness) }]}
         >
           <YourSplitCard
             accessibilityLabel={splitCardLabel}
@@ -553,6 +617,7 @@ const styles = StyleSheet.create({
     backgroundColor: redesignColors.ink,
   },
   scrollContent: {
+    flexGrow: 1,
     width: '100%',
     maxWidth: 480,
     alignSelf: 'center',
@@ -573,7 +638,6 @@ const styles = StyleSheet.create({
     letterSpacing: 2.4,
     textAlign: 'center',
     color: redesignColors.ashDim,
-    marginBottom: 16,
   },
   greeting: {
     fontFamily: redesignFonts.display,
@@ -583,18 +647,12 @@ const styles = StyleSheet.create({
     letterSpacing: -1.6,
     color: redesignColors.bone,
   },
-  heroWrap: {
-    marginTop: 16,
-  },
   changeButton: {
     alignSelf: 'center',
     width: '60%',
     minWidth: 190,
     maxWidth: 240,
-    minHeight: 58,
-    paddingVertical: 15,
     // The hero includes 10 points below the visible start button.
-    marginTop: 10,
     paddingHorizontal: 16,
     borderRadius: 20,
     borderCurve: 'continuous',
@@ -613,6 +671,6 @@ const styles = StyleSheet.create({
     color: redesignColors.ash,
   },
   splitCardWrap: {
-    marginTop: 20,
+    marginTop: 'auto',
   },
 });

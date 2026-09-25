@@ -35,6 +35,8 @@ type WorkoutHeroCardProps = {
   groupLabel?: string;
   accentColor?: string;
   hideStartButton?: boolean;
+  /** 0 is roomy, 1 is compact. Home derives this from the measured viewport. */
+  verticalCompactness?: number;
 };
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
@@ -78,6 +80,7 @@ export function WorkoutHeroCard({
   groupLabel,
   accentColor,
   hideStartButton = false,
+  verticalCompactness = 0,
 }: WorkoutHeroCardProps) {
   const primaryArchetype = archetypes?.[0];
   const sessionDisplay = getSessionWorkoutDisplay({
@@ -105,6 +108,9 @@ export function WorkoutHeroCard({
   const pressScale = usePressScale('surface');
   const hasMountedContent = useRef(false);
   const buttonRef = useRef<View>(null);
+  const compactness = Math.max(0, Math.min(1, verticalCompactness));
+  const blend = (roomy: number, compact: number) =>
+    roomy + (compact - roomy) * compactness;
 
   useEffect(() => {
     hasMountedContent.current = true;
@@ -134,7 +140,15 @@ export function WorkoutHeroCard({
       }}
       onPressIn={pressScale.onPressIn}
       onPressOut={pressScale.onPressOut}
-      style={[styles.card, pressScale.animatedStyle]}
+      style={[
+        styles.card,
+        {
+          minHeight: blend(350, 328),
+          paddingTop: blend(32, 28),
+          paddingBottom: blend(118, 112),
+        },
+        pressScale.animatedStyle,
+      ]}
     >
       <View
         pointerEvents="none"
@@ -166,7 +180,7 @@ export function WorkoutHeroCard({
       <Animated.View
         entering={hasMountedContent.current ? CONTENT_ENTER : undefined}
         exiting={CONTENT_EXIT}
-        style={styles.content}
+        style={[styles.content, { gap: blend(22, 18) }]}
         key={`${whenLabel}\u0000${label}\u0000${group}\u0000${exerciseCount}`}
       >
         <View style={[styles.badge, { backgroundColor: rgba(color, 0.14), borderColor: rgba(color, 0.45) }]}>
@@ -207,16 +221,13 @@ export function WorkoutHeroCard({
 const styles = StyleSheet.create({
   card: {
     // Include the entire start button in both layout and the touch target.
-    minHeight: 350,
     borderRadius: 38,
     borderCurve: 'continuous',
     paddingHorizontal: 22,
-    paddingTop: 32,
-    paddingBottom: 118,
     justifyContent: 'center',
   },
   cardBacklight: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     bottom: 46,
     borderRadius: 38,
     borderCurve: 'continuous',
@@ -226,7 +237,7 @@ const styles = StyleSheet.create({
     shadowRadius: 20,
   },
   cardSurface: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     bottom: 46,
     borderRadius: 38,
     borderCurve: 'continuous',
@@ -244,7 +255,6 @@ const styles = StyleSheet.create({
   },
   content: {
     alignItems: 'center',
-    gap: 22,
   },
   badge: {
     flexDirection: 'row',

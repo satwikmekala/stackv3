@@ -897,7 +897,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   weeklyGoalBorder: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     borderRadius: 27,
     borderCurve: 'continuous',
   },
@@ -1153,7 +1153,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   detailBackdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(10, 8, 6, 0.76)',
   },
   detailCard: {

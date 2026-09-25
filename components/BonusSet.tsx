@@ -1,11 +1,13 @@
+import { confirmationEnter } from '@/constants/workoutMotion';
+import { WorkoutTouchable } from '@/components/WorkoutTouchable';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Text, TouchableOpacity } from 'react-native';
+import { Text } from 'react-native';
 import { Check } from 'lucide-react-native';
-import Animated, { ReduceMotion, ZoomIn } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import { ActiveSetCard } from '@/components/ActiveSetCard';
 import { redesignColors, redesignFonts } from '@/constants/theme';
 import { formatWeight, unitLabel, type WeightUnit } from '@/store/weightUnits';
-import type { BonusSetType } from '@/store/workoutStore';
+import type { BonusSetType, ExerciseLoadType } from '@/store/workoutStore';
 
 export type BonusSetSelection = {
   type: BonusSetType;
@@ -19,21 +21,20 @@ export const BONUS_SET_META: Record<BonusSetType, { title: string; shortTitle: s
   pr: { title: 'PR Attempt', shortTitle: 'PR', color: '#E8B84A' },
 };
 
-const ACKNOWLEDGEMENT_CHECK_ENTER = ZoomIn.springify()
-  .damping(16)
-  .stiffness(240)
-  .reduceMotion(ReduceMotion.System);
+const ACKNOWLEDGEMENT_CHECK_ENTER = confirmationEnter;
 
 export function BonusSet({
   selection,
   weightIncrement,
   weightUnit,
+  loadType,
   onDone,
   onCancel,
 }: {
   selection: BonusSetSelection;
   weightIncrement: number;
   weightUnit?: WeightUnit;
+  loadType: ExerciseLoadType;
   onDone: (set: BonusSetSelection) => void;
   onCancel: () => void;
 }) {
@@ -47,6 +48,7 @@ export function BonusSet({
       badgeLabel="Bonus set"
       reps={reps}
       weight={weight}
+      loadType={loadType}
       weightIncrement={weightIncrement}
       weightUnit={weightUnit}
       accent={meta.color}
@@ -54,6 +56,8 @@ export function BonusSet({
       secondaryLabel="Cancel"
       onRepsChange={(delta) => setReps((current) => Math.max(1, current + delta))}
       onWeightChange={(delta) => setWeight((current) => Math.max(0, current + delta))}
+      onRepsCommit={setReps}
+      onWeightCommit={setWeight}
       onLog={() => onDone({ type: selection.type, reps, weight })}
       onSkip={onCancel}
     />
@@ -63,10 +67,12 @@ export function BonusSet({
 export function BonusSetAcknowledgement({
   set,
   weightUnit = 'kg',
+  loadType,
   onAdvance,
 }: {
   set: BonusSetSelection;
   weightUnit?: WeightUnit;
+  loadType: ExerciseLoadType;
   onAdvance: () => void;
 }) {
   const meta = BONUS_SET_META[set.type];
@@ -84,9 +90,13 @@ export function BonusSetAcknowledgement({
   }, [advanceOnce]);
 
   return (
-    <TouchableOpacity
+    <WorkoutTouchable
       accessibilityRole="button"
-      accessibilityLabel={`Well done. ${formatWeight(set.weight, weightUnit)} ${unitLabel(weightUnit)} by ${set.reps}. Continue.`}
+      accessibilityLabel={
+        loadType === 'bodyweight'
+          ? `Well done. ${set.reps} reps. Continue.`
+          : `Well done. ${formatWeight(set.weight, weightUnit)} ${unitLabel(weightUnit)} by ${set.reps}. Continue.`
+      }
       activeOpacity={0.92}
       onPress={advanceOnce}
       style={{
@@ -140,7 +150,9 @@ export function BonusSetAcknowledgement({
           color: meta.color,
         }}
       >
-        {formatWeight(set.weight, weightUnit)} {unitLabel(weightUnit)} × {set.reps}
+        {loadType === 'bodyweight'
+          ? `${set.reps} reps`
+          : `${formatWeight(set.weight, weightUnit)} ${unitLabel(weightUnit)} × ${set.reps}`}
       </Text>
       <Text
         allowFontScaling={false}
@@ -153,6 +165,6 @@ export function BonusSetAcknowledgement({
       >
         Tap to continue
       </Text>
-    </TouchableOpacity>
+    </WorkoutTouchable>
   );
 }

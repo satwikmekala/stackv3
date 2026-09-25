@@ -1,3 +1,7 @@
+import { confirmationEnter, confirmationExit, workoutMotion, workoutTiming } from '@/constants/workoutMotion';
+import { WorkoutTouchable } from '@/components/WorkoutTouchable';
+import { BUILD_SANDBOX_ENABLED } from '../features/build/config';
+import { completionDestination } from '../features/build/casting';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
@@ -18,19 +22,16 @@ import Animated, {
   FadeIn,
   FadeInLeft,
   FadeInRight,
-  FadeOut,
-  FadeOutDown,
   FadeOutLeft,
   interpolateColor,
-  LinearTransition,
   ReduceMotion,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
-  ZoomIn,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { ActiveSetCard } from '@/components/ActiveSetCard';
+import { ExerciseInfo } from '@/components/ExerciseInfo';
 import {
   BONUS_SET_META,
   BonusSet,
@@ -43,18 +44,27 @@ import { UpNextSheet, type RemainingExercise } from '@/components/UpNextSheet';
 import { WorkoutDayLabel } from '@/components/WorkoutDayLabel';
 import { WorkoutIntensityPicker } from '@/components/home/WorkoutIntensityPicker';
 import { ARCHETYPE_COMPOSITIONS } from '@/constants/archetypes';
+import { getExerciseInfo, type ExerciseInfoData } from '@/constants/exerciseInfo';
 import { motionDuration, motionEasing } from '@/constants/motion';
+import {
+  workoutCardEntering,
+  workoutCardExiting,
+  workoutLayoutTransition,
+  workoutRowEntering,
+} from '@/constants/workoutLayoutTransitions';
 import { redesignColors, redesignFonts, workoutLoggingColors } from '@/constants/theme';
 import { workoutMeta } from '@/constants/workouts';
 import {
   IntensityLevel,
   type Exercise,
+  type ExerciseLoadType,
   type ExerciseSet,
   useWorkoutStore,
 } from '@/store/workoutStore';
 import { DEFAULT_WEIGHT_UNIT } from '@/store/workoutDatabase';
 import { formatWeight, getWeightIncrement, type WeightUnit } from '@/store/weightUnits';
-import { getInitialExerciseIndex } from '@/utils/workoutResume';
+import { getActiveSetIndex, getCurrentWorkoutExerciseIndex } from '@/utils/workoutResume';
+import { getNextIncompleteExerciseIndex, isExerciseComplete } from '@/store/workoutSetActions';
 import '@/global.css';
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
@@ -81,17 +91,8 @@ const REPLACE_ENTER = FadeIn.duration(200)
 const EXERCISE_EXIT = FadeOutLeft.duration(160)
   .easing(Easing.in(Easing.cubic))
   .reduceMotion(ReduceMotion.System);
-const STAGE_EXIT = FadeOut.duration(120).reduceMotion(ReduceMotion.System);
-const STAGE_LAYOUT = LinearTransition.duration(220)
-  .easing(Easing.out(Easing.cubic))
-  .reduceMotion(ReduceMotion.System);
-const CHECK_ENTER = ZoomIn.springify()
-  .damping(17)
-  .stiffness(250)
-  .reduceMotion(ReduceMotion.System);
-const UP_NEXT_EXIT = FadeOutDown.duration(150)
-  .easing(Easing.in(Easing.cubic))
-  .reduceMotion(ReduceMotion.System);
+const STAGE_EXIT = workoutCardExiting;
+const CHECK_ENTER = confirmationEnter;
 const LOG_SUBMISSION_GUARD_MS = motionDuration.transition + motionDuration.feedback;
 
 function ExerciseProgressSegment({
@@ -133,7 +134,8 @@ function ExerciseProgressSegment({
     <Animated.View
       style={[
         {
-          flex: 1,
+          // The layout wrapper owns the row's flex; flex here would collapse the height.
+          width: '100%',
           height: 8,
           borderRadius: 4,
           shadowOffset: { width: 0, height: 0 },
@@ -149,6 +151,7 @@ function SetPip({
   weight,
   reps,
   weightUnit,
+  loadType,
   accent,
   currentLabel = 'NOW',
   setNumber,
@@ -158,6 +161,7 @@ function SetPip({
   weight: number;
   reps: number;
   weightUnit: WeightUnit;
+  loadType: ExerciseLoadType;
   accent: string;
   currentLabel?: string;
   setNumber: number;
@@ -167,11 +171,7 @@ function SetPip({
   const activeFill = useSharedValue(state === 'upcoming' ? 0 : 1);
 
   useEffect(() => {
-    glowOpacity.value = withTiming(state === 'current' ? 1 : 0, {
-      duration: 360,
-      easing: Easing.out(Easing.ease),
-      reduceMotion: ReduceMotion.System,
-    });
+    glowOpacity.value = withTiming(state === 'current' ? 1 : 0, workoutTiming(workoutMotion.confirm));
     activeFill.value = withTiming(state === 'upcoming' ? 0 : 1, {
       duration: 240,
       easing: Easing.out(Easing.cubic),
@@ -197,8 +197,7 @@ function SetPip({
   const content = (
     <>
       <View style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}>
-        {state === 'current' ? (
-          <Animated.View
+        <Animated.View
             style={[
               {
                 position: 'absolute',
@@ -215,7 +214,6 @@ function SetPip({
               glowStyle,
             ]}
           />
-        ) : null}
         <Animated.View
           style={[
             {
@@ -230,7 +228,7 @@ function SetPip({
           ]}
         >
           {state === 'completed' ? (
-            <Animated.View entering={CHECK_ENTER}>
+            <Animated.View entering={CHECK_ENTER} exiting={confirmationExit}>
               <Check color={redesignColors.ink} size={17} strokeWidth={3.2} />
             </Animated.View>
           ) : null}
@@ -247,24 +245,30 @@ function SetPip({
           color: state === 'current' ? accent : redesignColors.ash,
         }}
       >
-        {state === 'completed' ? `${formatWeight(weight, weightUnit)}·${reps}` : state === 'current' ? currentLabel : '–'}
+        {state === 'completed'
+          ? loadType === 'bodyweight'
+            ? `${reps} reps`
+            : `${formatWeight(weight, weightUnit)}·${reps}`
+          : state === 'current'
+            ? currentLabel
+            : '–'}
       </Text>
     </>
   );
 
   return state === 'completed' && onEdit ? (
-    <TouchableOpacity
+    <WorkoutTouchable
       accessibilityRole="button"
       accessibilityLabel={`Edit completed set ${setNumber}`}
       accessibilityHint="Reopens this set for editing"
       activeOpacity={0.72}
       onPress={onEdit}
-      style={{ flex: 1, alignItems: 'center' }}
+      style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}
     >
       {content}
-    </TouchableOpacity>
+    </WorkoutTouchable>
   ) : (
-    <View style={{ flex: 1, alignItems: 'center' }}>{content}</View>
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>{content}</View>
   );
 }
 
@@ -272,24 +276,29 @@ function SetProgress({
   sets,
   currentSetIndex,
   weightUnit,
+  loadType,
   accent,
   currentAccent = accent,
   currentLabel,
   onEditCompletedSet,
+  enteringSetIndex,
 }: {
   sets: ExerciseSet[];
   currentSetIndex: number;
   weightUnit: WeightUnit;
+  loadType: ExerciseLoadType;
   accent: string;
   currentAccent?: string;
   currentLabel?: string;
   onEditCompletedSet?: (setIndex: number) => void;
+  enteringSetIndex?: number;
 }) {
   return (
-    <View
+    <Animated.View
+      layout={workoutLayoutTransition}
       style={{
         flexDirection: 'row',
-        alignItems: 'center',
+        alignItems: 'stretch',
         height: 96,
         borderRadius: 22,
         paddingHorizontal: 14,
@@ -306,37 +315,29 @@ function SetProgress({
             ? 'current'
             : 'upcoming';
         return (
-          <SetPip
+          <Animated.View
             key={`${set.type ?? 'working'}-${index}`}
-            state={state}
-            weight={set.weight}
-            reps={set.reps}
-            weightUnit={weightUnit}
-            accent={index === currentSetIndex ? currentAccent : accent}
-            currentLabel={currentLabel}
-            setNumber={index + 1}
-            onEdit={state === 'completed' ? () => onEditCompletedSet?.(index) : undefined}
-          />
+            layout={workoutLayoutTransition}
+            entering={index === enteringSetIndex ? workoutRowEntering : undefined}
+            style={{ flex: 1 }}
+          >
+            <SetPip
+              state={state}
+              weight={set.weight}
+              reps={set.reps}
+              weightUnit={weightUnit}
+              loadType={loadType}
+              accent={index === currentSetIndex ? currentAccent : accent}
+              currentLabel={currentLabel}
+              setNumber={index + 1}
+              onEdit={state === 'completed' ? () => onEditCompletedSet?.(index) : undefined}
+            />
+          </Animated.View>
         );
       })}
-    </View>
+    </Animated.View>
   );
 }
-
-const isExerciseComplete = (exercise: Exercise) =>
-  exercise.sets.every((set) => set.completed);
-
-const getNextIncompleteExerciseIndex = (
-  exercises: Exercise[],
-  currentIndex: number
-) => {
-  for (let offset = 1; offset < exercises.length; offset += 1) {
-    const candidateIndex = (currentIndex + offset) % exercises.length;
-    if (!isExerciseComplete(exercises[candidateIndex])) return candidateIndex;
-  }
-
-  return -1;
-};
 
 const getRemainingExercises = (
   exercises: Exercise[],
@@ -357,8 +358,9 @@ export default function Workout() {
   const router = useRouter();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const { fromActivityCard, launchOrigin: launchOriginParam } = useLocalSearchParams<{
+  const { fromActivityCard, finishFromActivity, launchOrigin: launchOriginParam } = useLocalSearchParams<{
     fromActivityCard?: string;
+    finishFromActivity?: string;
     launchOrigin?: string;
   }>();
   const [launchOrigin] = useState(() => fromActivityCard === '1' ? null : parseWorkoutLaunchOrigin(launchOriginParam));
@@ -373,6 +375,7 @@ export default function Workout() {
   const updateProfile = useWorkoutStore((state) => state.updateProfile);
   const updateExerciseSet = useWorkoutStore((state) => state.updateExerciseSet);
   const appendBonusSet = useWorkoutStore((state) => state.appendBonusSet);
+  const applyActiveSetAction = useWorkoutStore((state) => state.applyActiveSetAction);
   const toggleSetCompleted = useWorkoutStore((state) => state.toggleSetCompleted);
   const toggleSetSkipped = useWorkoutStore((state) => state.toggleSetSkipped);
   const swapCurrentSessionExercise = useWorkoutStore(
@@ -381,18 +384,29 @@ export default function Workout() {
   const completeWorkout = useWorkoutStore((state) => state.completeWorkout);
   const discardWorkout = useWorkoutStore((state) => state.discardWorkout);
 
-  const [exerciseIndex, setExerciseIndex] = useState(() =>
-    currentSession ? getInitialExerciseIndex(currentSession.exercises) : 0
-  );
+  const workoutFocus = useWorkoutStore((state) => state.workoutFocus);
+  const setExerciseIndex = useWorkoutStore((state) => state.setWorkoutExerciseIndex);
+  const exerciseIndex = currentSession ? getCurrentWorkoutExerciseIndex(currentSession, workoutFocus) : 0;
   const [showSwapSheet, setShowSwapSheet] = useState(false);
   const [showUpNextSheet, setShowUpNextSheet] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const activityFeedbackVisible = Boolean(currentSession && finishFromActivity === currentSession.id &&
+    currentSession.exercises.every(isExerciseComplete));
   const [bonusSelection, setBonusSelection] = useState<BonusSetSelection | null>(null);
   const [loggedBonusSet, setLoggedBonusSet] = useState<BonusSetSelection | null>(null);
+  const [recentBonusSetIndex, setRecentBonusSetIndex] = useState<number | null>(null);
   const [stageDirection, setStageDirection] = useState<1 | -1>(1);
   const [exerciseMotion, setExerciseMotion] = useState<'forward' | 'backward' | 'replace'>(
     'forward'
   );
+  const [infoExercise, setInfoExercise] = useState<ExerciseInfoData | null>(null);
+  const [infoVisible, setInfoVisible] = useState(false);
+  const infoOpeningRef = useRef(false);
+  const closeExerciseInfo = useCallback(() => setInfoVisible(false), [setInfoVisible]);
+  const finishClosingExerciseInfo = useCallback(() => {
+    infoOpeningRef.current = false;
+    setInfoExercise(null);
+  }, [setInfoExercise]);
   const loggingSetRef = useRef(false);
   const exitingRef = useRef(false);
   const hasRenderedRef = useRef(false);
@@ -428,12 +442,16 @@ export default function Workout() {
     if (Platform.OS !== 'android') return;
 
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (infoExercise) {
+        closeExerciseInfo();
+        return true;
+      }
       confirmDiscardWorkout();
       return true;
     });
 
     return () => subscription.remove();
-  }, [confirmDiscardWorkout]);
+  }, [closeExerciseInfo, confirmDiscardWorkout, infoExercise]);
 
   useEffect(() => {
     setBonusSelection(null);
@@ -465,9 +483,8 @@ export default function Workout() {
     : legacyMeta.label;
   const accent = archetypeComposition?.color ?? workoutLoggingColors[workoutType];
   const exercise = currentSession.exercises[exerciseIndex];
-  const firstIncompleteSetIndex = exercise.sets.findIndex((set) => !set.completed);
-  const setIndex =
-    firstIncompleteSetIndex === -1 ? Math.max(0, exercise.sets.length - 1) : firstIncompleteSetIndex;
+  const availableExerciseInfo = getExerciseInfo(exercise.name);
+  const setIndex = getActiveSetIndex(exercise);
   const activeSet = exercise.sets[setIndex];
   const nextIncompleteExerciseIndex = getNextIncompleteExerciseIndex(
     currentSession.exercises,
@@ -483,52 +500,49 @@ export default function Workout() {
   );
   const exerciseComplete = isExerciseComplete(exercise);
 
-  const handleRepsChange = (delta: number) => {
-    const newReps = Math.max(1, activeSet.reps + delta);
-    updateExerciseSet(exerciseIndex, setIndex, newReps, activeSet.weight);
+  const updateActiveSet = (reps: number, weight: number) => {
+    updateExerciseSet(
+      exerciseIndex,
+      setIndex,
+      Math.max(1, reps),
+      exercise.loadType === 'bodyweight' ? 0 : Math.max(0, weight)
+    );
   };
 
+  // Both surfaces use the same active-set domain action and profile increment.
+  const currentTarget = () => {
+    const target = useWorkoutStore.getState().getActiveSetTarget();
+    return target?.workoutId === currentSession.id && target.exerciseIndex === exerciseIndex &&
+      target.setIndex === setIndex && target.exerciseName === exercise.name ? target : null;
+  };
+  const handleRepsChange = (delta: number) => {
+    const target = currentTarget();
+    if (target) applyActiveSetAction(target, delta > 0 ? 'increaseReps' : 'decreaseReps');
+  };
   const handleWeightChange = (delta: number) => {
-    const newWeight = Math.max(0, activeSet.weight + delta);
-    updateExerciseSet(exerciseIndex, setIndex, activeSet.reps, newWeight);
+    const target = currentTarget();
+    if (target) applyActiveSetAction(target, delta > 0 ? 'increaseWeight' : 'decreaseWeight');
   };
 
   const handleToggleSet = () => {
     if (loggingSetRef.current) return;
-
-    const wasCompleted = activeSet.completed;
-    const completesExercise = exercise.sets.every(
-      (set, index) => index === setIndex || set.completed
-    );
+    const target = currentTarget();
+    if (!target) return;
     loggingSetRef.current = true;
     setStageDirection(1);
-    toggleSetCompleted(exerciseIndex, setIndex);
-
-    // The store writes to SQLite before publishing the updated session. Read
-    // that published state back before moving the UI so a failed write keeps
-    // the user on the current exercise and uses the store's existing alert.
-    const committedSet = useWorkoutStore.getState().currentSession
-      ?.exercises[exerciseIndex]?.sets[setIndex];
-    if (!committedSet?.completed) {
+    setExerciseMotion('forward');
+    const result = applyActiveSetAction(target, 'completeSet');
+    if (result.status !== 'applied') {
       loggingSetRef.current = false;
       return;
     }
-
-    setTimeout(() => {
-      loggingSetRef.current = false;
-    }, LOG_SUBMISSION_GUARD_MS);
-
+    setTimeout(() => { loggingSetRef.current = false; }, LOG_SUBMISSION_GUARD_MS);
     if (Platform.OS !== 'web') {
-      if (!wasCompleted && completesExercise) {
-        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      } else if (!wasCompleted) {
-        void Haptics.selectionAsync();
-      }
+      if (result.completedExercise) void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      else void Haptics.selectionAsync();
     }
-
-    if (!wasCompleted && completesExercise) {
-      handleAdvanceExercise();
-    }
+    if (result.completedExercise) setRecentBonusSetIndex(null);
+    if (result.needsFeedback) setShowFeedbackModal(true);
   };
 
   const handleSkipSet = () => {
@@ -548,6 +562,7 @@ export default function Workout() {
     direction: 'forward' | 'backward' = targetIndex > exerciseIndex ? 'forward' : 'backward'
   ) => {
     if (targetIndex === exerciseIndex) return;
+    setRecentBonusSetIndex(null);
     setExerciseMotion(direction);
     setStageDirection(direction === 'forward' ? 1 : -1);
     setExerciseIndex(targetIndex);
@@ -574,12 +589,14 @@ export default function Workout() {
   };
 
   const handleSwapExercise = (name: string) => {
+    setRecentBonusSetIndex(null);
     setExerciseMotion('replace');
     swapCurrentSessionExercise(exerciseIndex, name);
     setShowSwapSheet(false);
   };
 
   const handleFeedbackSelect = (intensity: IntensityLevel) => {
+    if (exitingRef.current) return;
     exitingRef.current = true;
     const completedSession = completeWorkout(intensity);
     if (!completedSession) {
@@ -587,10 +604,8 @@ export default function Workout() {
       return;
     }
     setShowFeedbackModal(false);
-    router.replace({
-      pathname: '/workout-summary',
-      params: { sessionId: completedSession.id },
-    } as Parameters<typeof router.replace>[0]);
+    const destination = completionDestination(completedSession, BUILD_SANDBOX_ENABLED)!;
+    router.replace(destination as Parameters<typeof router.replace>[0]);
   };
 
   const previousWeight = setIndex > 0 ? exercise.sets[setIndex - 1].weight : null;
@@ -662,7 +677,7 @@ export default function Workout() {
           />
 
           <View style={{ flexShrink: 0, flexDirection: 'row', alignItems: 'center' }}>
-            <TouchableOpacity
+            <WorkoutTouchable
               accessibilityRole="button"
               accessibilityLabel="Change exercise"
               onPress={() => setShowSwapSheet(true)}
@@ -691,9 +706,9 @@ export default function Workout() {
               >
                 Change
               </Text>
-            </TouchableOpacity>
+            </WorkoutTouchable>
 
-            <TouchableOpacity
+            <WorkoutTouchable
               accessibilityRole="button"
               accessibilityLabel="Minimize workout"
               accessibilityHint="Keep your workout active and return to the previous screen"
@@ -715,9 +730,9 @@ export default function Workout() {
               }}
             >
               <ChevronDown color={redesignColors.ash} size={20} strokeWidth={2.4} />
-            </TouchableOpacity>
+            </WorkoutTouchable>
 
-            <TouchableOpacity
+            <WorkoutTouchable
               accessibilityRole="button"
               accessibilityLabel="Close workout"
               onPress={confirmDiscardWorkout}
@@ -735,7 +750,7 @@ export default function Workout() {
               }}
             >
               <X color={redesignColors.ash} size={20} strokeWidth={2.4} />
-            </TouchableOpacity>
+            </WorkoutTouchable>
           </View>
         </View>
         </WorkoutLaunchSection>
@@ -786,21 +801,29 @@ export default function Workout() {
           ) : null}
         </Animated.View>
 
-        <View style={{ flexDirection: 'row', gap: 8, marginTop: 20 }}>
+        <Animated.View
+          layout={workoutLayoutTransition}
+          style={{ flexDirection: 'row', gap: 8, marginTop: 20 }}
+        >
           {currentSession.exercises.map((item, index) => (
-            <ExerciseProgressSegment
+            <Animated.View
               key={`${item.name}-${index}`}
-              state={
-                index === exerciseIndex
-                  ? 'current'
-                  : isExerciseComplete(item)
-                    ? 'completed'
-                    : 'upcoming'
-              }
-              accent={accent}
-            />
+              layout={workoutLayoutTransition}
+              style={{ flex: 1 }}
+            >
+              <ExerciseProgressSegment
+                state={
+                  index === exerciseIndex
+                    ? 'current'
+                    : isExerciseComplete(item)
+                      ? 'completed'
+                      : 'upcoming'
+                }
+                accent={accent}
+              />
+            </Animated.View>
           ))}
-        </View>
+        </Animated.View>
         </WorkoutLaunchSection>
 
         <WorkoutLaunchSection order={2} fill>
@@ -811,6 +834,7 @@ export default function Workout() {
           style={{ flex: 1 }}
         >
           <Animated.View
+            layout={workoutLayoutTransition}
             style={{
               marginTop: 24,
               marginBottom: 22,
@@ -820,12 +844,13 @@ export default function Workout() {
               key={`${exerciseIdentity}-${stageKey}`}
               entering={animateStage ? stageEntering : undefined}
               exiting={STAGE_EXIT}
-              layout={STAGE_LAYOUT}
+              layout={workoutLayoutTransition}
             >
               {loggedBonusSet ? (
                 <BonusSetAcknowledgement
                   set={loggedBonusSet}
                   weightUnit={weightUnit}
+                  loadType={exercise.loadType}
                   onAdvance={() => {
                     setStageDirection(1);
                     setLoggedBonusSet(null);
@@ -840,7 +865,9 @@ export default function Workout() {
                       { ...bonusSelection, completed: false, skipped: false },
                     ]}
                     currentSetIndex={exercise.sets.length}
+                    enteringSetIndex={exercise.sets.length}
                     weightUnit={weightUnit}
+                    loadType={exercise.loadType}
                     accent={accent}
                     currentAccent={BONUS_SET_META[bonusSelection.type].color}
                     currentLabel={BONUS_SET_META[bonusSelection.type].shortTitle}
@@ -851,6 +878,7 @@ export default function Workout() {
                       selection={bonusSelection}
                       weightIncrement={weightIncrement}
                       weightUnit={weightUnit}
+                      loadType={exercise.loadType}
                       onCancel={() => {
                         setStageDirection(-1);
                         setBonusSelection(null);
@@ -863,6 +891,7 @@ export default function Workout() {
                           loggedSet.reps,
                           loggedSet.weight
                         );
+                        setRecentBonusSetIndex(exercise.sets.length);
                         setBonusSelection(null);
                         setLoggedBonusSet(loggedSet);
                         if (Platform.OS !== 'web') {
@@ -875,15 +904,19 @@ export default function Workout() {
               ) : exerciseComplete ? (
                 <ExerciseFinisher
                   sets={exercise.sets}
+                  enteringSetIndex={recentBonusSetIndex}
                   nextExerciseName={nextExercise?.name}
                   weightUnit={weightUnit}
+                  loadType={exercise.loadType}
                   onAdvance={handleAdvanceExercise}
                   onEditSet={(completedSetIndex) => {
+                    setRecentBonusSetIndex(null);
                     loggingSetRef.current = false;
                     setStageDirection(-1);
                     toggleSetCompleted(exerciseIndex, completedSetIndex);
                   }}
                   onSelectBonus={(selection) => {
+                    setRecentBonusSetIndex(null);
                     setStageDirection(1);
                     setBonusSelection(selection);
                     if (Platform.OS !== 'web') void Haptics.selectionAsync();
@@ -895,6 +928,7 @@ export default function Workout() {
                     sets={exercise.sets}
                     currentSetIndex={setIndex}
                     weightUnit={weightUnit}
+                    loadType={exercise.loadType}
                     accent={accent}
                     onEditCompletedSet={(completedSetIndex) => {
                       loggingSetRef.current = false;
@@ -906,20 +940,29 @@ export default function Workout() {
                     key={`active-card-${setIndex}`}
                     entering={animateStage ? FORWARD_ENTER : undefined}
                     exiting={STAGE_EXIT}
-                    layout={STAGE_LAYOUT}
+                    layout={workoutLayoutTransition}
                     style={{ marginTop: 24 }}
                   >
                     <ActiveSetCard
                       setNumber={setIndex + 1}
                       reps={activeSet.reps}
                       weight={activeSet.weight}
+                      loadType={exercise.loadType}
                       weightIncrement={weightIncrement}
                       weightUnit={weightUnit}
                       onWeightUnitChange={(unit) => updateProfile({ weightUnit: unit })}
+                      onInfoPress={availableExerciseInfo ? () => {
+                        if (infoOpeningRef.current) return;
+                        infoOpeningRef.current = true;
+                        setInfoExercise(availableExerciseInfo);
+                        setInfoVisible(true);
+                      } : undefined}
                       weightDeltaLabel={weightDeltaLabel}
                       accent={accent}
                       onRepsChange={handleRepsChange}
                       onWeightChange={handleWeightChange}
+                      onRepsCommit={(reps) => updateActiveSet(reps, activeSet.weight)}
+                      onWeightCommit={(weight) => updateActiveSet(activeSet.reps, weight)}
                       onLog={handleToggleSet}
                       onSkip={handleSkipSet}
                     />
@@ -938,7 +981,9 @@ export default function Workout() {
             accessibilityHint="Shows the remaining exercise queue"
             activeOpacity={0.72}
             onPress={() => setShowUpNextSheet(true)}
-            exiting={UP_NEXT_EXIT}
+            entering={animateStage ? workoutCardEntering : undefined}
+            exiting={workoutCardExiting}
+            layout={workoutLayoutTransition}
             style={{
               height: 82,
               marginTop: 2,
@@ -1032,7 +1077,7 @@ export default function Workout() {
       />
 
       <WorkoutIntensityPicker
-        visible={showFeedbackModal}
+        visible={showFeedbackModal || activityFeedbackVisible}
         type={workoutType}
         levels={FEEDBACK_LEVELS}
         prompt="How did it feel?"
@@ -1043,8 +1088,16 @@ export default function Workout() {
             value === 0 ? 'easy' : value === 0.5 ? 'medium' : 'hard';
           handleFeedbackSelect(intensity);
         }}
-        onClose={() => setShowFeedbackModal(false)}
+        onClose={() => { setShowFeedbackModal(false); router.setParams({ finishFromActivity: '' }); }}
       />
+      {infoExercise ? (
+        <ExerciseInfo
+          info={infoExercise}
+          visible={infoVisible}
+          onClose={closeExerciseInfo}
+          onHidden={finishClosingExerciseInfo}
+        />
+      ) : null}
     </View>
     </WorkoutMinimizeSurface>
     </WorkoutLaunchSurface>

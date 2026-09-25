@@ -1,4 +1,5 @@
 // Run with: node --test tests/personalRecords.test.cjs (Node 22+ for in-memory SQLite).
+/* global __dirname */
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const fs = require('node:fs');
@@ -19,11 +20,11 @@ function evaluate(text, requireModule = require, injected = {}) {
   new Function('exports', 'require', ...Object.keys(injected), code)(exports, requireModule, ...Object.values(injected));
   return exports;
 }
-const dates = evaluate(declarations('store/workoutStore.ts', ['parseSessionDate', 'toLocalCalendarDate']));
+const dates = evaluate(source('store/workoutCalendar.ts'));
 const verified = evaluate(source('store/verifiedSessions.ts'));
 const theme = evaluate(source('constants/theme.ts'));
 const records = evaluate(source('store/personalRecords.ts'), (id) => {
-  if (id.endsWith('/workoutStore')) return dates;
+  if (id.endsWith('/workoutCalendar')) return dates;
   if (id.endsWith('/verifiedSessions')) return verified;
   if (id.endsWith('/theme')) return theme;
   throw new Error(`Unexpected dependency: ${id}`);

@@ -79,7 +79,7 @@ constants/workouts.ts maps **splitColors** to the six workout types. The active 
 | **splitColors** | **core** | **#FF5682** |
 | **workoutLoggingColors** | **chest** | **#FF7A3D** (splitColors.chest) |
 | **workoutLoggingColors** | **back** | **#4F8BFF** (splitColors.back) |
-| **workoutLoggingColors** | **shoulders** | **#F05C66** |
+| **workoutLoggingColors** | **shoulders** | **#A76FF2** (splitColors.shoulders) |
 | **workoutLoggingColors** | **arms** | **#28C8BD** (splitColors.arms) |
 | **workoutLoggingColors** | **legs** | **#B5E53F** (splitColors.legs) |
 | **workoutLoggingColors** | **core** | **#55C96B** |

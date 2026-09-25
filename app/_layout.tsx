@@ -17,7 +17,10 @@ import { JetBrainsMono_400Regular, JetBrainsMono_700Bold } from '@expo-google-fo
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { ActiveWorkoutBar } from '@/components/ActiveWorkoutBar';
 import { initializeWorkoutStore, useWorkoutStore } from '@/store/workoutStore';
+import { startWorkoutLiveActivitySync } from '@/services/liveActivity/sync';
+import { startWorkoutLiveActivityInteractions } from '@/services/liveActivity/interaction';
 import '@/global.css';
+import { BUILD_SANDBOX_ENABLED } from '@/features/build/config';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -34,11 +37,14 @@ export default function RootLayout() {
   const inOnboarding = segments[0] === '(onboarding)';
   const inCustomSplitFlow = segments[0] === 'custom-split';
   const onSplash = pathname === '/' && segments[0] !== '(tabs)';
+  const inBuildSandbox = BUILD_SANDBOX_ENABLED && (pathname === '/build-sandbox' || pathname === '/build' || pathname === '/build-casting'
+    || pathname === '/build-case' || pathname.startsWith('/build-case/'));
   const needsOnboardingRedirect =
     isHydrated &&
     !profile?.onboardingCompleted &&
     !inOnboarding &&
     !inCustomSplitFlow &&
+    !inBuildSandbox &&
     !onSplash;
   const needsAppRedirect =
     isHydrated &&
@@ -68,6 +74,18 @@ export default function RootLayout() {
       console.error('Failed to initialize workout database', error);
     });
   }, []);
+
+  useEffect(() => startWorkoutLiveActivitySync(), []);
+
+  useEffect(() => {
+    if ((!fontsLoaded && !fontError) || !isHydrated || hydrationError || redirectPending) return;
+    return startWorkoutLiveActivityInteractions((workoutId, needsFeedback) => {
+      if (!needsFeedback) return;
+      router.navigate({ pathname: '/workout', params: {
+        fromActivityCard: '1', finishFromActivity: needsFeedback ? workoutId : '',
+      } });
+    });
+  }, [fontError, fontsLoaded, hydrationError, isHydrated, redirectPending, router]);
 
   useEffect(() => {
     if (
@@ -136,6 +154,7 @@ export default function RootLayout() {
             animationTypeForReplace: 'pop',
           })}
         />
+        <Stack.Screen name="build-casting" options={{ headerShown: false, gestureEnabled: false, animation: 'fade' }} />
         <Stack.Screen
           name="workout-summary"
           options={({ route }) => ({

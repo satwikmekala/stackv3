@@ -55,7 +55,7 @@ export const splitColors = {
 export const workoutLoggingColors = {
   chest: splitColors.chest,
   back: splitColors.back,
-  shoulders: '#F05C66',
+  shoulders: splitColors.shoulders,
   arms: splitColors.arms,
   legs: splitColors.legs,
   core: '#55C96B',
