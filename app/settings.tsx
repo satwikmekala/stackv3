@@ -20,7 +20,9 @@ import { Button } from '@/components/Button';
 import { colors, fonts, redesignColors } from '@/constants/theme';
 import { TestLiveActivityControls } from '@/components/dev/TestLiveActivityControls';
 import '@/global.css';
-import { BUILD_SANDBOX_ENABLED } from '@/features/build/config';
+import { BUILD_DEMO_ENABLED, BUILD_SANDBOX_ENABLED } from '@/features/build/config';
+import { buildPreferences, useBuildAccessibility } from '@/features/build/useBuildAccessibility';
+import { buildIntroduction } from '@/features/build/introductionStore';
 
 // Supported weekly-goal range.
 const GOAL_OPTIONS = [1, 2, 3, 4, 5, 6];
@@ -63,6 +65,27 @@ const resizeTrainingDays = (trainingDays: number[], weeklyGoal: number) => {
 
   return resizedDays.sort((a, b) => a - b);
 };
+
+function BuildEffectsSetting() {
+  const accessibility = useBuildAccessibility();
+  return (
+    <View style={{ backgroundColor: colors.surface, borderRadius: 20, padding: 20, marginBottom: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+      <View style={{ flex: 1 }}>
+        <Text style={{ fontFamily: fonts.bodyMedium, fontSize: 12, color: colors.ash, marginBottom: 4 }}>Reduce Your Stack effects</Text>
+        <Text style={{ fontFamily: fonts.body, fontSize: 13, color: colors.ash }}>Use static previews and skip animations. Your workouts and records stay available.</Text>
+      </View>
+      <Switch
+        accessibilityLabel="Reduce Your Stack effects"
+        value={accessibility.reduceEffects}
+        disabled={!accessibility.ready}
+        onValueChange={(value) => { void buildPreferences.setReduceEffects(value); }}
+        trackColor={{ false: colors.surfaceRaised, true: redesignColors.accent }}
+        thumbColor={colors.bone}
+        ios_backgroundColor={colors.surfaceRaised}
+      />
+    </View>
+  );
+}
 
 // Shared pill used by both the goal stepper and the intensity selector —
 // bone border on the selected option, matching the onboarding convention.
@@ -154,6 +177,7 @@ export default function Settings() {
           style: 'destructive',
           onPress: () => {
             resetAllData();
+            void buildIntroduction.reset();
             router.replace('/(onboarding)/welcome');
           },
         },
@@ -418,6 +442,7 @@ export default function Settings() {
           />
         </View>
 
+        {BUILD_SANDBOX_ENABLED && <BuildEffectsSetting />}
         {__DEV__ && Platform.OS === 'ios' && <TestLiveActivityControls />}
 
         {/* Danger zone — moved as-is from the old Profile */}
@@ -451,7 +476,7 @@ export default function Settings() {
             This will clear all your workout data and return you to onboarding
           </Text>
         </View>
-        {BUILD_SANDBOX_ENABLED && (
+        {BUILD_DEMO_ENABLED && (
           <View style={{ marginTop: 24 }}>
             <Button title="Build · Monolith" variant="secondary" onPress={() => router.push('/build')} />
             <View style={{ height: 12 }} />

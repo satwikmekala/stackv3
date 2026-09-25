@@ -108,9 +108,68 @@ test('introPages: every exit marks the intro seen, once', async () => {
   }
 });
 
+test('introduction: reset shows it again, in memory and in storage', async () => {
+  const values = new Map([[BUILD_INTRO_KEY, 'seen']]);
+  const storage = { getItem: async (key) => values.get(key) ?? null, setItem: async (key, value) => { values.set(key, value); }, removeItem: async (key) => { values.delete(key); } };
+  const introduction = createBuildIntroduction(storage);
+  assert.equal(await introduction.shouldShow(), false);
+  await introduction.reset();
+  assert.equal(introduction.getSnapshot(), false);
+  assert.equal(await introduction.shouldShow(), true);
+  assert.equal(await createBuildIntroduction(storage).shouldShow(), true, 'reset is persisted');
+});
+
+test('introduction: a user who dismissed v1 sees the introduction again', async () => {
+  const storage = { getItem: async (key) => (key === 'stack.build.introduction.v1' ? 'seen' : null), setItem: async () => {} };
+  assert.equal(await createBuildIntroduction(storage).shouldShow(), true);
+});
+
 test('introPages: a failed write still marks the intro seen for this app session', async () => {
   const introduction = createBuildIntroduction({ getItem: async () => null, setItem: async () => { throw new Error('write failed'); } });
   pages.createIntroExit(introduction).exit('back');
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(await introduction.shouldShow(), false);
+});
+
+test('introOverview: every week drops in from above, lands inside the frame, and the camera ends on the whole tower', () => {
+  const overview = load('features/build/introOverview.ts');
+  const { cameraFrame } = load('features/build/monolithModel.ts');
+  const { layoutSlabs, weeklyHeight, BASE_HEIGHT, DEFAULT_TUNING } = load('features/build/model.ts');
+  const COS = Math.hypot(8, 10) / Math.hypot(8, 6, 10);
+  const slab = (heights) => ({ height: weeklyHeight(heights.map((height) => ({ height })), DEFAULT_TUNING.compression) });
+  // Mirrors BuildEntry's page 4 fixture: page 3's five weeks, then seven more dropped on top (no gaps).
+  const base = [{ height: 1.08 }, { height: 1.32 }, { height: 0.52 }, { height: 0.94 }, slab([1, 1, 1, 1.45, 1])];
+  const drops = [3, 4, 2, 4, 5, 3, 4].map((sessions, week) => slab(Array.from({ length: sessions }, (_, session) => 1 + ((week + session) % 3) * 0.15)));
+  const { items, top } = layoutSlabs([...base, ...drops], 0);
+  const dropItems = items.slice(base.length);
+  const heights = dropItems.map(({ slab: s }) => s.height * BASE_HEIGHT);
+  // How far a 2.22-wide top face's corners reach above its centre on screen, from the camera's (8, 6, 10) direction.
+  const n = Math.hypot(8, 6, 10), f = [-8 / n, -6 / n, -10 / n], rl = Math.hypot(f[2], f[0]), r = [-f[2] / rl, f[0] / rl];
+  const cornerReach = 1.11 * (Math.abs(r[1] * f[1]) + Math.abs(r[0] * f[1]));
+  for (const [width, height] of [[340, 380], [340, 250], [300, 300], [260, 380]]) {
+    const closeZoom = cameraFrame(top, width, height, false, { bottom: 0, top: 0.6 }).zoom;
+    const path = { closeZoom, handoffY: 0.08 + 0.2 * height / (closeZoom * COS), overview: cameraFrame(top, width, height, true) };
+    const lifts = overview.overviewDropLifts(dropItems.map(({ y }) => y), dropItems[0].y, heights, height, COS, path);
+    assert.ok(lifts.every((lift) => lift >= 3.2 && lift < 6), `${width}x${height}: drop heights ${lifts}`);
+    let progress = 0;
+    let lastZoom = closeZoom;
+    for (let elapsed = 0; elapsed <= overview.OVERVIEW_PULLBACK_END + 400; elapsed += 1000 / 60) {
+      // A plain (unsprung) follow is the worst case for lag: the goal itself must keep landings in frame.
+      progress = Math.max(progress, overview.overviewProgressTarget(elapsed, dropItems[0].y, heights, height, COS, path));
+      const camera = overview.overviewCamera(progress, path);
+      assert.ok(Math.abs(Math.log(camera.zoom / lastZoom)) * height / 2 < 4, `${width}x${height}: zoom jumps at ${Math.round(elapsed)}ms`);
+      lastZoom = camera.zoom;
+      const landedTop = dropItems.reduce((sum, item, index) => (elapsed >= overview.overviewLanding(index) ? item.y + heights[index] : sum), dropItems[0].y);
+      const screenTop = (landedTop - camera.targetY) * COS + cornerReach;
+      assert.ok(screenTop <= height / 2 / camera.zoom, `${width}x${height}: a landed week is above the frame at ${Math.round(elapsed)}ms`);
+      dropItems.forEach((item, index) => {
+        const drop = overview.overviewDrop(elapsed, index, lifts[index]);
+        if (drop.visible && elapsed - overview.overviewLanding(index) + 300 < 17) {
+          // Its lowest corner is still above the top edge on its first frame.
+          assert.ok((item.y + drop.lift - camera.targetY) * COS - cornerReach > height / 2 / camera.zoom, `${width}x${height}: week ${index} appears inside the frame`);
+        }
+      });
+    }
+    assert.equal(progress, 1, `${width}x${height}: ends on the overview`);
+  }
 });

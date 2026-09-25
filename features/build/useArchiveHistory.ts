@@ -6,10 +6,11 @@ import { getStartOfWeek, toLocalCalendarDate } from '../../store/workoutCalendar
 import { adaptBuildHistory } from './adapter';
 import { makeMonolithDemo, MONOLITH_DEMO_NOW } from './monolithDemo';
 import { useBuildHistory } from './useBuildHistory';
+import { BUILD_DEMO_ENABLED } from './config';
 
 /** History for the Case and its unpacked weeks: the shared derivation, or a demo source. */
 export function useArchiveHistory(sourceParam: string | undefined) {
-  const demoCount = ['0', '12', '104', '260'].includes(sourceParam ?? '') ? Number(sourceParam) : null;
+  const demoCount = BUILD_DEMO_ENABLED && ['0', '12', '104', '260'].includes(sourceParam ?? '') ? Number(sourceParam) : null;
   const sessions = useWorkoutStore((state) => state.sessions);
   const focused = useIsFocused();
   const [now, setNow] = useState(() => new Date());

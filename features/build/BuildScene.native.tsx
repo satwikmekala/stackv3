@@ -9,6 +9,7 @@ import { castingFrame, type CastingPhase } from './casting';
 import { createHistoryGeometry, createRecordSeamGeometry, createSlabGeometry } from './geometry';
 import { BASE_HEIGHT, layoutSlabs, type BuildSlab, type BuildTuning, type Lamination } from './model';
 import type { BuildSceneProps } from './sceneTypes';
+import { OVERVIEW_PULLBACK_END, overviewCamera, overviewDrop, overviewDropLifts, overviewLanding, overviewProgressTarget } from './introOverview';
 
 /** Where page 3 (weekly fusion) leaves the camera; page 4 starts its pull-back from here. */
 const INTRO_HANDOFF_Y = 0.08;
@@ -18,10 +19,6 @@ const INTRO_DROP = 0.2;
 const CAMERA_ELEVATION_COS = Math.hypot(8, 10) / Math.hypot(8, 6, 10);
 /** Raising the camera target lowers the object on screen; this is the rise for the intro drop. */
 const introDropY = (zoom: number, height: number) => INTRO_DROP * height / (zoom * CAMERA_ELEVATION_COS);
-const introSmoother = (elapsed: number, start: number, end: number) => {
-  const t = Math.max(0, Math.min(1, (elapsed - start) / (end - start)));
-  return t * t * t * (t * (t * 6 - 15) + 10);
-};
 const introEase = (elapsed: number, start: number, end: number) => {
   const t = Math.max(0, Math.min(1, (elapsed - start) / (end - start)));
   return t * t * (3 - 2 * t);
@@ -31,8 +28,8 @@ const introEase = (elapsed: number, start: number, end: number) => {
 // very first frame and is visually settled in about half a second, with no long creep.
 const CAMERA_SMOOTH_TIME = 0.14;
 /** Frame-rate independent critically damped spring (Game Programming Gems 4, 1.10). */
-function smoothDamp(current: number, goal: number, velocity: number, dt: number) {
-  const omega = 2 / CAMERA_SMOOTH_TIME;
+function smoothDamp(current: number, goal: number, velocity: number, dt: number, smoothTime = CAMERA_SMOOTH_TIME) {
+  const omega = 2 / smoothTime;
   const x = omega * dt;
   const decay = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
   const change = current - goal;
@@ -162,6 +159,11 @@ function Scene(props: BuildSceneProps) {
   const introOverviewWarmup = useRef(0);
   const introOverviewPullbackFinished = useRef(false);
   const introOverviewFinished = useRef(false);
+  const introOverviewProgress = useRef({ value: 0, velocity: 0 });
+  const overviewBaseCount = introOverview ? Math.min(introOverview.baseCount, items.length) : 0;
+  const overviewBase = useMemo(() => items.slice(0, overviewBaseCount), [items, overviewBaseCount]);
+  const overviewDrops = useMemo(() => items.slice(overviewBaseCount), [items, overviewBaseCount]);
+  const overviewDropHeights = useMemo(() => overviewDrops.map(({ slab }) => slab.height * BASE_HEIGHT + (props.pieceGap ?? 0)), [overviewDrops, props.pieceGap]);
   const introHistoryHeight = introFusion
     ? Math.max(0, (items[introFusion.historyCount]?.y ?? items[0]?.y ?? 0) - (items[0]?.y ?? 0))
     : 0;
@@ -210,28 +212,42 @@ function Scene(props: BuildSceneProps) {
       const frame = cameraFrame(top, size.width, size.height, true);
       targetY = frame.targetY;
       desiredZoom = frame.zoom;
+      overviewDrops.forEach((item, index) => {
+        const object = introObjects.current[index]?.current;
+        if (object) { object.visible = true; object.position.y = item.y; }
+      });
       introOverviewFinished.current = true;
     } else if (introOverview && !introOverviewFinished.current) {
       // The first frames on this page upload the whole tower to the GPU; hold the clock
-      // until they are through so the pull-back never starts on a stalled frame.
+      // until they are through so the first drop never starts on a stalled frame.
       if (introOverviewWarmup.current++ >= 3) introOverviewElapsed.current += Math.min(delta * 1000, 34);
-      const overviewFrame = cameraFrame(top, size.width, size.height, true);
+      const elapsed = introOverviewElapsed.current;
       const closeZoom = cameraFrame(top, size.width, size.height, false, { bottom: 0, top: 0.6 }).zoom;
-      const progress = introSmoother(introOverviewElapsed.current, 300, 1800);
-      // Zoom geometrically so the tower recedes at an even perceived rate instead of
-      // crawling and then rushing at the end. The view's centre follows its visible span
-      // from where page 3 leaves the camera, so the plinth stays put across the page change.
-      desiredZoom = closeZoom * (overviewFrame.zoom / closeZoom) ** progress;
-      const spanRange = 1 / overviewFrame.zoom - 1 / closeZoom;
-      const spanProgress = Math.abs(spanRange) < 1e-6 ? progress : (1 / desiredZoom - 1 / closeZoom) / spanRange;
-      // Start from page 3's lowered frame; the drop eases out as the tower fills the view.
-      const handoffY = INTRO_HANDOFF_Y + introDropY(closeZoom, size.height);
-      targetY = handoffY + (overviewFrame.targetY - handoffY) * spanProgress;
-      if (!introOverviewPullbackFinished.current && introOverviewElapsed.current >= 1800) {
+      // Start from page 3's lowered frame so the plinth and its tower stay put across the page change.
+      const path = { closeZoom, handoffY: INTRO_HANDOFF_Y + introDropY(closeZoom, size.height), overview: cameraFrame(top, size.width, size.height, true) };
+      const baseTop = overviewDrops[0]?.y ?? top;
+      const lifts = overviewDropLifts(overviewDrops.map(({ y }) => y), baseTop, overviewDropHeights, size.height, CAMERA_ELEVATION_COS, path);
+      overviewDrops.forEach((item, index) => {
+        const object = introObjects.current[index]?.current;
+        if (!object) return;
+        const drop = overviewDrop(elapsed, index, lifts[index]);
+        object.visible = drop.visible;
+        object.position.y = item.y + drop.lift;
+      });
+      // The camera rises with the stack as each week lands, then pulls back to the whole tower.
+      // It follows its goal on a spring, so the handoff between the two never shows a kink.
+      const goal = overviewProgressTarget(elapsed, baseTop, overviewDropHeights, size.height, CAMERA_ELEVATION_COS, path);
+      const progress = introOverviewProgress.current;
+      const spring = smoothDamp(progress.value, goal, progress.velocity, Math.min(delta, 1 / 20), 0.12);
+      progress.velocity = spring.velocity;
+      progress.value = Math.min(1, Math.max(progress.value, spring.value, elapsed >= OVERVIEW_PULLBACK_END ? goal : 0));
+      ({ zoom: desiredZoom, targetY } = overviewCamera(progress.value, path));
+      const settled = elapsed >= OVERVIEW_PULLBACK_END && progress.value >= 0.9995 && overviewDrops.every((_, index) => elapsed >= overviewLanding(index) + 80);
+      if (!introOverviewPullbackFinished.current && settled) {
         introOverviewPullbackFinished.current = true;
         introOverview.onPullbackComplete();
       }
-      if (introOverviewElapsed.current >= 2100) {
+      if (introOverviewPullbackFinished.current && elapsed >= OVERVIEW_PULLBACK_END + 300) {
         introOverviewFinished.current = true;
         introOverview.onComplete();
       } else invalidate();
@@ -551,9 +567,10 @@ function Scene(props: BuildSceneProps) {
       <boxGeometry args={[2.36, 0.075, 2.36]} />
       <meshBasicMaterial color="#29231B" />
     </mesh>
-    {fusionItem ? <FusionHistory items={fusionHistory} tuning={tuning} material={material} /> : castItem ? castHistory.length > 0 && <FusionHistory items={castHistory} tuning={tuning} material={material} /> : introOverview ? <FusionHistory items={items} tuning={tuning} material={material} /> : !hasIntroScene && items.filter(({ slab }) => slab.id !== casting?.slabId).map(({ slab, y }) => <Slab key={slab.id} slab={slab} y={y} onSelect={onSelectSlab} tuning={tuning} lamination={lamination} material={material} />)}
+    {fusionItem ? <FusionHistory items={fusionHistory} tuning={tuning} material={material} /> : castItem ? castHistory.length > 0 && <FusionHistory items={castHistory} tuning={tuning} material={material} /> : introOverview ? <FusionHistory items={overviewBase} tuning={tuning} material={material} /> : !hasIntroScene && items.filter(({ slab }) => slab.id !== casting?.slabId).map(({ slab, y }) => <Slab key={slab.id} slab={slab} y={y} onSelect={onSelectSlab} tuning={tuning} lamination={lamination} material={material} />)}
     {introStack && items.map(({ slab, y }, index) => <IntroSlab key={slab.id} slab={slab} y={y} tuning={tuning} material={material} objectRef={introObjects.current[index]} visible={introIsStatic} />)}
     {introProgress && items.map(({ slab, y }, index) => <IntroProgressSlab key={slab.id} slab={{ ...slab, height: index === 3 ? 1 : slab.height, layers: slab.layers.map((layer) => ({ ...layer, record: false })) }} y={y} tuning={tuning} material={material} goldMaterial={goldMaterial} objectRef={introObjects.current[index]} visible={introIsStatic || index < 3} seamGeometry={index === 4 ? introProgressSeam ?? undefined : undefined} />)}
+    {introOverview && overviewDrops.map(({ slab, y }, index) => <IntroSlab key={slab.id} slab={slab} y={y} tuning={tuning} material={material} objectRef={introObjects.current[index]} visible={introOverview.alreadyPlayed || reducedMotion} />)}
     {introFusion && <group ref={introHistoryObject} position={[0, -introHistoryHeight, 0]} visible={introIsStatic}>{items.slice(0, introFusion.historyCount).map(({ slab, y }) => <Slab key={slab.id} slab={slab} y={y} tuning={tuning} lamination="strata" material={material} />)}</group>}
     {introFusion && items[introFusion.historyCount] && <FusionSlab slab={items[introFusion.historyCount].slab} tuning={tuning} objectRef={introFusionObject} material={material} />}
     </group>

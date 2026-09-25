@@ -146,7 +146,7 @@ export default function Monolith() {
     <View style={styles.header}>
       <Pressable accessibilityRole="button" accessibilityLabel="Back to Your Stack" hitSlop={8} onPress={() => router.canGoBack() ? router.back() : router.replace('/')} style={styles.backButton}><ChevronLeft size={23} color={c.bone} /></Pressable>
       <Text maxFontSizeMultiplier={1.4} style={styles.brand}>YOUR STACK</Text>
-      <Pressable accessibilityRole="button" accessibilityLabel="Your Stack options and history source" onPress={() => setSheet('source')} style={styles.source}><Text style={styles.sourceText}>Options</Text></Pressable>
+      <View style={styles.headerSpacer} />
     </View>
     <ScrollView scrollEnabled={accessibility.largeText} contentContainerStyle={{ flexGrow: 1 }}>
     {/* Overview gives everything above the metrics to the tower. */}
@@ -239,10 +239,9 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: c.ink },
   header: { flexWrap: 'wrap', paddingHorizontal: 20, paddingTop: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   backButton: { width: 44, minHeight: 48, alignItems: 'center', justifyContent: 'center', marginLeft: -8 },
+  headerSpacer: { width: 44, marginRight: -8 },
   icon: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22, backgroundColor: '#241E18' },
   brand: { color: c.bone, fontFamily: f.mono, fontSize: 10, letterSpacing: 2 },
-  source: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 10 },
-  sourceText: { color: c.ash, fontFamily: f.uiMedium, fontSize: 12 },
   intro: { paddingHorizontal: 26, paddingTop: 10 },
   cardSlot: { justifyContent: 'center' },
   eyebrow: { color: c.ash, fontFamily: f.mono, fontSize: 9, letterSpacing: 1.5 },

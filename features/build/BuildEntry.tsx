@@ -45,8 +45,8 @@ const overviewWeeks: BuildSlab[] = OVERVIEW_WEEK_SESSIONS.map((sessions, week) =
   }));
   return { id: `intro:overview-week-${week + 1}`, layers: weekLayers, height: weeklyHeight(weekLayers, DEFAULT_TUNING.compression), sealed: true };
 });
-/** Page 4: about three months (12 weeks), ending in page 3's tower so the pull-back starts where fusion ended. */
-const overviewTower = [...overviewWeeks, ...introTower];
+/** Page 4: about three months (12 weeks). Page 3's tower is the base, so the page change is seamless; the rest drop onto it. */
+const overviewTower = [...introTower, ...overviewWeeks];
 /** Scene fixtures per page; the copy lives in introCopy.ts. */
 const PAGE_SLABS = [introPieces, progressPieces, introTower, pieces];
 export default function BuildEntry({ children }: { children: ReactNode }) {
@@ -214,7 +214,7 @@ export default function BuildEntry({ children }: { children: ReactNode }) {
             : page === 2 && !fusionSceneFailed
               ? <BuildScene slabs={slabs} pieceGap={0} tuning={DEFAULT_TUNING} lamination="strata" overview={false} focusRange={INTRO_CAMERA_FOCUS} reducedMotion={introReducedMotion} benchmark={0} onStats={() => {}} onError={() => setFusionSceneFailed(true)} introFusion={{ alreadyPlayed: played2, loosePieces: progressPieces, historyCount: earlierWeeks.length, onPressStart: onFusionPressStart, onComplete: onFusionComplete }} />
               : page === 3 && !overviewSceneFailed
-                ? <BuildScene slabs={overviewTower} tuning={DEFAULT_TUNING} lamination="strata" overview reducedMotion={introReducedMotion} benchmark={0} onStats={() => {}} onError={() => setOverviewSceneFailed(true)} introOverview={{ alreadyPlayed: played3, onPullbackComplete: onOverviewPullbackComplete, onComplete: onOverviewComplete }} />
+                ? <BuildScene slabs={overviewTower} pieceGap={0} tuning={DEFAULT_TUNING} lamination="strata" overview reducedMotion={introReducedMotion} benchmark={0} onStats={() => {}} onError={() => setOverviewSceneFailed(true)} introOverview={{ alreadyPlayed: played3, baseCount: introTower.length, onPullbackComplete: onOverviewPullbackComplete, onComplete: onOverviewComplete }} />
                 : <BuildPreview slabs={page === 3 ? overviewTower : slabs} width={artWidth} height={artHeight} />}
       </View>
       {/* Copy pages swipe; the page index comes from where the pager settles. */}

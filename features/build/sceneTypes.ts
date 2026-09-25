@@ -37,6 +37,8 @@ export type BuildSceneProps = {
   };
   introOverview?: {
     alreadyPlayed: boolean;
+    /** The first slabs are page 3's tower, already standing; the rest drop onto it. */
+    baseCount: number;
     onPullbackComplete: () => void;
     onComplete: () => void;
   };

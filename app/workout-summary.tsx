@@ -26,7 +26,7 @@ import Animated, {
   ZoomIn,
 } from 'react-native-reanimated';
 import { ShareSheet } from '@/components/ShareSheet';
-import { BUILD_SANDBOX_ENABLED } from '@/features/build/config';
+import { BUILD_DEMO_ENABLED } from '@/features/build/config';
 import { motionDuration, motionEasing } from '@/constants/motion';
 import { redesignColors, redesignFonts } from '@/constants/theme';
 import { DEFAULT_WEIGHT_UNIT } from '@/store/workoutDatabase';
@@ -302,7 +302,7 @@ export default function WorkoutSummaryScreen() {
   const demo = Array.isArray(rawDemo) ? rawDemo[0] : rawDemo;
   // Demo workouts are never saved, so the sandbox rebuilds them to show their summary.
   const demoSessions = useMemo(() => {
-    if (!demo || !BUILD_SANDBOX_ENABLED) return undefined;
+    if (!demo || !BUILD_DEMO_ENABLED) return undefined;
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { makeMonolithDemo } = require('@/features/build/monolithDemo') as typeof import('@/features/build/monolithDemo');
     return makeMonolithDemo(Number(demo));

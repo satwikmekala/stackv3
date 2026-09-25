@@ -20,7 +20,7 @@ import { initializeWorkoutStore, useWorkoutStore } from '@/store/workoutStore';
 import { startWorkoutLiveActivitySync } from '@/services/liveActivity/sync';
 import { startWorkoutLiveActivityInteractions } from '@/services/liveActivity/interaction';
 import '@/global.css';
-import { BUILD_SANDBOX_ENABLED } from '@/features/build/config';
+import { BUILD_DEMO_ENABLED } from '@/features/build/config';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -37,7 +37,7 @@ export default function RootLayout() {
   const inOnboarding = segments[0] === '(onboarding)';
   const inCustomSplitFlow = segments[0] === 'custom-split';
   const onSplash = pathname === '/' && segments[0] !== '(tabs)';
-  const inBuildSandbox = BUILD_SANDBOX_ENABLED && (pathname === '/build-sandbox' || pathname === '/build' || pathname === '/build-casting'
+  const inBuildSandbox = BUILD_DEMO_ENABLED && (pathname === '/build-sandbox' || pathname === '/build' || pathname === '/build-casting'
     || pathname === '/build-case' || pathname.startsWith('/build-case/'));
   const needsOnboardingRedirect =
     isHydrated &&
