@@ -265,7 +265,7 @@ export default function NewCustomExerciseScreen() {
 const styles = StyleSheet.create({
   modal: { flex: 1, backgroundColor: 'transparent' },
   backdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0, 0, 0, 0.76)',
   },
   keyboardView: { flex: 1, justifyContent: 'flex-end' },

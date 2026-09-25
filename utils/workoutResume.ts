@@ -1,7 +1,7 @@
-import type { Router } from 'expo-router';
+import type { ImperativeRouter } from 'expo-router';
 import type { Exercise } from '@/store/workoutStore';
 
-export const resumeWorkout = (router: Pick<Router, 'push'>) => {
+export const resumeWorkout = (router: Pick<ImperativeRouter, 'push'>) => {
   router.push({ pathname: '/workout', params: { fromActivityCard: '1' } });
 };
 

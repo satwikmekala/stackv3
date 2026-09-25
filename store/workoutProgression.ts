@@ -1,5 +1,6 @@
 import type {
   Exercise,
+  ExerciseLoadType,
   ExerciseSet,
   UserProfile,
 } from '@/store/workoutStore';
@@ -10,8 +11,12 @@ import { getWeightIncrementKg } from '@/store/weightUnits';
  * and no usable history. Shared by the split editor and by custom-split
  * sessions so a first-time exercise always starts the same way.
  */
-export const makeDefaultExercise = (name: string): Exercise => ({
+export const makeDefaultExercise = (
+  name: string,
+  loadType: ExerciseLoadType = 'external_weight'
+): Exercise => ({
   name,
+  loadType,
   sets: [
     { reps: 8, weight: 0 },
     { reps: 8, weight: 0 },
@@ -24,23 +29,32 @@ const computeNextTarget = (
   lastSet: ExerciseSet | undefined,
   templateSet: { reps: number; weight: number },
   progressionIncrementKg: number,
-  autoIncreaseWeight: boolean
+  loadType: ExerciseLoadType
 ): { targetReps: number; targetWeight: number } => {
   if (!lastSet) {
-    return { targetReps: templateSet.reps, targetWeight: templateSet.weight };
+    return {
+      targetReps: templateSet.reps,
+      targetWeight: loadType === 'bodyweight' ? 0 : templateSet.weight,
+    };
   }
   const priorTargetReps = lastSet.targetReps ?? lastSet.reps;
   const priorTargetWeight = lastSet.weight ?? lastSet.targetWeight ?? templateSet.weight;
 
   if (lastSet.skipped) {
-    return { targetReps: priorTargetReps, targetWeight: priorTargetWeight };
+    return {
+      targetReps: priorTargetReps,
+      targetWeight: loadType === 'bodyweight' ? 0 : priorTargetWeight,
+    };
   }
   const hitTarget = lastSet.reps >= priorTargetReps;
   return {
     targetReps: priorTargetReps,
-    targetWeight: hitTarget && autoIncreaseWeight
-      ? Math.max(0, priorTargetWeight + progressionIncrementKg)
-      : priorTargetWeight,
+    targetWeight:
+      loadType === 'bodyweight'
+        ? 0
+        : hitTarget
+          ? Math.max(0, priorTargetWeight + progressionIncrementKg)
+          : priorTargetWeight,
   };
 };
 
@@ -49,7 +63,7 @@ export const createSessionExercise = (
   lastExercise: Exercise | undefined,
   profile: Pick<
     UserProfile,
-    'weightUnit' | 'weightIncrement' | 'weightIncrementLbs' | 'autoIncreaseWeight'
+    'weightUnit' | 'weightIncrement' | 'weightIncrementLbs'
   >
 ): Exercise => {
   // One configured step keeps the next target on the same grid as the actual
@@ -58,6 +72,7 @@ export const createSessionExercise = (
 
   return {
     name: templateExercise.name,
+    loadType: templateExercise.loadType,
     sets: templateExercise.sets
       .filter((set) => !set.type)
       .map((templateSet, setIndex) => {
@@ -65,7 +80,7 @@ export const createSessionExercise = (
           lastExercise?.sets[setIndex],
           templateSet,
           progressionIncrementKg,
-          profile.autoIncreaseWeight
+          templateExercise.loadType
         );
         return {
           reps: targetReps,
@@ -89,12 +104,15 @@ export const createCompletedSessionExercise = (
   lastExercise: Exercise | undefined
 ): Exercise => ({
   name: templateExercise.name,
+  loadType: templateExercise.loadType,
   sets: templateExercise.sets
     .filter((set) => !set.type)
     .map((templateSet, setIndex) => {
       const lastSet = lastExercise?.sets[setIndex];
       const reps = lastSet?.reps ?? templateSet.reps;
-      const weight = lastSet?.weight ?? templateSet.weight;
+      const weight = templateExercise.loadType === 'bodyweight'
+        ? 0
+        : lastSet?.weight ?? templateSet.weight;
 
       return {
         reps,

@@ -1,16 +1,27 @@
-import React, { useEffect, useRef } from 'react';
-import { Text, TouchableOpacity, View } from 'react-native';
-import { Check, Minus, Plus } from 'lucide-react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  Keyboard,
+  Pressable,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { Check, Info, Minus, Plus } from 'lucide-react-native';
 import Animated, {
-  Easing,
   useAnimatedStyle,
   useSharedValue,
-  withSequence,
   withTiming,
+  useReducedMotion,
+  cancelAnimation,
+  interpolateColor,
 } from 'react-native-reanimated';
+import { WorkoutTouchable } from '@/components/WorkoutTouchable';
+import { workoutMotion, workoutTiming } from '@/constants/workoutMotion';
 import { StatusPill } from '@/components/StatusPill';
 import { redesignColors, redesignFonts } from '@/constants/theme';
 import { usePressScale } from '@/hooks/usePressScale';
+import type { ExerciseLoadType } from '@/store/workoutStore';
 import { formatWeight, lbsToKg, unitLabel, type WeightUnit } from '@/store/weightUnits';
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
@@ -20,53 +31,152 @@ interface RollingValueProps {
   // Rendered text; falls back to the raw value when no unit conversion applies.
   label?: string;
   color?: string;
+  inputLabel: string;
+  inputMode: 'decimal' | 'integer';
+  minimum: number;
+  onCommit: (value: number) => void;
 }
 
-function RollingValue({ value, label, color = redesignColors.bone }: RollingValueProps) {
+function RollingValue({
+  value,
+  label,
+  color = redesignColors.bone,
+  inputLabel,
+  inputMode,
+  minimum,
+  onCommit,
+}: RollingValueProps) {
   const previousValue = useRef(value);
+  const manualCommit = useRef(false);
+  const reducedMotion = useReducedMotion();
+  const finishingRef = useRef(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [selection, setSelection] = useState<{ start: number; end: number }>();
   const translateY = useSharedValue(0);
   const opacity = useSharedValue(1);
+  const valueLabel = label ?? String(value);
+  const isCompactValue = valueLabel.length >= 4;
 
   useEffect(() => {
-    if (value === previousValue.current) return;
+    if (value === previousValue.current) {
+      manualCommit.current = false;
+      return;
+    }
 
     const direction = value > previousValue.current ? 1 : -1;
     previousValue.current = value;
-    translateY.value = direction * 14;
-    opacity.value = 0.35;
-    translateY.value = withSequence(
-      withTiming(direction * -2, { duration: 130, easing: Easing.out(Easing.cubic) }),
-      withTiming(0, { duration: 80, easing: Easing.out(Easing.ease) })
-    );
-    opacity.value = withTiming(1, { duration: 170, easing: Easing.out(Easing.ease) });
-  }, [opacity, translateY, value]);
+    cancelAnimation(translateY);
+    cancelAnimation(opacity);
+    if (manualCommit.current || isEditing || reducedMotion) {
+      manualCommit.current = false;
+      translateY.value = 0;
+      opacity.value = 1;
+      return;
+    }
+    translateY.value = direction * workoutMotion.numberTravel;
+    opacity.value = 0;
+    translateY.value = withTiming(0, workoutTiming(workoutMotion.number));
+    opacity.value = withTiming(1, workoutTiming(workoutMotion.number));
+  }, [isEditing, opacity, reducedMotion, translateY, value]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
     transform: [{ translateY: translateY.value }],
   }));
-  const valueLabel = label ?? String(value);
-  const isCompactValue = valueLabel.length >= 4;
+  const beginEditing = () => {
+    finishingRef.current = false;
+    cancelAnimation(translateY);
+    cancelAnimation(opacity);
+    translateY.set(0);
+    opacity.set(1);
+    manualCommit.current = false;
+    setDraft(valueLabel);
+    setSelection({ start: 0, end: valueLabel.length });
+    setIsEditing(true);
+  };
+
+  const handleDraftChange = (text: string) => {
+    setSelection(undefined);
+    setDraft(text);
+  };
+
+  const finishEditing = () => {
+    if (finishingRef.current) return;
+    finishingRef.current = true;
+
+    const normalizedDraft = draft.trim().replace(',', '.');
+    const matchesFormat = inputMode === 'integer'
+      ? /^\d+$/.test(normalizedDraft)
+      : /^(?:\d+(?:\.\d*)?|\.\d+)$/.test(normalizedDraft);
+    const parsedValue = Number(normalizedDraft);
+
+    if (
+      matchesFormat
+      && Number.isFinite(parsedValue)
+      && parsedValue >= minimum
+      && (inputMode !== 'integer' || Number.isInteger(parsedValue))
+    ) {
+      manualCommit.current = true;
+      onCommit(parsedValue);
+    }
+
+    Keyboard.dismiss();
+    setIsEditing(false);
+  };
+
+  const fontSize = isCompactValue ? 29 : 32;
+  const valueWidth = isCompactValue
+    ? Math.max(66, Math.ceil(valueLabel.length * fontSize * 0.6))
+    : 52;
+  const valueStyle = {
+    width: valueWidth,
+    height: 38,
+    padding: 0,
+    textAlign: 'center' as const,
+    fontFamily: redesignFonts.monoBold,
+    fontSize,
+    lineHeight: 38,
+    color,
+  };
 
   return (
-    <Animated.Text
-      allowFontScaling={false}
-      style={[
-        {
-          // Decimal weights need a little more room, but a smaller type size keeps
-          // the +/- controls comfortably inside a two-column metric card.
-          minWidth: isCompactValue ? 66 : 52,
-          textAlign: 'center',
-          fontFamily: redesignFonts.monoBold,
-          fontSize: isCompactValue ? 29 : 32,
-          lineHeight: 38,
-          color,
-        },
-        animatedStyle,
-      ]}
-    >
-      {valueLabel}
-    </Animated.Text>
+    <>
+      {isEditing ? (
+        <TextInput
+          autoFocus
+          accessibilityLabel={`Edit ${inputLabel}`}
+          allowFontScaling={false}
+          value={draft}
+          selection={selection}
+          onChangeText={handleDraftChange}
+          onFocus={() => setSelection({ start: 0, end: valueLabel.length })}
+          onBlur={finishEditing}
+          onSubmitEditing={finishEditing}
+          selectTextOnFocus
+          keyboardType={inputMode === 'decimal' ? 'decimal-pad' : 'number-pad'}
+          keyboardAppearance="dark"
+          inputMode={inputMode === 'decimal' ? 'decimal' : 'numeric'}
+          returnKeyType="done"
+          inputAccessoryViewButtonLabel="Done"
+          style={valueStyle}
+        />
+      ) : (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Edit ${inputLabel}, current value ${valueLabel}`}
+          hitSlop={6}
+          onPress={beginEditing}
+        >
+          <Animated.Text
+            allowFontScaling={false}
+            style={[valueStyle, animatedStyle]}
+          >
+            {valueLabel}
+          </Animated.Text>
+        </Pressable>
+      )}
+    </>
   );
 }
 
@@ -76,15 +186,30 @@ interface StepperProps {
   displayValue?: string;
   step: number;
   unit: string;
+  inputLabel: string;
+  inputMode: 'decimal' | 'integer';
+  minimum: number;
   accent?: string;
   onChange: (delta: number) => void;
+  onCommit: (value: number) => void;
 }
 
-function Stepper({ value, displayValue, step, unit, accent, onChange }: StepperProps) {
+function Stepper({
+  value,
+  displayValue,
+  step,
+  unit,
+  inputLabel,
+  inputMode,
+  minimum,
+  accent,
+  onChange,
+  onCommit,
+}: StepperProps) {
   return (
     <View style={{ alignItems: 'center' }}>
       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-        <TouchableOpacity
+        <WorkoutTouchable
           accessibilityRole="button"
           accessibilityLabel={`Decrease ${unit}`}
           onPress={() => onChange(-step)}
@@ -102,11 +227,19 @@ function Stepper({ value, displayValue, step, unit, accent, onChange }: StepperP
           }}
         >
           <Minus color={redesignColors.bone} size={18} strokeWidth={2.6} />
-        </TouchableOpacity>
+        </WorkoutTouchable>
 
-        <RollingValue value={value} label={displayValue} color={accent} />
+        <RollingValue
+          value={value}
+          label={displayValue}
+          color={accent}
+          inputLabel={inputLabel}
+          inputMode={inputMode}
+          minimum={minimum}
+          onCommit={onCommit}
+        />
 
-        <TouchableOpacity
+        <WorkoutTouchable
           accessibilityRole="button"
           accessibilityLabel={`Increase ${unit}`}
           onPress={() => onChange(step)}
@@ -124,7 +257,7 @@ function Stepper({ value, displayValue, step, unit, accent, onChange }: StepperP
           }}
         >
           <Plus color={redesignColors.bone} size={18} strokeWidth={2.6} />
-        </TouchableOpacity>
+        </WorkoutTouchable>
       </View>
       <Text
         style={{
@@ -218,6 +351,7 @@ interface ActiveSetCardProps {
   secondaryLabel?: string;
   reps: number;
   weight: number;
+  loadType: ExerciseLoadType;
   weightDeltaLabel?: string | null;
   // Step size for the manual weight stepper, from the user's profile — already
   // in `weightUnit`, so it is lb-native in lbs mode rather than a converted kg.
@@ -225,9 +359,12 @@ interface ActiveSetCardProps {
   // Display/input unit. `weight` is always kg, and so is every onWeightChange delta.
   weightUnit?: WeightUnit;
   onWeightUnitChange?: (weightUnit: WeightUnit) => void;
+  onInfoPress?: () => void;
   accent: string;
   onRepsChange: (delta: number) => void;
   onWeightChange: (delta: number) => void;
+  onRepsCommit: (reps: number) => void;
+  onWeightCommit: (weight: number) => void;
   onLog: () => void;
   onSkip: () => void;
 }
@@ -240,18 +377,34 @@ export function ActiveSetCard({
   secondaryLabel = 'Skip',
   reps,
   weight,
+  loadType,
   weightDeltaLabel,
   weightIncrement,
   weightUnit = 'kg',
   onWeightUnitChange,
+  onInfoPress,
   accent,
   onRepsChange,
   onWeightChange,
+  onRepsCommit,
+  onWeightCommit,
   onLog,
   onSkip,
 }: ActiveSetCardProps) {
   const primaryPressScale = usePressScale();
   const secondaryPressScale = usePressScale();
+  const unitPosition = useSharedValue(weightUnit === 'kg' ? 0 : 39);
+  useEffect(() => {
+    unitPosition.value = withTiming(weightUnit === 'kg' ? 0 : 39, workoutTiming(workoutMotion.toggle));
+  }, [unitPosition, weightUnit]);
+  const unitPillStyle = useAnimatedStyle(() => ({ transform: [{ translateX: unitPosition.value }] }));
+  const kgLabelStyle = useAnimatedStyle(() => ({
+    color: interpolateColor(unitPosition.value, [0, 39], [redesignColors.ink, redesignColors.ash]),
+  }));
+  const lbsLabelStyle = useAnimatedStyle(() => ({
+    color: interpolateColor(unitPosition.value, [0, 39], [redesignColors.ash, redesignColors.ink]),
+  }));
+  const showsWeight = loadType === 'external_weight';
 
   // The stepper taps produce a delta in the display unit. Storage is kg-canonical
   // and the parent adds this delta straight onto the stored kg value, so a
@@ -259,6 +412,10 @@ export function ActiveSetCard({
   // applying it to a signed delta is exact — and kg mode passes through untouched.
   const handleWeightDelta = (delta: number) => {
     onWeightChange(weightUnit === 'lbs' ? lbsToKg(delta) : delta);
+  };
+
+  const handleWeightCommit = (nextWeight: number) => {
+    onWeightCommit(weightUnit === 'lbs' ? lbsToKg(nextWeight) : nextWeight);
   };
 
   return (
@@ -296,7 +453,31 @@ export function ActiveSetCard({
         >
           {heading ?? `Set ${setNumber}`}
         </Text>
-        {onWeightUnitChange ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        {onInfoPress ? (
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Exercise info"
+            accessibilityHint="Opens exercise illustration, muscles, and description"
+            onPress={onInfoPress}
+            activeOpacity={0.7}
+            style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
+          >
+            <View style={{
+              width: 27,
+              height: 27,
+              borderRadius: 14,
+              borderWidth: 1,
+              borderColor: redesignColors.border,
+              backgroundColor: redesignColors.raised,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}>
+              <Info color={redesignColors.ash} size={15} strokeWidth={2} />
+            </View>
+          </TouchableOpacity>
+        ) : null}
+        {showsWeight && onWeightUnitChange ? (
           <View
             accessibilityRole="radiogroup"
             style={{
@@ -308,10 +489,15 @@ export function ActiveSetCard({
               backgroundColor: redesignColors.raised,
             }}
           >
+            <Animated.View
+              pointerEvents="none"
+              style={[{ position: 'absolute', left: 3, top: 3, width: 39, height: 27,
+                borderRadius: 9, backgroundColor: accent }, unitPillStyle]}
+            />
             {(['kg', 'lbs'] as const).map((unit) => {
               const selected = weightUnit === unit;
               return (
-                <TouchableOpacity
+                <WorkoutTouchable
                   key={unit}
                   accessibilityRole="radio"
                   accessibilityLabel={`Use ${unit}`}
@@ -319,46 +505,71 @@ export function ActiveSetCard({
                   activeOpacity={0.72}
                   onPress={() => onWeightUnitChange(unit)}
                   style={{
-                    minWidth: 39,
+                    width: 39,
                     height: 27,
                     borderRadius: 9,
                     alignItems: 'center',
                     justifyContent: 'center',
-                    backgroundColor: selected ? accent : 'transparent',
+                    backgroundColor: 'transparent',
                   }}
                 >
-                  <Text
+                  <Animated.Text
                     allowFontScaling={false}
-                    style={{
+                    style={[{
                       fontFamily: redesignFonts.monoBold,
                       fontSize: 10,
                       letterSpacing: 0.4,
-                      color: selected ? redesignColors.ink : redesignColors.ash,
-                    }}
+                    }, unit === 'kg' ? kgLabelStyle : lbsLabelStyle]}
                   >
                     {unit.toUpperCase()}
-                  </Text>
-                </TouchableOpacity>
+                  </Animated.Text>
+                </WorkoutTouchable>
               );
             })}
           </View>
         ) : badgeLabel ? (
           <StatusPill label={badgeLabel} color={accent} />
         ) : null}
+        </View>
       </View>
 
-      <View style={{ flexDirection: 'row', gap: 12 }}>
+      <View
+        style={{
+          width: '100%',
+          maxWidth: showsWeight ? undefined : 240,
+          alignSelf: 'center',
+          flexDirection: 'row',
+          gap: 12,
+        }}
+      >
+        {showsWeight ? (
+          <MetricBlock
+            label="WEIGHT"
+            value={weight}
+            displayValue={formatWeight(weight, weightUnit)}
+            step={weightIncrement}
+            unit={unitLabel(weightUnit)}
+            inputLabel="weight"
+            inputMode="decimal"
+            minimum={0}
+            accent={accent}
+            deltaLabel={weightDeltaLabel}
+            onChange={handleWeightDelta}
+            onCommit={handleWeightCommit}
+          />
+        ) : null}
         <MetricBlock
-          label="WEIGHT"
-          value={weight}
-          displayValue={formatWeight(weight, weightUnit)}
-          step={weightIncrement}
-          unit={unitLabel(weightUnit)}
-          accent={accent}
-          deltaLabel={weightDeltaLabel}
-          onChange={handleWeightDelta}
+          label="REPS"
+          value={reps}
+          step={1}
+          unit="reps"
+          inputLabel="reps"
+          inputMode="integer"
+          minimum={1}
+          accent={showsWeight ? undefined : accent}
+          onChange={onRepsChange}
+          onCommit={onRepsCommit}
         />
-        <MetricBlock label="REPS" value={reps} step={1} unit="reps" onChange={onRepsChange} />
       </View>
 
       <View style={{ width: '100%', flexDirection: 'row', gap: 12, marginTop: 20 }}>

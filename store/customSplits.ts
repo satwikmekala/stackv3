@@ -1,4 +1,4 @@
-import type { WorkoutType } from '@/store/workoutStore';
+import type { ExerciseLoadType, WorkoutType } from '@/store/workoutStore';
 
 export const EMPTY_CUSTOM_WORKOUT_MESSAGE =
   "This workout doesn't have any exercises yet — add some first.";
@@ -41,6 +41,7 @@ export interface CustomSplitExercise {
   name: string;
   primaryMuscle: string;
   equipment: string | null;
+  loadType: ExerciseLoadType;
   workoutType: WorkoutType;
   isCustom: boolean;
   position: number;

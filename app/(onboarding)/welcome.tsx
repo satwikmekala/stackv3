@@ -1,6 +1,7 @@
 import React from 'react';
-import { Image, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { BarChart3, Target, TrendingUp } from 'lucide-react-native';
 import {
   OnboardingNextButton,

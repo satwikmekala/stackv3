@@ -1,13 +1,15 @@
+import { WorkoutTouchable } from '@/components/WorkoutTouchable';
 import React, { useEffect, useRef, useState } from 'react';
-import { Platform, Text, TouchableOpacity, View } from 'react-native';
+import { Platform, Text, View } from 'react-native';
 import Animated, {
   cancelAnimation,
   Easing,
   ReduceMotion,
-  SlideInDown,
-  SlideOutDown,
+  FadeIn,
+  FadeOut,
   useAnimatedStyle,
   useSharedValue,
+  useReducedMotion,
   withTiming,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
@@ -32,17 +34,20 @@ export function RestTimer({ accent, onFinish, onDismiss }: RestTimerProps) {
   const [remaining, setRemaining] = useState(DEFAULT_REST_SECONDS);
   const finishedRef = useRef(false);
   const progress = useSharedValue(1);
+  const reducedMotion = useReducedMotion();
 
+  // Predict just the next tick on the UI thread, then retarget from the
+  // current visual position. Adjustments never snap or change the timer clock.
   useEffect(() => {
-    progress.value = 1;
-    progress.value = withTiming(0, {
-      duration: DEFAULT_REST_SECONDS * 1000,
-      easing: Easing.linear,
-      reduceMotion: ReduceMotion.System,
-    });
-
+    progress.value = reducedMotion
+      ? remaining / DEFAULT_REST_SECONDS
+      : withTiming(Math.max(0, remaining - 1) / DEFAULT_REST_SECONDS, {
+        duration: 1000,
+        easing: Easing.linear,
+        reduceMotion: ReduceMotion.System,
+      });
     return () => cancelAnimation(progress);
-  }, [progress]);
+  }, [progress, reducedMotion, remaining]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -74,23 +79,16 @@ export function RestTimer({ accent, onFinish, onDismiss }: RestTimerProps) {
     if (Platform.OS !== 'web') void Haptics.selectionAsync();
     setRemaining((previous) => {
       const next = Math.max(0, previous + seconds);
-      cancelAnimation(progress);
-      progress.value = next / DEFAULT_REST_SECONDS;
-      progress.value = withTiming(0, {
-        duration: next * 1000,
-        easing: Easing.linear,
-        reduceMotion: ReduceMotion.System,
-      });
       return next;
     });
   };
 
   return (
     <Animated.View
-      entering={SlideInDown.duration(motionDuration.transition)
+      entering={FadeIn.duration(motionDuration.transition)
         .easing(motionEasing.decelerate)
         .reduceMotion(ReduceMotion.System)}
-      exiting={SlideOutDown.duration(motionDuration.transition)
+      exiting={FadeOut.duration(motionDuration.transition)
         .easing(motionEasing.accelerate)
         .reduceMotion(ReduceMotion.System)}
       style={{
@@ -169,7 +167,7 @@ export function RestTimer({ accent, onFinish, onDismiss }: RestTimerProps) {
         </View>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 13 }}>
-          <TouchableOpacity
+          <WorkoutTouchable
             accessibilityRole="button"
             accessibilityLabel="Remove 15 seconds from rest"
             activeOpacity={0.7}
@@ -192,9 +190,9 @@ export function RestTimer({ accent, onFinish, onDismiss }: RestTimerProps) {
             >
               −15
             </Text>
-          </TouchableOpacity>
+          </WorkoutTouchable>
 
-          <TouchableOpacity
+          <WorkoutTouchable
             accessibilityRole="button"
             accessibilityLabel="Skip rest"
             activeOpacity={0.7}
@@ -207,9 +205,9 @@ export function RestTimer({ accent, onFinish, onDismiss }: RestTimerProps) {
             >
               Skip rest
             </Text>
-          </TouchableOpacity>
+          </WorkoutTouchable>
 
-          <TouchableOpacity
+          <WorkoutTouchable
             accessibilityRole="button"
             accessibilityLabel="Add 15 seconds to rest"
             activeOpacity={0.7}
@@ -232,7 +230,7 @@ export function RestTimer({ accent, onFinish, onDismiss }: RestTimerProps) {
             >
               +15
             </Text>
-          </TouchableOpacity>
+          </WorkoutTouchable>
         </View>
       </View>
     </Animated.View>
