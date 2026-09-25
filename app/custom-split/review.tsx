@@ -740,7 +740,7 @@ const styles = StyleSheet.create({
   },
   menuModal: { flex: 1 },
   menuBackdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(7, 6, 5, 0.72)',
   },
   menuDock: {

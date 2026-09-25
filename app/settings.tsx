@@ -2,21 +2,23 @@ import React, { useState } from 'react';
 import {
   View,
   Text,
-  SafeAreaView,
   ScrollView,
   TextInput,
   Alert,
+  Platform,
   Pressable,
   Switch,
   TouchableOpacity,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { X } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { useWorkoutStore } from '@/store/workoutStore';
 import { unitLabel, type WeightUnit } from '@/store/weightUnits';
 import { Button } from '@/components/Button';
 import { colors, fonts, redesignColors } from '@/constants/theme';
+import { TestLiveActivityControls } from '@/components/dev/TestLiveActivityControls';
 import '@/global.css';
 
 // Supported weekly-goal range.
@@ -133,8 +135,8 @@ export default function Settings() {
     );
   };
 
-  const handleAutoIncreaseWeightChange = (autoIncreaseWeight: boolean) => {
-    updateProfile({ autoIncreaseWeight });
+  const handleIncreaseBetweenSetsChange = (increaseBetweenSetsEnabled: boolean) => {
+    updateProfile({ autoIncreaseWeight: increaseBetweenSetsEnabled });
   };
 
   const handleReset = () => {
@@ -392,7 +394,7 @@ export default function Settings() {
                 marginBottom: 4,
               }}
             >
-              Auto-increase Weight
+              Increase Between Sets
             </Text>
             <Text
               style={{
@@ -401,19 +403,21 @@ export default function Settings() {
                 color: colors.ash,
               }}
             >
-              Raise next session&apos;s target after you hit your reps
+              When enabled, Stack automatically increases your target during consecutive sets of the same exercise.
             </Text>
           </View>
           <Switch
-            accessibilityLabel="Auto-increase weight"
-            accessibilityHint="Raises next session's target weight after you hit your reps"
+            accessibilityLabel="Increase Between Sets"
+            accessibilityHint="Automatically increases your target during consecutive sets of the same exercise"
             value={profile.autoIncreaseWeight}
-            onValueChange={handleAutoIncreaseWeightChange}
+            onValueChange={handleIncreaseBetweenSetsChange}
             trackColor={{ false: colors.surfaceRaised, true: redesignColors.accent }}
             thumbColor={colors.bone}
             ios_backgroundColor={colors.surfaceRaised}
           />
         </View>
+
+        {__DEV__ && Platform.OS === 'ios' && <TestLiveActivityControls />}
 
         {/* Danger zone — moved as-is from the old Profile */}
         <View

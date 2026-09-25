@@ -618,33 +618,31 @@ function WeeklyGoalCard({ completed, goal }: { completed: number; goal: number }
       />
 
       <View style={styles.weeklyGoalTopRow}>
-        <View>
-          <Text style={styles.weeklyGoalEyebrow}>WEEKLY WORKOUT GOAL</Text>
-          <Text style={styles.weeklyGoalHeadline}>
-            {isComplete ? 'Goal met.' : `${remaining} ${remaining === 1 ? 'workout' : 'workouts'} to go.`}
+        <Text style={styles.weeklyGoalEyebrow}>WEEKLY GOAL</Text>
+        <View style={[styles.weeklyGoalPill, isComplete && styles.weeklyGoalPillComplete]}>
+          <Text style={[styles.weeklyGoalPillText, isComplete && styles.weeklyGoalPillTextComplete]}>
+            {isComplete ? 'DONE' : `${remaining} TO GO`}
           </Text>
-        </View>
-        <View style={styles.weeklyGoalCount}>
-          <Text style={styles.weeklyGoalCompleted}>{completed}</Text>
-          <Text style={styles.weeklyGoalTotal}>/{goal}</Text>
         </View>
       </View>
 
-      <View style={styles.weeklyGoalFooter}>
-        <View style={styles.weeklyGoalBars}>
-          {Array.from({ length: visibleGoal }).map((_, index) => (
-            <View
-              key={index}
-              style={[
-                styles.weeklyGoalBar,
-                index < visibleCompleted && styles.weeklyGoalBarComplete,
-              ]}
-            />
-          ))}
-        </View>
-        <Text style={styles.weeklyGoalCaption}>
-          {isComplete ? 'Your target is in the bag.' : `Complete ${remaining} more to hit your target.`}
+      <View style={styles.weeklyGoalCount}>
+        <Text style={styles.weeklyGoalCompleted}>{completed}</Text>
+        <Text style={styles.weeklyGoalTotal}>
+          / {goal} {goal === 1 ? 'workout' : 'workouts'}
         </Text>
+      </View>
+
+      <View style={styles.weeklyGoalBars}>
+        {Array.from({ length: visibleGoal }).map((_, index) => (
+          <View
+            key={index}
+            style={[
+              styles.weeklyGoalBar,
+              index < visibleCompleted && styles.weeklyGoalBarComplete,
+            ]}
+          />
+        ))}
       </View>
     </View>
   );
@@ -732,7 +730,7 @@ export default function Progress() {
             onPress={openSettings}
             style={({ pressed }) => [styles.settingsButton, pressed && styles.buttonPressed]}
           >
-            <Settings color={redesignColors.ash} size={24} strokeWidth={2} />
+            <Settings color={redesignColors.ash} size={20} strokeWidth={2} />
           </Pressable>
         </View>
 
@@ -850,22 +848,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   header: {
-    minHeight: 57,
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
   title: {
     fontFamily: redesignFonts.display,
-    fontSize: 45,
-    lineHeight: 51,
-    letterSpacing: -1.5,
+    fontSize: 34,
+    lineHeight: 42,
+    letterSpacing: -1.6,
     color: redesignColors.bone,
   },
   settingsButton: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     borderCurve: 'continuous',
     borderWidth: 1,
     borderColor: redesignColors.border,
@@ -878,27 +876,25 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.97 }],
   },
   weeklyGoalSection: {
-    marginTop: 27,
+    marginTop: 20,
   },
   weeklyGoalCard: {
-    minHeight: 202,
-    paddingHorizontal: 24,
-    paddingTop: 25,
-    paddingBottom: 23,
-    borderRadius: 27,
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 20,
+    borderRadius: 24,
     borderCurve: 'continuous',
     borderWidth: 1,
     borderColor: 'transparent',
     backgroundColor: '#171716',
     shadowColor: STREAK_ORANGE,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.13,
-    shadowRadius: 20,
-    justifyContent: 'space-between',
+    shadowOpacity: 0.1,
+    shadowRadius: 18,
   },
   weeklyGoalBorder: {
-    ...StyleSheet.absoluteFillObject,
-    borderRadius: 27,
+    ...StyleSheet.absoluteFill,
+    borderRadius: 24,
     borderCurve: 'continuous',
   },
   weeklyGoalFill: {
@@ -907,72 +903,72 @@ const styles = StyleSheet.create({
     right: 1,
     bottom: 1,
     left: 1,
-    borderRadius: 26,
+    borderRadius: 23,
     borderCurve: 'continuous',
   },
   weeklyGoalTopRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 14,
   },
   weeklyGoalEyebrow: {
     fontFamily: redesignFonts.monoBold,
     fontSize: 11,
-    lineHeight: 16,
     letterSpacing: 1.65,
+    color: redesignColors.ash,
+  },
+  weeklyGoalPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 122, 61, 0.35)',
+    backgroundColor: 'rgba(255, 122, 61, 0.1)',
+  },
+  weeklyGoalPillComplete: {
+    borderColor: STREAK_ORANGE,
+    backgroundColor: STREAK_ORANGE,
+  },
+  weeklyGoalPillText: {
+    fontFamily: redesignFonts.monoBold,
+    fontSize: 10,
+    letterSpacing: 1.2,
     color: STREAK_ORANGE,
   },
-  weeklyGoalHeadline: {
-    maxWidth: 228,
-    marginTop: 11,
-    fontFamily: redesignFonts.display,
-    fontSize: 34,
-    lineHeight: 38,
-    letterSpacing: -1.15,
-    color: redesignColors.bone,
+  weeklyGoalPillTextComplete: {
+    color: redesignColors.ink,
   },
   weeklyGoalCount: {
-    minWidth: 67,
-    paddingTop: 2,
+    marginTop: 14,
     flexDirection: 'row',
     alignItems: 'baseline',
-    justifyContent: 'flex-end',
+    gap: 8,
   },
   weeklyGoalCompleted: {
     fontFamily: redesignFonts.display,
-    fontSize: 43,
-    lineHeight: 47,
-    letterSpacing: -1.4,
+    fontSize: 48,
+    lineHeight: 52,
+    letterSpacing: -1.6,
     color: redesignColors.bone,
   },
   weeklyGoalTotal: {
-    fontFamily: redesignFonts.monoBold,
+    fontFamily: redesignFonts.uiMedium,
     fontSize: 16,
     color: redesignColors.ash,
   },
-  weeklyGoalFooter: {
-    marginTop: 20,
-  },
   weeklyGoalBars: {
+    marginTop: 16,
     flexDirection: 'row',
     gap: 6,
   },
   weeklyGoalBar: {
     flex: 1,
-    height: 8,
-    borderRadius: 4,
+    height: 6,
+    borderRadius: 3,
     backgroundColor: redesignColors.raised,
   },
   weeklyGoalBarComplete: {
     backgroundColor: STREAK_ORANGE,
-  },
-  weeklyGoalCaption: {
-    marginTop: 12,
-    fontFamily: redesignFonts.uiMedium,
-    fontSize: 14,
-    lineHeight: 19,
-    color: redesignColors.ash,
   },
   section: {
     marginTop: 34,
@@ -1153,7 +1149,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   detailBackdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(10, 8, 6, 0.76)',
   },
   detailCard: {

@@ -1,6 +1,6 @@
 import { useEffect, type ReactNode } from 'react';
 import { Tabs } from 'expo-router';
-import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import type { BottomTabBarProps } from 'expo-router/js-tabs';
 import * as Haptics from 'expo-haptics';
 import { ChartNoAxesColumn, Zap } from 'lucide-react-native';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';

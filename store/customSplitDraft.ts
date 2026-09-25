@@ -270,6 +270,7 @@ export const useCustomSplitDraftStore = create<CustomSplitDraftStore>()((set) =>
           workoutType: exercise.workoutType,
           primaryMuscle: exercise.primaryMuscle,
           equipment: exercise.equipment,
+          loadType: exercise.loadType,
           isCustom: exercise.isCustom,
         }));
         const selectedMuscleGroups: CustomSplitMuscleGroup[] = [];

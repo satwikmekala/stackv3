@@ -1,0 +1,406 @@
+diff --git a/node_modules/expo-widgets/ios/LiveActivity.swift b/node_modules/expo-widgets/ios/LiveActivity.swift
+index 5f34eb2..e2058f2 100644
+--- a/node_modules/expo-widgets/ios/LiveActivity.swift
++++ b/node_modules/expo-widgets/ios/LiveActivity.swift
+@@ -19,6 +19,10 @@ final class LiveActivity: SharedObject {
+       throw LiveActivityNotFoundException(id)
+     }
+ 
++    if name == "StackWorkoutLiveActivity" {
++      try await StackLiveActivityPresentation.shared.reconcile(source: id, props: props, staleDate: staleDate)
++      return
++    }
+     let newState = LiveActivityAttributes.ContentState(name: name, props: props)
+     await activity.update(ActivityContent(state: newState, staleDate: staleDate))
+   }
+diff --git a/node_modules/expo-widgets/ios/Widgets/AppIntent.swift b/node_modules/expo-widgets/ios/Widgets/AppIntent.swift
+index 972fa4f..f8d7625 100644
+--- a/node_modules/expo-widgets/ios/Widgets/AppIntent.swift
++++ b/node_modules/expo-widgets/ios/Widgets/AppIntent.swift
+@@ -1,4 +1,5 @@
+ import AppIntents
++import ActivityKit
+ import WidgetKit
+ 
+ struct WidgetReload: AppIntent {
+@@ -128,3 +129,116 @@ struct LiveActivityUserInteraction: LiveActivityIntent {
+     return .result()
+   }
+ }
++
++// Stack evaluates a pure presentation callback before notifying React Native.
++// LiveActivityIntent runs in the host process without presenting the host UI.
++@available(iOS 17.0, *)
++struct StackWorkoutLiveActivityInteraction: LiveActivityIntent {
++  static var title: LocalizedStringResource = "Update workout"
++  static var isDiscoverable: Bool = false
++  static var openAppWhenRun: Bool = false
++  static var authenticationPolicy: IntentAuthenticationPolicy = .alwaysAllowed
++  @Parameter(title: "source") var source: String?
++  @Parameter(title: "target") var target: String?
++  init() {}
++  init(source: String?, target: String?) { self.source = source; self.target = target }
++  func perform() async throws -> some IntentResult {
++    if let source, let target, target.hasPrefix("stack.workout.v2:") {
++      try await StackLiveActivityPresentation.shared.press(source: source, target: target)
++    }
++    return .result()
++  }
++}
++
++// Every press AND authoritative write shares this serial task chain. Actor
++// isolation alone would allow reentrancy while awaiting ActivityKit.update.
++@available(iOS 16.2, *)
++actor StackLiveActivityPresentation {
++  static let shared = StackLiveActivityPresentation()
++  private var tail: Task<Void, Never>?
++  private var latest: [String: [String: Any]] = [:]
++
++  func press(source: String, target: String) async throws {
++    let previous = tail
++    let operation = Task {
++      await previous?.value
++      try await self.applyPress(source: source, target: target)
++    }
++    tail = Task { _ = try? await operation.value }
++    try await operation.value
++  }
++
++  func reconcile(source: String, props: String, staleDate: Date?) async throws {
++    let previous = tail
++    let operation = Task {
++      await previous?.value
++      try await self.applyAuthoritative(source: source, props: props, staleDate: staleDate)
++    }
++    tail = Task { _ = try? await operation.value }
++    try await operation.value
++  }
++
++  private func activity(_ source: String) -> Activity<LiveActivityAttributes>? {
++    Activity<LiveActivityAttributes>.activities.first {
++      $0.id == source && ($0.activityState == .active || $0.activityState == .stale) &&
++        $0.content.state.name == "StackWorkoutLiveActivity"
++    }
++  }
++  private func decode(_ string: String) throws -> [String: Any] {
++    guard let data = string.data(using: .utf8),
++      let props = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
++      throw CocoaError(.coderReadCorrupt)
++    }
++    return props
++  }
++  private func encode(_ props: [String: Any]) throws -> String {
++    let data = try JSONSerialization.data(withJSONObject: props)
++    guard let value = String(data: data, encoding: .utf8) else { throw CocoaError(.coderInvalidValue) }
++    let content = LiveActivityAttributes.ContentState(name: "StackWorkoutLiveActivity", props: value)
++    guard try JSONEncoder().encode(content).count <= 4096 else { throw CocoaError(.coderInvalidValue) }
++    return value
++  }
++
++  private func applyPress(source: String, target: String) async throws {
++    guard let activity = activity(source), activity.activityState == .active,
++      let layout = WidgetsStorage.getString(forKey: "__expo_widgets_live_activity_StackWorkoutLiveActivity_layout") else { return }
++    let current = try latest[source] ?? decode(activity.content.state.props)
++    // SDK 57's press walker accepts a widget root, not the Live Activity regions
++    // object. Evaluate its banner root; both surfaces use identical callbacks.
++    let callbackLayout = "(function(props, environment) { return (\(layout))(props, environment).banner; })"
++    let result = evaluateWidgetButtonPress(layout: callbackLayout, props: current,
++      environment: ["target": target, "timestamp": Int(Date().timeIntervalSince1970 * 1000)])
++    let updated: [String: Any]
++    switch result {
++    case .success(let value):
++      guard let value else { return } // An old set/disabled Done no longer has this target.
++      updated = current.merging(value) { _, new in new }
++    case .failure(let error): throw error
++    }
++    // Validate serialization before accepting the action. Journal before display.
++    var next = updated
++    next["_stackRevision"] = Int.max // Reserve space before journaling.
++    _ = try encode(next)
++    let event = try WidgetsEvents.shared.enqueueStackAction(source: source, target: target)
++    next["_stackRevision"] = event["sequence"]
++    let encoded = try encode(next)
++    latest[source] = next
++    let state = LiveActivityAttributes.ContentState(name: activity.content.state.name, props: encoded)
++    await activity.update(ActivityContent(state: state, staleDate: activity.content.staleDate))
++    WidgetsEvents.shared.sendNotification(type: .userEvent, data: event)
++  }
++
++  private func applyAuthoritative(source: String, props: String, staleDate: Date?) async throws {
++    guard let activity = activity(source) else { return }
++    let incoming = try decode(props)
++    let current = try latest[source] ?? decode(activity.content.state.props)
++    let localRevision = current["_stackRevision"] as? Int ?? 0
++    let acknowledgement = incoming["acknowledgedRevision"] as? Int ?? 0
++    // An earlier host snapshot must not erase a newer local tap. A rejected action
++    // still consumes its command, so the following authoritative update corrects it.
++    guard !(try WidgetsEvents.shared.hasPendingStackActions(source: source)), acknowledgement >= localRevision else { return }
++    latest[source] = incoming
++    let state = LiveActivityAttributes.ContentState(name: activity.content.state.name, props: props)
++    await activity.update(ActivityContent(state: state, staleDate: staleDate))
++  }
++}
+diff --git a/node_modules/expo-widgets/ios/Widgets/Buttons.swift b/node_modules/expo-widgets/ios/Widgets/Buttons.swift
+index 55fb9b3..1e699ac 100644
+--- a/node_modules/expo-widgets/ios/Widgets/Buttons.swift
++++ b/node_modules/expo-widgets/ios/Widgets/Buttons.swift
+@@ -41,22 +41,28 @@ struct LiveActivityButtonView: ExpoSwiftUI.View {
+   @ObservedObject var props: ButtonProps
+ 
+   var body: some View {
+-    SwiftUI.Button(
+-      role: props.role?.toNativeRole(),
+-      intent: LiveActivityUserInteraction(
+-        source: props.source,
+-        target: props.target
+-      )
+-    ) {
+-      if let label = props.label {
+-        if let systemImage = props.systemImage {
+-          Label(title: { Text(label) }, icon: { Image(systemName: systemImage) })
+-        } else {
+-          Text(label)
+-        }
++    if props.target?.hasPrefix("stack.workout.v2:") == true {
++      SwiftUI.Button(
++        role: props.role?.toNativeRole(),
++        intent: StackWorkoutLiveActivityInteraction(source: props.source, target: props.target)
++      ) { buttonLabel }
++    } else {
++      SwiftUI.Button(
++        role: props.role?.toNativeRole(),
++        intent: LiveActivityUserInteraction(source: props.source, target: props.target)
++      ) { buttonLabel }
++    }
++  }
++
++  @ViewBuilder private var buttonLabel: some View {
++    if let label = props.label {
++      if let systemImage = props.systemImage {
++        Label(title: { Text(label) }, icon: { Image(systemName: systemImage) })
+       } else {
+-        Children()
++        Text(label)
+       }
++    } else {
++      Children()
+     }
+   }
+ }
+diff --git a/node_modules/expo-widgets/ios/Widgets/DynamicView.swift b/node_modules/expo-widgets/ios/Widgets/DynamicView.swift
+index 17f6609..9802b1a 100644
+--- a/node_modules/expo-widgets/ios/Widgets/DynamicView.swift
++++ b/node_modules/expo-widgets/ios/Widgets/DynamicView.swift
+@@ -9,6 +9,25 @@ class NodeIdentityWrapper {
+     self.id = id
+   }
+ }
++
++// Stack: identities are cached by a node's position in the layout. A fresh
++// identity per render made SwiftUI replace every view on each Live Activity
++// update, so nothing could animate (e.g. contentTransition(.numericText)).
++enum NodeIdentityCache {
++  private static let lock = NSLock()
++  private static var identities: [String: NodeIdentityWrapper] = [:]
++
++  static func identity(for path: String) -> NodeIdentityWrapper {
++    lock.lock()
++    defer { lock.unlock() }
++    if let existing = identities[path] {
++      return existing
++    }
++    let created = NodeIdentityWrapper(id: UUID())
++    identities[path] = created
++    return created
++  }
++}
+ extension ObjectIdentifier: @retroactive Encodable {
+   public func encode(to encoder: Encoder) throws {
+     var container = encoder.singleValueContainer()
+@@ -22,26 +41,29 @@ public struct WidgetsDynamicView: View, ExpoSwiftUI.AnyChild {
+   let kind: WidgetsKind
+   let entryIndex: Int?
+   let environmentString: String?
++  let path: String
+ 
+-  let uuid = NodeIdentityWrapper(id: UUID())
++  let uuid: NodeIdentityWrapper
+   public var id: ObjectIdentifier {
+     ObjectIdentifier(uuid)
+   }
+ 
+   public init(name: String, kind: WidgetsKind, node: [String: Any]) {
+-    self.name = name
+-    self.kind = kind
+-    self.node = node
+-    self.entryIndex = nil
+-    self.environmentString = nil
++    self.init(name: name, kind: kind, node: node, entryIndex: nil, environmentString: nil)
+   }
+ 
+   public init(name: String, kind: WidgetsKind, node: [String: Any], entryIndex: Int?, environmentString: String?) {
++    self.init(name: name, kind: kind, node: node, entryIndex: entryIndex, environmentString: environmentString, path: "root")
++  }
++
++  init(name: String, kind: WidgetsKind, node: [String: Any], entryIndex: Int?, environmentString: String?, path: String) {
+     self.name = name
+     self.kind = kind
+     self.node = node
+     self.entryIndex = entryIndex
+     self.environmentString = environmentString
++    self.path = path
++    self.uuid = NodeIdentityCache.identity(for: path)
+   }
+ 
+   @ViewBuilder
+@@ -152,13 +174,23 @@ public struct WidgetsDynamicView: View, ExpoSwiftUI.AnyChild {
+     if let props = node["props"] as? [String: Any] {
+       if let children = props["children"] as? [Any] {
+         let validChildren = flattenChildNodes(children)
+-        initialProps.children = validChildren.map { WidgetsDynamicView(name: name, kind: kind, node: $0, entryIndex: entryIndex, environmentString: environmentString) }
++        initialProps.children = validChildren.enumerated().map { index, child in
++          WidgetsDynamicView(name: name, kind: kind, node: child, entryIndex: entryIndex, environmentString: environmentString, path: childPath(index, child))
++        }
+       } else if let child = props["children"] as? [String: Any] {
+-        initialProps.children = [WidgetsDynamicView(name: name, kind: kind, node: child, entryIndex: entryIndex, environmentString: environmentString)]
++        initialProps.children = [WidgetsDynamicView(name: name, kind: kind, node: child, entryIndex: entryIndex, environmentString: environmentString, path: childPath(0, child))]
+       }
+     }
+   }
+ 
++  // Position plus type (and React key, if any): a different view at the same
++  // slot still gets a new identity, while the same view keeps its own.
++  private func childPath(_ index: Int, _ child: [String: Any]) -> String {
++    let type = child["type"] as? String ?? "?"
++    let key = child["key"].map { "#\($0)" } ?? ""
++    return "\(path)/\(index):\(type)\(key)"
++  }
++
+   private func flattenChildNodes(_ children: [Any]) -> [[String: Any]] {
+     return children.flatMap { child -> [[String: Any]] in
+       if let node = child as? [String: Any] {
+diff --git a/node_modules/expo-widgets/ios/WidgetsEvents.swift b/node_modules/expo-widgets/ios/WidgetsEvents.swift
+index 0dec3e3..0007630 100644
+--- a/node_modules/expo-widgets/ios/WidgetsEvents.swift
++++ b/node_modules/expo-widgets/ios/WidgetsEvents.swift
+@@ -1,16 +1,89 @@
++import Foundation
++
+ public enum WidgetsEventType: String {
+   case userEvent = "ExpoWidgetsUserInteraction"
+ }
+ 
+ public class WidgetsEvents {
+   public static let shared = WidgetsEvents()
++  private let lock = NSLock()
++  private let storageURL: URL?
++
++  // Only unconsumed COMMANDS are journaled, never workout values or a second DB.
++  // LiveActivityIntent executes in the host process; this lock orders its calls
++  // with the RN module's synchronous consume/revision methods.
++  init(storageURL: URL? = nil) {
++    if let storageURL { self.storageURL = storageURL; return }
++    if let group = Bundle.main.object(forInfoDictionaryKey: "ExpoWidgetsAppGroupIdentifier") as? String {
++      self.storageURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)?
++        .appendingPathComponent("StackLiveActivityCommands.json")
++    } else { self.storageURL = nil }
++  }
++
++  private struct Inbox: Codable {
++    var revision = 0
++    var consumed = 0
++    var commands: [Command] = []
++  }
++  private struct Command: Codable {
++    let id: String
++    let source: String
++    let target: String
++    let timestamp: Int
++    let sequence: Int
++    var event: [String: Any] {
++      ["id": id, "source": source, "target": target, "timestamp": timestamp, "sequence": sequence]
++    }
++  }
++  private func read() throws -> Inbox {
++    guard let storageURL else { throw CocoaError(.fileNoSuchFile) }
++    guard FileManager.default.fileExists(atPath: storageURL.path) else { return Inbox() }
++    return try JSONDecoder().decode(Inbox.self, from: Data(contentsOf: storageURL))
++  }
++  private func save(_ inbox: Inbox) throws {
++    guard let storageURL else { throw CocoaError(.fileNoSuchFile) }
++    let data = try JSONEncoder().encode(inbox)
++    #if os(iOS)
++    try data.write(to: storageURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
++    #else
++    try data.write(to: storageURL, options: .atomic)
++    #endif
++  }
+ 
+-  private init() {}
++  @discardableResult public func enqueueStackAction(source: String, target: String) throws -> [String: Any] {
++    lock.lock(); defer { lock.unlock() }
++    var inbox = try read()
++    inbox.revision += 1
++    let command = Command(id: UUID().uuidString, source: source, target: target,
++      timestamp: Int(Date().timeIntervalSince1970 * 1000), sequence: inbox.revision)
++    inbox.commands.append(command)
++    try save(inbox)
++    return command.event
++  }
++
++  public func takeStackActions() throws -> [[String: Any]] {
++    lock.lock(); defer { lock.unlock() }
++    var inbox = try read()
++    guard !inbox.commands.isEmpty else { return [] }
++    let pending = inbox.commands.removeFirst()
++    inbox.consumed = pending.sequence
++    try save(inbox)
++    return [pending.event]
++  }
++
++  public func stackConsumedRevision() throws -> Int {
++    lock.lock(); defer { lock.unlock() }
++    return try read().consumed
++  }
++
++  public func hasPendingStackActions(source: String) throws -> Bool {
++    lock.lock(); defer { lock.unlock() }
++    return try read().commands.contains { $0.source == source }
++  }
+ 
+   public func sendNotification(type: WidgetsEventType, data: [String: Any]) {
+     var eventData = data
+     eventData["type"] = type.rawValue
+-    let userInfo = ["eventData": eventData] as [String: Any]
+-    NotificationCenter.default.post(name: onUserInteractionNotification, object: nil, userInfo: userInfo)
++    NotificationCenter.default.post(name: onUserInteractionNotification, object: nil, userInfo: ["eventData": eventData])
+   }
+ }
+diff --git a/node_modules/expo-widgets/ios/WidgetsModule.swift b/node_modules/expo-widgets/ios/WidgetsModule.swift
+index b1b4295..bc63eec 100644
+--- a/node_modules/expo-widgets/ios/WidgetsModule.swift
++++ b/node_modules/expo-widgets/ios/WidgetsModule.swift
+@@ -59,6 +59,23 @@ public final class WidgetsModule: Module {
+       }
+     }
+ 
++    Constant("stackLiveActivityInteractionVersion") { 2 }
++
++    Function("getStackLiveActivityRevision") {
++      try WidgetsEvents.shared.stackConsumedRevision()
++    }
++
++    Function("isStackLiveActivityActive") { (id: String) -> Bool in
++      guard #available(iOS 16.2, *) else { return false }
++      return Activity<LiveActivityAttributes>.activities.contains {
++        $0.id == id && $0.activityState == .active && $0.content.state.name == "StackWorkoutLiveActivity"
++      }
++    }
++
++    Function("takeStackLiveActivityActions") {
++      try WidgetsEvents.shared.takeStackActions()
++    }
++
+     Function("reloadAllWidgets") {
+       WidgetCenter.shared.reloadAllTimelines()
+     }
