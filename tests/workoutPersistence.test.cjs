@@ -588,3 +588,459 @@ test('weekly presentation markers never write workout data and relaunch keeps th
     assert.equal(later.state.sealedWeeks[0].pieces.length, 1);
   } finally { h.sql.close(); }
 });
+
+test('shared workout focus tracks navigation without changing sets or progression', () => {
+  const h = harness();
+  h.store.getState().startWorkoutFromArchetype(['push']);
+  const session = h.store.getState().currentSession;
+  assert.deepEqual(h.store.getState().workoutFocus, { workoutId: session.id, exerciseIndex: 0 });
+  const before = JSON.stringify(session);
+  h.store.getState().setWorkoutExerciseIndex(1);
+  assert.equal(h.store.getState().workoutFocus.exerciseIndex, 1);
+  assert.equal(JSON.stringify(h.store.getState().currentSession), before);
+  h.store.getState().setWorkoutExerciseIndex(999);
+  assert.equal(h.store.getState().workoutFocus.exerciseIndex, 1);
+  h.store.getState().setWorkoutExerciseIndex(0);
+  for (let i = 0; i < session.exercises[0].sets.length; i++) h.store.getState().toggleSetSkipped(0, i);
+  // Skipping the last set must still wait on the screen's existing Next action.
+  assert.equal(h.store.getState().workoutFocus.exerciseIndex, 0);
+  const payload = h.load('@/services/liveActivity/state').deriveWorkoutLiveActivityState(h.store.getState());
+  assert.equal(payload.exerciseName, session.exercises[0].name);
+  h.store.getState().discardWorkout();
+  assert.equal(h.store.getState().workoutFocus, null);
+  assert.equal(h.store.getState().currentSession, null);
+  h.sql.close();
+});
+
+test('live payload uses real store progression, unit changes and next-exercise selection', () => {
+  const h = harness();
+  h.store.getState().startWorkoutFromArchetype(['push']);
+  const { deriveWorkoutLiveActivityState: derive } = h.load('@/services/liveActivity/state');
+  const { formatWeight } = h.load('@/store/weightUnits');
+  h.store.getState().updateExerciseSet(0, 0, 8, 80);
+  h.store.getState().toggleSetCompleted(0, 0);
+  let payload = derive(h.store.getState());
+  const next = h.store.getState().currentSession.exercises[0].sets[1];
+  assert.equal(payload.setNumber, 2);
+  assert.equal(payload.weight, String(next.weight));
+  assert.equal(payload.reps, next.reps);
+  h.store.getState().updateProfile({ weightUnit: 'lbs' });
+  payload = derive(h.store.getState());
+  assert.equal(payload.weight, formatWeight(next.weight, 'lbs'));
+  h.store.getState().setWorkoutExerciseIndex(1);
+  assert.equal(derive(h.store.getState()).setNumber, 1);
+  h.store.getState().completeWorkout('medium');
+  assert.equal(derive(h.store.getState()), null);
+  assert.equal(h.store.getState().workoutFocus, null);
+  h.sql.close();
+});
+
+// Slice 4 exercises the actual store, SQL, action decoding and bridge together.
+function actionHarness() {
+  const h = harness();
+  h.store.getState().startWorkoutFromArchetype(['push']);
+  h.store.setState({ isHydrated: true });
+  const actions = h.load('@/services/liveActivity/actions');
+  const queue = [];
+  const applied = [];
+  const errors = [];
+  let sequence = 0;
+  let ready = true;
+  let refreshes = 0;
+  const drain = actions.createLiveActivityActionBridge({
+    isReady: () => ready,
+    isCurrentActivity: (id) => id === 'current-activity',
+    takePending: () => queue.splice(0),
+    apply: (target, action, step) => h.store.getState().applyActiveSetAction(target, action, step),
+    onApplied: (target, result) => applied.push({ target, result }),
+    reconcile: () => { refreshes++; },
+    onError: (error) => errors.push(error),
+  });
+  const enqueue = (action, target = h.store.getState().getActiveSetTarget(), overrides = {}) => {
+    const event = { id: `tap-${++sequence}`, source: 'current-activity', timestamp: Date.now(),
+      target: actions.createLiveActivityActionTargets(target, false)[action], ...overrides };
+    queue.push(event);
+    return event;
+  };
+  const act = (action, target, overrides) => { enqueue(action, target, overrides); drain(); };
+  const active = () => {
+    const target = h.store.getState().getActiveSetTarget();
+    return h.store.getState().currentSession.exercises[target.exerciseIndex].sets[target.setIndex];
+  };
+  return { ...h, actions, queue, applied, errors, drain, enqueue, act, active,
+    ready: (value) => { ready = value; }, refreshes: () => refreshes };
+}
+
+test('widget weight/reps +/- use current values, custom increments, bounds and SQLite', () => {
+  const h = actionHarness();
+  h.store.getState().updateExerciseSet(0, 0, 1, 0.25);
+  h.act('increaseWeight');
+  assert.equal(h.active().weight, 0.75);
+  h.act('decreaseWeight');
+  assert.equal(h.active().weight, 0.25);
+  h.act('decreaseWeight');
+  h.act('decreaseReps');
+  assert.equal(h.active().weight, 0);
+  assert.equal(h.active().reps, 1);
+  h.act('increaseReps');
+  assert.equal(h.active().reps, 2);
+  h.act('decreaseReps');
+  const row = h.sql.prepare('SELECT * FROM sets WHERE id = ?').get(Number(h.store.getState().getActiveSetTarget().setId));
+  assert.equal(row.reps, 1);
+  assert.equal(row.weight, 0);
+  h.sql.close();
+});
+
+test('lbs step converts once to canonical kg and uses latest configured step', () => {
+  const h = actionHarness();
+  const units = h.load('@/store/weightUnits');
+  const target = h.store.getState().getActiveSetTarget();
+  h.store.getState().updateExerciseSet(0, 0, 8, 10.125);
+  h.store.getState().updateProfile({ weightUnit: 'lbs', weightIncrementLbs: 2.5 });
+  h.act('increaseWeight', target);
+  assert.ok(Math.abs(h.active().weight - (10.125 + units.lbsToKg(2.5))) < 1e-10);
+  h.act('decreaseWeight', target);
+  assert.ok(Math.abs(h.active().weight - 10.125) < 1e-10);
+  h.sql.close();
+});
+
+test('rapid increments serialize without lost updates; duplicate event IDs do not replay', () => {
+  const h = actionHarness();
+  const before = { ...h.active() };
+  const first = h.enqueue('increaseWeight');
+  for (let i = 0; i < 19; i++) h.enqueue('increaseWeight');
+  for (let i = 0; i < 10; i++) h.enqueue('increaseReps');
+  h.queue.push(first);
+  h.drain();
+  assert.equal(h.active().weight, before.weight + 10);
+  assert.equal(h.active().reps, before.reps + 10);
+  assert.equal(h.applied.length, 30);
+  h.sql.close();
+});
+
+test('double Done completes only the referenced set, preserves Increase Between Sets', () => {
+  const h = actionHarness();
+  h.store.getState().updateExerciseSet(0, 0, 12, 40.5);
+  const old = h.store.getState().getActiveSetTarget();
+  h.enqueue('completeSet', old);
+  h.enqueue('completeSet', old);
+  h.enqueue('increaseReps', old);
+  h.drain();
+  const sets = h.store.getState().currentSession.exercises[0].sets;
+  assert.equal(sets.filter((s) => s.completed).length, 1);
+  assert.equal(sets[1].weight, 41);
+  assert.equal(h.applied.length, 1);
+  assert.equal(h.store.getState().getActiveSetTarget().setIndex, 1);
+  assert.equal(h.sql.prepare('SELECT target_weight FROM sets WHERE id = ?').get(Number(h.store.getState().getActiveSetTarget().setId)).target_weight, 41);
+  h.sql.close();
+});
+
+test('Increase Between Sets off carries values through the shared completion action', () => {
+  const h = actionHarness();
+  h.store.getState().updateProfile({ autoIncreaseWeight: false });
+  h.store.getState().updateExerciseSet(0, 0, 11, 42.25);
+  h.act('completeSet');
+  assert.equal(h.active().weight, 42.25);
+  assert.equal(h.active().reps, 11);
+  h.sql.close();
+});
+
+test('final-set progression selects the next exercise then requests normal feedback without saving prematurely', () => {
+  const h = actionHarness();
+  for (let i = 0; i < 3; i++) h.act('completeSet');
+  assert.equal(h.store.getState().getActiveSetTarget().exerciseIndex, 1);
+  assert.equal(h.applied.at(-1).result.needsFeedback, false);
+  for (let i = 0; i < 3; i++) h.act('completeSet');
+  assert.equal(h.store.getState().getActiveSetTarget(), null);
+  assert.equal(h.applied.at(-1).result.needsFeedback, true);
+  assert.equal(h.store.getState().currentSession.completed, false);
+  assert.equal(h.store.getState().sessions.length, 0);
+  assert.ok(h.store.getState().completeWorkout('medium'));
+  assert.equal(h.store.getState().currentSession, null);
+  h.sql.close();
+});
+
+test('stale session, activity, selection, name and replaced SQLite set identities are rejected', () => {
+  const h = actionHarness();
+  const target = h.store.getState().getActiveSetTarget();
+  const before = h.active().weight;
+  h.act('increaseWeight', target, { source: 'old-activity' });
+  for (const override of [{ workoutId: 'other' }, { workoutStartedAt: 'other' }, { exerciseName: 'other' }, { setId: 'other' }, { exerciseId: 'other' }]) {
+    h.act('increaseWeight', { ...target, ...override });
+  }
+  h.store.getState().setWorkoutExerciseIndex(1);
+  h.act('completeSet', target);
+  h.store.getState().setWorkoutExerciseIndex(0);
+  assert.equal(h.active().weight, before);
+  // Replace with the same name at the same position: IDs must still reject it.
+  h.database.replaceCurrentSessionExercise(0, h.store.getState().currentSession.exercises[0]);
+  h.act('completeSet', target);
+  assert.equal(h.applied.length, 0);
+  assert.equal(h.active().completed, false);
+  h.store.getState().discardWorkout();
+  h.act('increaseWeight', target);
+  h.store.getState().startWorkoutFromArchetype(['push']);
+  h.act('completeSet', target);
+  assert.equal(h.applied.length, 0);
+  h.sql.close();
+});
+
+test('bodyweight has no weight commands, rejects forged weight actions and keeps completion weight zero', () => {
+  const h = actionHarness();
+  const name = h.sql.prepare("SELECT name FROM exercises WHERE load_type = 'bodyweight' LIMIT 1").get().name;
+  h.store.getState().appendExerciseToSession(name);
+  h.store.getState().setWorkoutExerciseIndex(2);
+  const target = h.store.getState().getActiveSetTarget();
+  const targets = h.actions.createLiveActivityActionTargets(target, true);
+  assert.equal(targets.increaseWeight, undefined);
+  assert.equal(targets.decreaseWeight, undefined);
+  h.act('increaseWeight');
+  h.act('decreaseWeight');
+  assert.equal(h.applied.length, 0);
+  const reps = h.active().reps;
+  h.act('increaseReps');
+  assert.equal(h.active().reps, reps + 1);
+  h.act('completeSet');
+  assert.equal(h.active().weight, 0);
+  h.sql.close();
+});
+
+test('hydration blocks mutation and a startup inbox drains when the host is ready', () => {
+  const h = actionHarness();
+  const before = h.active().reps;
+  h.ready(false);
+  h.enqueue('increaseReps');
+  h.drain();
+  assert.equal(h.queue.length, 1);
+  h.ready(true);
+  h.drain();
+  assert.equal(h.active().reps, before + 1);
+  h.store.setState({ isHydrated: false });
+  h.act('increaseReps');
+  h.store.setState({ isHydrated: true, hydrationError: 'failed' });
+  h.act('increaseReps');
+  assert.equal(h.active().reps, before + 1);
+  h.sql.close();
+});
+
+test('persistence failure leaves both completion/progression rows and Zustand unchanged', () => {
+  const h = actionHarness();
+  const beforeState = h.store.getState().currentSession;
+  const beforeRows = h.sql.prepare('SELECT * FROM sets').all();
+  const run = h.adapter.runSync;
+  let writes = 0;
+  h.adapter.runSync = (query, ...args) => {
+    if (query.includes('UPDATE sets') && ++writes === 3) throw Error('disk full on next set');
+    return run(query, ...args);
+  };
+  h.act('completeSet');
+  assert.equal(h.store.getState().currentSession, beforeState);
+  assert.deepEqual(h.sql.prepare('SELECT * FROM sets').all(), beforeRows);
+  assert.equal(h.applied.length, 0);
+  assert.equal(h.alerts.length, 1);
+  h.adapter.runSync = () => { throw Error('write unavailable'); };
+  h.act('increaseWeight');
+  assert.equal(h.store.getState().currentSession, beforeState);
+  h.adapter.runSync = run;
+  h.act('increaseReps');
+  assert.equal(h.applied.length, 1);
+  assert.ok(h.refreshes() >= 3);
+  h.sql.close();
+});
+
+test('malformed native events cannot prevent later valid actions', () => {
+  const h = actionHarness();
+  for (const target of ['bad', 'stack.workout.v2:{#increaseReps', 'stack.workout.v2:null#increaseReps', 'stack.workout.v2:{}#delete']) {
+    h.enqueue('increaseReps', undefined, { target });
+  }
+  const before = h.active().reps;
+  h.enqueue('increaseReps');
+  h.drain();
+  assert.equal(h.active().reps, before + 1);
+  assert.equal(h.applied.length, 1);
+  h.sql.close();
+});
+
+test('widget action publishes authoritative Slice 3 redraws and finishing ends the activity', async () => {
+  const h = actionHarness();
+  const { createWorkoutLiveActivityCoordinator } = h.load('@/services/liveActivity/coordinator');
+  const { deriveWorkoutLiveActivityState } = h.load('@/services/liveActivity/state');
+  const events = [];
+  const instances = [];
+  const instance = {
+    getId: () => 'native',
+    update: async (state) => { events.push(['update', state]); },
+    end: async () => { events.push(['end']); instances.splice(0); },
+  };
+  const coordinator = createWorkoutLiveActivityCoordinator({
+    factory: {
+      getInstances: () => [...instances],
+      start: (state) => { instances.push(instance); events.push(['start', state]); return instance; },
+    },
+    endTestActivities: async () => {},
+    onError: (error) => { throw error; },
+  });
+  const sync = () => coordinator.sync(deriveWorkoutLiveActivityState(h.store.getState()), true);
+  const unsubscribe = h.store.subscribe(sync);
+  await sync();
+  h.act('increaseWeight');
+  await sync();
+  assert.equal(events.at(-1)[1].weight, String(h.active().weight));
+  h.act('completeSet');
+  await sync();
+  assert.equal(events.at(-1)[1].setNumber, 2);
+  assert.equal(events.at(-1)[1].weight, String(h.active().weight));
+  for (let i = 0; i < 5; i++) h.act('completeSet');
+  await sync();
+  assert.equal(instances.length, 1);
+  h.store.getState().completeWorkout('medium');
+  await sync();
+  assert.equal(events.at(-1)[0], 'end');
+  assert.equal(instances.length, 0);
+  unsubscribe();
+  h.sql.close();
+});
+
+const widgetRuntime = require('./helpers/widgetRuntime.cjs');
+let localRuntime;
+const localWidget = () => localRuntime ??= widgetRuntime();
+const interactive = (h) => h.load('@/services/liveActivity/presentation').deriveInteractiveWorkoutPresentation(
+  h.store.getState(), h.database.readCurrentSetTarget);
+const press = (frame, action) => localWidget().press(frame, frame.actionTarget + action);
+
+test('actual Expo widget runtime shows 80 → 82.5 → 85 → 87.5 before any host mutation', () => {
+  const h = actionHarness();
+  h.store.getState().updateProfile({ weightIncrement: 2.5 });
+  h.store.getState().updateExerciseSet(0, 0, 8, 80);
+  let local = interactive(h);
+  for (const expected of ['82.5', '85', '87.5']) {
+    h.enqueue('increaseWeight', undefined, { target: local.actionTarget + 'increaseWeight' });
+    local = press(local, 'increaseWeight');
+    assert.equal(local.weight, expected);
+    assert.equal(h.active().weight, 80);
+  }
+  h.drain();
+  assert.equal(interactive(h).weight, local.weight);
+  assert.equal(h.active().weight, 87.5);
+  local = press(local, 'decreaseWeight');
+  assert.equal(local.weight, '85');
+  h.sql.close();
+});
+
+test('actual callback increments/decrements reps and enforces the same lower bounds', () => {
+  const h = actionHarness();
+  h.store.getState().updateExerciseSet(0, 0, 1, 0.25);
+  let local = interactive(h);
+  local = press(local, 'decreaseReps');
+  assert.equal(local.reps, 1);
+  local = press(local, 'increaseReps');
+  assert.equal(local.reps, 2);
+  local = press(local, 'decreaseWeight');
+  assert.equal(local.weight, '0');
+  assert.equal(h.active().weight, 0.25);
+  h.sql.close();
+});
+
+test('Done renders the domain-derived next set immediately; rapid old Done cannot run again', () => {
+  const h = actionHarness();
+  h.store.getState().updateProfile({ weightIncrement: 2.5 });
+  h.act('completeSet');
+  h.store.getState().updateExerciseSet(0, 1, 8, 80);
+  let local = interactive(h);
+  local = press(local, 'increaseWeight');
+  const doneTarget = local.actionTarget + 'completeSet';
+  local = press(local, 'completeSet');
+  assert.equal(local.setNumber, 3);
+  assert.equal(local.weight, '85');
+  assert.equal(local.completionPending, true);
+  assert.equal(local.actions.completeSet, undefined);
+  assert.equal(localWidget().press(local, doneTarget), undefined);
+  assert.equal(h.store.getState().getActiveSetTarget().setIndex, 1);
+  h.act('increaseWeight');
+  h.act('completeSet');
+  const authoritative = interactive(h);
+  assert.equal(authoritative.weight, local.weight);
+  assert.equal(authoritative.setNumber, local.setNumber);
+  assert.equal(authoritative.actions.completeSet, 'completeSet');
+  h.sql.close();
+});
+
+test('preview tracks edited reps/weight with Increase Between Sets off, including lbs', () => {
+  const h = actionHarness();
+  h.store.getState().updateProfile({ autoIncreaseWeight: false, weightUnit: 'lbs', weightIncrementLbs: 2.5 });
+  h.store.getState().updateExerciseSet(0, 0, 8, 20.125);
+  let local = interactive(h);
+  for (const action of ['increaseWeight', 'increaseReps', 'completeSet']) {
+    h.enqueue(action, undefined, { target: local.actionTarget + action });
+    local = press(local, action);
+  }
+  assert.equal(local.reps, 9);
+  assert.equal(local.setNumber, 2);
+  h.drain();
+  assert.equal(interactive(h).weight, local.weight);
+  assert.equal(interactive(h).reps, local.reps);
+  h.sql.close();
+});
+
+test('next exercise preview is derived in the host; final workout Done only signals pending completion', () => {
+  const h = actionHarness();
+  h.act('completeSet'); h.act('completeSet');
+  const before = interactive(h);
+  const local = press(before, 'completeSet');
+  assert.equal(local.exerciseName, h.store.getState().currentSession.exercises[1].name);
+  assert.equal(local.setNumber, 1);
+  h.act('completeSet');
+  assert.equal(interactive(h).exerciseName, local.exerciseName);
+  h.act('completeSet'); h.act('completeSet');
+  const final = interactive(h);
+  assert.equal(final.interaction.next, undefined);
+  const done = press(final, 'completeSet');
+  assert.equal(done.setNumber, final.setNumber);
+  assert.equal(done.completionPending, true);
+  assert.deepEqual(done.actions, {});
+  assert.equal(h.store.getState().currentSession.completed, false);
+  h.sql.close();
+});
+
+test('optimistic bodyweight presentation has no weight handler and keeps weight absent', () => {
+  const h = actionHarness();
+  const name = h.sql.prepare("SELECT name FROM exercises WHERE load_type = 'bodyweight' LIMIT 1").get().name;
+  h.store.getState().appendExerciseToSession(name);
+  h.store.getState().setWorkoutExerciseIndex(2);
+  const local = interactive(h);
+  assert.equal(press(local, 'increaseWeight'), undefined);
+  assert.equal(press(local, 'decreaseWeight'), undefined);
+  assert.equal(press(local, 'increaseReps').weight, '—');
+  assert.equal(press(local, 'completeSet').weight, '—');
+  h.sql.close();
+});
+
+test('failed and stale mirrored actions reconcile to real values instead of leaving optimistic values', () => {
+  const h = actionHarness();
+  h.store.getState().updateExerciseSet(0, 0, 8, 80);
+  const before = interactive(h);
+  const optimistic = press(before, 'increaseWeight');
+  assert.equal(optimistic.weight, '80.5');
+  const run = h.adapter.runSync;
+  h.adapter.runSync = () => { throw Error('test write failure'); };
+  h.enqueue('increaseWeight', undefined, { target: before.actionTarget + 'increaseWeight' });
+  h.drain();
+  h.adapter.runSync = run;
+  assert.equal(interactive(h).weight, '80');
+  const command = h.actions.parseLiveActivityAction(before.actionTarget + 'increaseWeight');
+  h.store.getState().updateProfile({ weightIncrement: 2.5 });
+  assert.equal(h.store.getState().applyActiveSetAction(command.target, command.action, command.weightStepKg).status, 'stale');
+  assert.equal(h.active().weight, 80);
+  assert.equal(h.refreshes(), 1);
+  h.sql.close();
+});
+
+test('interactive ActivityKit content fits the 4 KB limit, with one shared target per presentation', () => {
+  const h = actionHarness();
+  const frame = interactive(h);
+  const bytes = Buffer.byteLength(JSON.stringify({ name: 'StackWorkoutLiveActivity', props: JSON.stringify(frame) }));
+  assert.ok(bytes < 4096, `Content uses ${bytes} bytes`);
+  assert.equal(frame.actions.increaseWeight, 'increaseWeight');
+  assert.ok(frame.actionTarget.includes('stack.workout.v2:'));
+  h.sql.close();
+});

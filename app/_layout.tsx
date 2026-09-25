@@ -17,6 +17,8 @@ import { JetBrainsMono_400Regular, JetBrainsMono_700Bold } from '@expo-google-fo
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { ActiveWorkoutBar } from '@/components/ActiveWorkoutBar';
 import { initializeWorkoutStore, useWorkoutStore } from '@/store/workoutStore';
+import { startWorkoutLiveActivitySync } from '@/services/liveActivity/sync';
+import { startWorkoutLiveActivityInteractions } from '@/services/liveActivity/interaction';
 import '@/global.css';
 import { BUILD_SANDBOX_ENABLED } from '@/features/build/config';
 
@@ -72,6 +74,18 @@ export default function RootLayout() {
       console.error('Failed to initialize workout database', error);
     });
   }, []);
+
+  useEffect(() => startWorkoutLiveActivitySync(), []);
+
+  useEffect(() => {
+    if ((!fontsLoaded && !fontError) || !isHydrated || hydrationError || redirectPending) return;
+    return startWorkoutLiveActivityInteractions((workoutId, needsFeedback) => {
+      if (!needsFeedback) return;
+      router.navigate({ pathname: '/workout', params: {
+        fromActivityCard: '1', finishFromActivity: needsFeedback ? workoutId : '',
+      } });
+    });
+  }, [fontError, fontsLoaded, hydrationError, isHydrated, redirectPending, router]);
 
   useEffect(() => {
     if (

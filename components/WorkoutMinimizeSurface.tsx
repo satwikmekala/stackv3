@@ -7,7 +7,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { ActiveWorkoutCard } from '@/components/ActiveWorkoutCard';
 import { redesignColors } from '@/constants/theme';
-import { useWorkoutMinimizeTarget } from '@/store/workoutMinimizeTarget';
+import { WORKOUT_BAR_SIDE_INSET, useWorkoutMinimizeTarget } from '@/store/workoutMinimizeTarget';
 import type { WorkoutSession } from '@/store/workoutStore';
 
 export type WorkoutMinimizeHandle = { minimize: () => void };
@@ -27,8 +27,8 @@ export function WorkoutMinimizeSurface({ children, session, onMinimize, expandFr
   const [isExpanding, setIsExpanding] = useState(expandFromCard);
   const [isMinimizing, setIsMinimizing] = useState(false);
   const bottom = target.bottom ?? insets.bottom + 88;
-  const left = insets.left + 16;
-  const right = insets.right + 16;
+  const left = insets.left + WORKOUT_BAR_SIDE_INSET;
+  const right = insets.right + WORKOUT_BAR_SIDE_INSET;
 
   const finishExpanding = useCallback(() => setIsExpanding(false), []);
   useEffect(() => {

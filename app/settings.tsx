@@ -5,6 +5,7 @@ import {
   ScrollView,
   TextInput,
   Alert,
+  Platform,
   Pressable,
   Switch,
   TouchableOpacity,
@@ -17,6 +18,7 @@ import { useWorkoutStore } from '@/store/workoutStore';
 import { unitLabel, type WeightUnit } from '@/store/weightUnits';
 import { Button } from '@/components/Button';
 import { colors, fonts, redesignColors } from '@/constants/theme';
+import { TestLiveActivityControls } from '@/components/dev/TestLiveActivityControls';
 import '@/global.css';
 import { BUILD_SANDBOX_ENABLED } from '@/features/build/config';
 
@@ -415,6 +417,8 @@ export default function Settings() {
             ios_backgroundColor={colors.surfaceRaised}
           />
         </View>
+
+        {__DEV__ && Platform.OS === 'ios' && <TestLiveActivityControls />}
 
         {/* Danger zone — moved as-is from the old Profile */}
         <View

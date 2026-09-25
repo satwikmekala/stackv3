@@ -63,7 +63,8 @@ import {
 } from '@/store/workoutStore';
 import { DEFAULT_WEIGHT_UNIT } from '@/store/workoutDatabase';
 import { formatWeight, getWeightIncrement, type WeightUnit } from '@/store/weightUnits';
-import { getInitialExerciseIndex } from '@/utils/workoutResume';
+import { getActiveSetIndex, getCurrentWorkoutExerciseIndex } from '@/utils/workoutResume';
+import { getNextIncompleteExerciseIndex, isExerciseComplete } from '@/store/workoutSetActions';
 import '@/global.css';
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
@@ -337,21 +338,6 @@ function SetProgress({
   );
 }
 
-const isExerciseComplete = (exercise: Exercise) =>
-  exercise.sets.every((set) => set.completed);
-
-const getNextIncompleteExerciseIndex = (
-  exercises: Exercise[],
-  currentIndex: number
-) => {
-  for (let offset = 1; offset < exercises.length; offset += 1) {
-    const candidateIndex = (currentIndex + offset) % exercises.length;
-    if (!isExerciseComplete(exercises[candidateIndex])) return candidateIndex;
-  }
-
-  return -1;
-};
-
 const getRemainingExercises = (
   exercises: Exercise[],
   currentIndex: number
@@ -371,8 +357,9 @@ export default function Workout() {
   const router = useRouter();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const { fromActivityCard, launchOrigin: launchOriginParam } = useLocalSearchParams<{
+  const { fromActivityCard, finishFromActivity, launchOrigin: launchOriginParam } = useLocalSearchParams<{
     fromActivityCard?: string;
+    finishFromActivity?: string;
     launchOrigin?: string;
   }>();
   const [launchOrigin] = useState(() => fromActivityCard === '1' ? null : parseWorkoutLaunchOrigin(launchOriginParam));
@@ -387,6 +374,7 @@ export default function Workout() {
   const updateProfile = useWorkoutStore((state) => state.updateProfile);
   const updateExerciseSet = useWorkoutStore((state) => state.updateExerciseSet);
   const appendBonusSet = useWorkoutStore((state) => state.appendBonusSet);
+  const applyActiveSetAction = useWorkoutStore((state) => state.applyActiveSetAction);
   const toggleSetCompleted = useWorkoutStore((state) => state.toggleSetCompleted);
   const toggleSetSkipped = useWorkoutStore((state) => state.toggleSetSkipped);
   const swapCurrentSessionExercise = useWorkoutStore(
@@ -395,12 +383,14 @@ export default function Workout() {
   const completeWorkout = useWorkoutStore((state) => state.completeWorkout);
   const discardWorkout = useWorkoutStore((state) => state.discardWorkout);
 
-  const [exerciseIndex, setExerciseIndex] = useState(() =>
-    currentSession ? getInitialExerciseIndex(currentSession.exercises) : 0
-  );
+  const workoutFocus = useWorkoutStore((state) => state.workoutFocus);
+  const setExerciseIndex = useWorkoutStore((state) => state.setWorkoutExerciseIndex);
+  const exerciseIndex = currentSession ? getCurrentWorkoutExerciseIndex(currentSession, workoutFocus) : 0;
   const [showSwapSheet, setShowSwapSheet] = useState(false);
   const [showUpNextSheet, setShowUpNextSheet] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const activityFeedbackVisible = Boolean(currentSession && finishFromActivity === currentSession.id &&
+    currentSession.exercises.every(isExerciseComplete));
   const [bonusSelection, setBonusSelection] = useState<BonusSetSelection | null>(null);
   const [loggedBonusSet, setLoggedBonusSet] = useState<BonusSetSelection | null>(null);
   const [recentBonusSetIndex, setRecentBonusSetIndex] = useState<number | null>(null);
@@ -411,11 +401,11 @@ export default function Workout() {
   const [infoExercise, setInfoExercise] = useState<ExerciseInfoData | null>(null);
   const [infoVisible, setInfoVisible] = useState(false);
   const infoOpeningRef = useRef(false);
-  const closeExerciseInfo = useCallback(() => setInfoVisible(false), []);
+  const closeExerciseInfo = useCallback(() => setInfoVisible(false), [setInfoVisible]);
   const finishClosingExerciseInfo = useCallback(() => {
     infoOpeningRef.current = false;
     setInfoExercise(null);
-  }, []);
+  }, [setInfoExercise]);
   const loggingSetRef = useRef(false);
   const exitingRef = useRef(false);
   const hasRenderedRef = useRef(false);
@@ -493,9 +483,7 @@ export default function Workout() {
   const accent = archetypeComposition?.color ?? workoutLoggingColors[workoutType];
   const exercise = currentSession.exercises[exerciseIndex];
   const availableExerciseInfo = getExerciseInfo(exercise.name);
-  const firstIncompleteSetIndex = exercise.sets.findIndex((set) => !set.completed);
-  const setIndex =
-    firstIncompleteSetIndex === -1 ? Math.max(0, exercise.sets.length - 1) : firstIncompleteSetIndex;
+  const setIndex = getActiveSetIndex(exercise);
   const activeSet = exercise.sets[setIndex];
   const nextIncompleteExerciseIndex = getNextIncompleteExerciseIndex(
     currentSession.exercises,
@@ -520,50 +508,40 @@ export default function Workout() {
     );
   };
 
-  const handleRepsChange = (delta: number) => {
-    updateActiveSet(activeSet.reps + delta, activeSet.weight);
+  // Both surfaces use the same active-set domain action and profile increment.
+  const currentTarget = () => {
+    const target = useWorkoutStore.getState().getActiveSetTarget();
+    return target?.workoutId === currentSession.id && target.exerciseIndex === exerciseIndex &&
+      target.setIndex === setIndex && target.exerciseName === exercise.name ? target : null;
   };
-
+  const handleRepsChange = (delta: number) => {
+    const target = currentTarget();
+    if (target) applyActiveSetAction(target, delta > 0 ? 'increaseReps' : 'decreaseReps');
+  };
   const handleWeightChange = (delta: number) => {
-    updateActiveSet(activeSet.reps, activeSet.weight + delta);
+    const target = currentTarget();
+    if (target) applyActiveSetAction(target, delta > 0 ? 'increaseWeight' : 'decreaseWeight');
   };
 
   const handleToggleSet = () => {
     if (loggingSetRef.current) return;
-
-    const wasCompleted = activeSet.completed;
-    const completesExercise = exercise.sets.every(
-      (set, index) => index === setIndex || set.completed
-    );
+    const target = currentTarget();
+    if (!target) return;
     loggingSetRef.current = true;
     setStageDirection(1);
-    toggleSetCompleted(exerciseIndex, setIndex);
-
-    // The store writes to SQLite before publishing the updated session. Read
-    // that published state back before moving the UI so a failed write keeps
-    // the user on the current exercise and uses the store's existing alert.
-    const committedSet = useWorkoutStore.getState().currentSession
-      ?.exercises[exerciseIndex]?.sets[setIndex];
-    if (!committedSet?.completed) {
+    setExerciseMotion('forward');
+    const result = applyActiveSetAction(target, 'completeSet');
+    if (result.status !== 'applied') {
       loggingSetRef.current = false;
       return;
     }
-
-    setTimeout(() => {
-      loggingSetRef.current = false;
-    }, LOG_SUBMISSION_GUARD_MS);
-
+    setTimeout(() => { loggingSetRef.current = false; }, LOG_SUBMISSION_GUARD_MS);
     if (Platform.OS !== 'web') {
-      if (!wasCompleted && completesExercise) {
-        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      } else if (!wasCompleted) {
-        void Haptics.selectionAsync();
-      }
+      if (result.completedExercise) void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      else void Haptics.selectionAsync();
     }
-
-    if (!wasCompleted && completesExercise) {
-      handleAdvanceExercise();
-    }
+    if (result.completedExercise) setRecentBonusSetIndex(null);
+    if (result.needsFeedback) setShowFeedbackModal(true);
   };
 
   const handleSkipSet = () => {
@@ -1098,7 +1076,7 @@ export default function Workout() {
       />
 
       <WorkoutIntensityPicker
-        visible={showFeedbackModal}
+        visible={showFeedbackModal || activityFeedbackVisible}
         type={workoutType}
         levels={FEEDBACK_LEVELS}
         prompt="How did it feel?"
@@ -1109,7 +1087,7 @@ export default function Workout() {
             value === 0 ? 'easy' : value === 0.5 ? 'medium' : 'hard';
           handleFeedbackSelect(intensity);
         }}
-        onClose={() => setShowFeedbackModal(false)}
+        onClose={() => { setShowFeedbackModal(false); router.setParams({ finishFromActivity: '' }); }}
       />
       {infoExercise ? (
         <ExerciseInfo

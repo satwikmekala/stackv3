@@ -2832,7 +2832,7 @@ export const updateCurrentSet = (
 ): void => {
   const db = getDatabase();
   const id = currentSetIdSync(db, exerciseIndex, setIndex);
-  if (id === null) return;
+  if (id === null) throw new Error('The current set no longer exists');
   db.runSync(
     `UPDATE sets
      SET reps = ?, weight = ?, completed = ?, skipped = ?
@@ -2843,6 +2843,40 @@ export const updateCurrentSet = (
     updates.skipped ? 1 : 0,
     id
   );
+};
+
+// No schema change: expose the existing persisted identities for external actions.
+export const readCurrentSetTarget = (exerciseIndex: number, setIndex: number) => {
+  const row = getDatabase().getFirstSync<{
+    workoutId: number; workoutStartedAt: string; exerciseId: number; setId: number; exerciseName: string;
+  }>(
+    `SELECT s.id AS workoutId, s.date AS workoutStartedAt, se.id AS exerciseId, st.id AS setId, e.name AS exerciseName
+     FROM sets st JOIN session_exercises se ON se.id = st.session_exercise_id
+     JOIN sessions s ON s.id = se.session_id JOIN exercises e ON e.id = se.exercise_id
+     WHERE s.completed = 0 AND se.position = ? AND st.set_index = ? LIMIT 1`,
+    exerciseIndex, setIndex
+  );
+  return row ? {
+    workoutId: String(row.workoutId), workoutStartedAt: row.workoutStartedAt, exerciseId: String(row.exerciseId),
+    setId: String(row.setId), exerciseName: row.exerciseName, exerciseIndex, setIndex,
+  } : null;
+};
+
+// Completion and Increase Between Sets must either both commit or both roll back.
+export const updateCurrentSets = (
+  exerciseIndex: number,
+  updates: { setIndex: number; set: ExerciseSet }[]
+) => {
+  getDatabase().withTransactionSync(() => {
+    for (const update of updates) {
+      updateCurrentSet(exerciseIndex, update.setIndex, update.set);
+      const id = currentSetIdSync(getDatabase(), exerciseIndex, update.setIndex);
+      getDatabase().runSync(
+        'UPDATE sets SET target_reps = ?, target_weight = ? WHERE id = ?',
+        update.set.targetReps ?? null, update.set.targetWeight ?? null, id
+      );
+    }
+  });
 };
 
 export const appendCurrentBonusSet = (
