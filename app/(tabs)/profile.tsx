@@ -29,8 +29,11 @@ import Animated, {
 import { withMotionTiming } from '@/constants/motion';
 import { redesignColors, redesignFonts, splitColors } from '@/constants/theme';
 import {
+  deriveDefaultSlots,
+  getSessionLocalDate,
   getStartOfWeek,
   parseSessionDate,
+  toLocalCalendarDate,
   useWorkoutStore,
   type WorkoutSession,
 } from '@/store/workoutStore';
@@ -63,14 +66,6 @@ type StrengthWeekPoint = {
 const SECTION_BORDER = 'rgba(169, 159, 145, 0.18)';
 const STREAK_ORANGE = splitColors.chest;
 const STRENGTH_RANGES: StrengthRange[] = [4, 8, 12, 16];
-const STRENGTH_COLOR_PALETTE = [
-  splitColors.chest,
-  splitColors.back,
-  splitColors.legs,
-  splitColors.shoulders,
-  splitColors.arms,
-  splitColors.core,
-];
 
 // Display unit lives on the profile; this is a screen, so its cards read the
 // store directly rather than threading a prop the way the set components do.
@@ -82,12 +77,11 @@ const formatNumber = (value: number) =>
 
 type StrengthHistoryEntry = { date: Date; weight: number };
 
+// Colour follows the exercise's muscle group (the same colours as the split
+// cards), so it carries meaning. Unknown exercises stay neutral.
 const getStrengthColor = (exerciseName: string) => {
-  const hash = [...exerciseName].reduce(
-    (value, character) => ((value << 5) - value + character.charCodeAt(0)) | 0,
-    0
-  );
-  return STRENGTH_COLOR_PALETTE[(hash >>> 0) % STRENGTH_COLOR_PALETTE.length];
+  const type = useWorkoutStore.getState().getExerciseWorkoutType(exerciseName);
+  return type ? splitColors[type] : redesignColors.ash;
 };
 
 function buildRecordedStrengthMetric(
@@ -326,6 +320,8 @@ function StrengthRangePicker({
   );
 }
 
+// Every card has the same fixed structure (two-line name slot, weight, gain),
+// so the grid lines up regardless of name length or number width.
 function StrengthCard({ metric, onPress }: { metric: StrengthMetric; onPress: () => void }) {
   const weightUnit = useWeightUnit();
   const formattedWeight = formatWeight(metric.weight, weightUnit);
@@ -342,23 +338,24 @@ function StrengthCard({ metric, onPress }: { metric: StrengthMetric; onPress: ()
         onPress={onPress}
         style={({ pressed }) => [styles.strengthCardTapTarget, pressed && styles.strengthCardPressed]}
       >
-        <View style={styles.strengthCard}>
-          <View style={[styles.cardAccent, { backgroundColor: metric.color }]} />
-          <View style={styles.exerciseTitleRow}>
-            <View style={[styles.exerciseDot, { backgroundColor: metric.color }]} />
-            <Text adjustsFontSizeToFit minimumFontScale={0.8} numberOfLines={2} style={styles.exerciseTitle}>
-              {metric.label}
-            </Text>
-          </View>
+        <View style={styles.strengthTile}>
+          <Text numberOfLines={2} style={styles.strengthTileName}>
+            {metric.label}
+          </Text>
 
-          <View style={styles.weightRow}>
-            <Text adjustsFontSizeToFit minimumFontScale={0.82} numberOfLines={1} style={styles.weightValue}>
+          <View style={styles.strengthTileWeightRow}>
+            <Text numberOfLines={1} style={styles.strengthTileWeight}>
               {formattedWeight}
             </Text>
-            <Text style={styles.weightUnit}>{unitLabel(weightUnit)}</Text>
+            <Text style={styles.strengthTileUnit}>{unitLabel(weightUnit)}</Text>
           </View>
 
-          <Text style={[styles.gainText, { color: metric.color }]}>{progressionLabel}</Text>
+          <Text numberOfLines={1} style={styles.strengthTileMeta}>
+            <Text style={{ color: metric.percentageGain > 0 ? metric.color : redesignColors.ash }}>
+              {progressionLabel}
+            </Text>
+            {` · ${metric.periodWeeks} WK`}
+          </Text>
         </View>
       </Pressable>
     </View>
@@ -589,15 +586,89 @@ function StrengthProgressionDetail({
   );
 }
 
+const WEEKDAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+const WEEKDAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+// Consecutive weeks with at least `goal` workouts, ending with the current
+// week once it's met. Uses today's goal, since past goals aren't stored.
+function countGoalStreak(sessions: WorkoutSession[], goal: number) {
+  if (goal <= 0) return 0;
+  const perWeek = new Map<string, number>();
+  for (const session of sessions) {
+    if (!session.completed) continue;
+    const day = new Date(`${getSessionLocalDate(session.date)}T12:00:00`);
+    const week = toLocalCalendarDate(getStartOfWeek(day));
+    perWeek.set(week, (perWeek.get(week) ?? 0) + 1);
+  }
+  const currentWeek = getStartOfWeek(new Date());
+  let streak = 0;
+  for (let offset = 0; offset < 520; offset += 1) {
+    const week = new Date(currentWeek);
+    week.setDate(currentWeek.getDate() - offset * 7);
+    if ((perWeek.get(toLocalCalendarDate(week)) ?? 0) < goal) break;
+    streak += 1;
+  }
+  return streak;
+}
+
 function WeeklyGoalCard({ completed, goal }: { completed: number; goal: number }) {
-  const visibleGoal = Math.max(1, Math.min(goal, 7));
-  const visibleCompleted = Math.min(completed, visibleGoal);
+  const trainingDays = useWorkoutStore((state) => state.profile?.trainingDays);
+  const sessions = useWorkoutStore((state) => state.sessions);
+  const days = useWorkoutStore((state) => state.getWeekStreak)();
   const remaining = Math.max(goal - completed, 0);
   const isComplete = remaining === 0;
+  const extra = Math.max(completed - goal, 0);
+
+  // Same planned days the weekly queue uses when none were picked.
+  const planned = new Set(trainingDays?.length ? trainingDays : deriveDefaultSlots(goal));
+  const todayIndex = (new Date().getDay() + 6) % 7;
+  const trainedToday = (days[todayIndex]?.workouts ?? 0) > 0;
+  let nextIndex: number | null = null;
+  for (let index = trainedToday ? todayIndex + 1 : todayIndex; index < 7; index += 1) {
+    if (planned.has(index) && (days[index]?.workouts ?? 0) === 0) {
+      nextIndex = index;
+      break;
+    }
+  }
+  const nextLabel = nextIndex === null
+    ? null
+    : nextIndex === todayIndex
+      ? 'Today'
+      : nextIndex === todayIndex + 1
+        ? 'Tomorrow'
+        : WEEKDAY_NAMES[nextIndex];
+  const streak = isComplete ? countGoalStreak(sessions, goal) : 0;
+
+  const headline = completed === 0 ? "Week's open" : isComplete ? 'Goal hit' : `${remaining} to go`;
+  const trainedNames = days
+    .map((day, index) => (day.workouts > 0 ? WEEKDAY_NAMES[index] : null))
+    .filter(Boolean)
+    .join(', ');
+
+  let caption: ReactNode;
+  if (!isComplete) {
+    caption = nextLabel
+      ? <>Next session: <Text style={styles.weeklyGoalCaptionStrong}>{nextLabel}</Text></>
+      // No planned day left, so point at the reset instead of a missing plan.
+      : 'Week resets Monday';
+  } else {
+    const streakText = streak >= 2
+      ? <><Text style={styles.weeklyGoalCaptionStrong}>{streak} weeks</Text> in a row</>
+      : 'First week on target';
+    caption = extra > 0
+      ? <>{extra} extra {extra === 1 ? 'session' : 'sessions'} · {streakText}</>
+      : streakText;
+  }
 
   return (
     <View
-      accessibilityLabel={`${completed} of ${goal} workouts completed this week`}
+      accessible
+      accessibilityLabel={[
+        `This week, ${completed} of ${goal} workouts`,
+        trainedNames ? `trained ${trainedNames}` : null,
+        !isComplete && nextLabel ? `next session ${nextLabel}` : null,
+        isComplete && streak >= 2 ? `${streak} weeks in a row` : null,
+      ].filter(Boolean).join('. ')}
       style={styles.weeklyGoalCard}
     >
       <LinearGradient
@@ -618,11 +689,9 @@ function WeeklyGoalCard({ completed, goal }: { completed: number; goal: number }
       />
 
       <View style={styles.weeklyGoalTopRow}>
-        <View>
-          <Text style={styles.weeklyGoalEyebrow}>WEEKLY WORKOUT GOAL</Text>
-          <Text style={styles.weeklyGoalHeadline}>
-            {isComplete ? 'Goal met.' : `${remaining} ${remaining === 1 ? 'workout' : 'workouts'} to go.`}
-          </Text>
+        <View style={styles.weeklyGoalCopy}>
+          <Text style={styles.weeklyGoalEyebrow}>THIS WEEK</Text>
+          <Text numberOfLines={1} style={styles.weeklyGoalHeadline}>{headline}</Text>
         </View>
         <View style={styles.weeklyGoalCount}>
           <Text style={styles.weeklyGoalCompleted}>{completed}</Text>
@@ -630,22 +699,36 @@ function WeeklyGoalCard({ completed, goal }: { completed: number; goal: number }
         </View>
       </View>
 
-      <View style={styles.weeklyGoalFooter}>
-        <View style={styles.weeklyGoalBars}>
-          {Array.from({ length: visibleGoal }).map((_, index) => (
+      {/* Mon-Sun: trained days filled, upcoming planned days outlined, rest dim. */}
+      <View style={styles.weeklyGoalDays}>
+        {WEEKDAY_LETTERS.map((letter, index) => {
+          const trained = (days[index]?.workouts ?? 0) > 0;
+          const upcomingPlan = !trained && planned.has(index) && index >= todayIndex;
+          return (
             <View
               key={index}
               style={[
-                styles.weeklyGoalBar,
-                index < visibleCompleted && styles.weeklyGoalBarComplete,
+                styles.weeklyGoalDay,
+                trained && styles.weeklyGoalDayTrained,
+                upcomingPlan && styles.weeklyGoalDayPlanned,
               ]}
-            />
-          ))}
-        </View>
-        <Text style={styles.weeklyGoalCaption}>
-          {isComplete ? 'Your target is in the bag.' : `Complete ${remaining} more to hit your target.`}
-        </Text>
+            >
+              <Text
+                style={[
+                  styles.weeklyGoalDayLetter,
+                  upcomingPlan && styles.weeklyGoalDayLetterPlanned,
+                  index === todayIndex && !trained && styles.weeklyGoalDayLetterToday,
+                  trained && styles.weeklyGoalDayLetterTrained,
+                ]}
+              >
+                {letter}
+              </Text>
+            </View>
+          );
+        })}
       </View>
+
+      <Text style={styles.weeklyGoalCaption}>{caption}</Text>
     </View>
   );
 }
@@ -855,11 +938,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  // Same size as Home's greeting so the two tab titles match.
   title: {
     fontFamily: redesignFonts.display,
-    fontSize: 45,
-    lineHeight: 51,
-    letterSpacing: -1.5,
+    fontSize: 34,
+    lineHeight: 42,
+    letterSpacing: -1.6,
     color: redesignColors.bone,
   },
   settingsButton: {
@@ -881,10 +965,9 @@ const styles = StyleSheet.create({
     marginTop: 27,
   },
   weeklyGoalCard: {
-    minHeight: 202,
-    paddingHorizontal: 24,
-    paddingTop: 25,
-    paddingBottom: 23,
+    paddingHorizontal: 22,
+    paddingTop: 20,
+    paddingBottom: 18,
     borderRadius: 27,
     borderCurve: 'continuous',
     borderWidth: 1,
@@ -894,7 +977,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.13,
     shadowRadius: 20,
-    justifyContent: 'space-between',
   },
   weeklyGoalBorder: {
     ...StyleSheet.absoluteFill,
@@ -912,9 +994,13 @@ const styles = StyleSheet.create({
   },
   weeklyGoalTopRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'flex-end',
     justifyContent: 'space-between',
     gap: 14,
+  },
+  weeklyGoalCopy: {
+    flex: 1,
+    minWidth: 0,
   },
   weeklyGoalEyebrow: {
     fontFamily: redesignFonts.monoBold,
@@ -924,48 +1010,65 @@ const styles = StyleSheet.create({
     color: STREAK_ORANGE,
   },
   weeklyGoalHeadline: {
-    maxWidth: 228,
-    marginTop: 11,
+    marginTop: 6,
     fontFamily: redesignFonts.display,
-    fontSize: 34,
-    lineHeight: 38,
-    letterSpacing: -1.15,
+    fontSize: 24,
+    lineHeight: 30,
+    letterSpacing: -0.7,
     color: redesignColors.bone,
   },
   weeklyGoalCount: {
-    minWidth: 67,
-    paddingTop: 2,
     flexDirection: 'row',
     alignItems: 'baseline',
-    justifyContent: 'flex-end',
   },
   weeklyGoalCompleted: {
     fontFamily: redesignFonts.display,
-    fontSize: 43,
-    lineHeight: 47,
-    letterSpacing: -1.4,
+    fontSize: 30,
+    lineHeight: 34,
+    letterSpacing: -1,
     color: redesignColors.bone,
   },
   weeklyGoalTotal: {
     fontFamily: redesignFonts.monoBold,
-    fontSize: 16,
+    fontSize: 14,
     color: redesignColors.ash,
   },
-  weeklyGoalFooter: {
-    marginTop: 20,
-  },
-  weeklyGoalBars: {
+  weeklyGoalDays: {
     flexDirection: 'row',
     gap: 6,
+    marginTop: 16,
   },
-  weeklyGoalBar: {
+  weeklyGoalDay: {
     flex: 1,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: redesignColors.raised,
+    height: 28,
+    borderRadius: 9,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    borderColor: 'transparent',
+    backgroundColor: 'rgba(255, 255, 255, 0.045)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  weeklyGoalBarComplete: {
+  weeklyGoalDayTrained: {
     backgroundColor: STREAK_ORANGE,
+  },
+  weeklyGoalDayPlanned: {
+    backgroundColor: 'transparent',
+    borderColor: `${STREAK_ORANGE}80`,
+  },
+  weeklyGoalDayLetter: {
+    fontFamily: redesignFonts.monoBold,
+    fontSize: 10,
+    color: redesignColors.ashDim,
+  },
+  weeklyGoalDayLetterPlanned: {
+    color: redesignColors.ash,
+  },
+  weeklyGoalDayLetterToday: {
+    color: redesignColors.bone,
+  },
+  weeklyGoalDayLetterTrained: {
+    color: redesignColors.ink,
   },
   weeklyGoalCaption: {
     marginTop: 12,
@@ -973,6 +1076,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 19,
     color: redesignColors.ash,
+  },
+  weeklyGoalCaptionStrong: {
+    fontFamily: redesignFonts.uiSemiBold,
+    color: redesignColors.bone,
   },
   section: {
     marginTop: 34,
@@ -1061,22 +1168,56 @@ const styles = StyleSheet.create({
   strengthCardTapTarget: {
     width: '100%',
   },
-  strengthCard: {
+  strengthCardPressed: {
+    opacity: 0.86,
+    transform: [{ scale: 0.975 }],
+  },
+  // Matches recordCard: same surface, border and corner radius as the cards around it.
+  strengthTile: {
     width: '100%',
-    minHeight: 208,
-    paddingHorizontal: 20,
-    paddingTop: 24,
-    paddingBottom: 20,
-    borderRadius: 26,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 15,
+    borderRadius: 23,
     borderCurve: 'continuous',
     borderWidth: 1,
     borderColor: SECTION_BORDER,
     backgroundColor: redesignColors.surface,
-    overflow: 'hidden',
   },
-  strengthCardPressed: {
-    opacity: 0.86,
-    transform: [{ scale: 0.975 }],
+  strengthTileName: {
+    // Always two lines tall, so every card's content starts at the same height.
+    height: 38,
+    fontFamily: redesignFonts.uiSemiBold,
+    fontSize: 15,
+    lineHeight: 19,
+    color: redesignColors.bone,
+  },
+  strengthTileWeightRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    marginTop: 10,
+  },
+  strengthTileWeight: {
+    flexShrink: 1,
+    fontFamily: redesignFonts.display,
+    fontSize: 30,
+    lineHeight: 34,
+    letterSpacing: -0.9,
+    color: redesignColors.bone,
+  },
+  strengthTileUnit: {
+    marginLeft: 5,
+    fontFamily: redesignFonts.uiSemiBold,
+    fontSize: 13,
+    color: redesignColors.ash,
+  },
+  strengthTileMeta: {
+    marginTop: 4,
+    fontFamily: redesignFonts.monoBold,
+    fontSize: 11,
+    lineHeight: 15,
+    letterSpacing: 0.4,
+    color: redesignColors.ashDim,
   },
   cardAccent: {
     position: 'absolute',
@@ -1085,11 +1226,6 @@ const styles = StyleSheet.create({
     right: 0,
     height: 3,
   },
-  exerciseTitleRow: {
-    minHeight: 45,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
   exerciseDot: {
     width: 10,
     height: 10,
@@ -1097,40 +1233,10 @@ const styles = StyleSheet.create({
     marginTop: 7,
     marginRight: 10,
   },
-  exerciseTitle: {
-    flex: 1,
-    fontFamily: redesignFonts.uiBold,
-    fontSize: 18,
-    lineHeight: 21,
-    color: redesignColors.bone,
-  },
-  weightRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    marginTop: 6,
-  },
-  weightValue: {
-    fontFamily: redesignFonts.display,
-    fontSize: 42,
-    lineHeight: 47,
-    letterSpacing: -1.3,
-    color: redesignColors.bone,
-  },
-  weightUnit: {
-    marginLeft: 7,
-    fontFamily: redesignFonts.uiSemiBold,
-    fontSize: 15,
-    color: redesignColors.ash,
-  },
   gainRow: {
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: 7,
-  },
-  gainText: {
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 14,
-    lineHeight: 20,
   },
   periodText: {
     marginTop: 2,

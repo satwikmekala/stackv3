@@ -218,12 +218,8 @@ function Stepper({
           style={{
             width: 30,
             height: 42,
-            borderRadius: 12,
             alignItems: 'center',
             justifyContent: 'center',
-            borderWidth: 1,
-            borderColor: redesignColors.border,
-            backgroundColor: redesignColors.raised,
           }}
         >
           <Minus color={redesignColors.bone} size={18} strokeWidth={2.6} />
@@ -248,12 +244,8 @@ function Stepper({
           style={{
             width: 30,
             height: 42,
-            borderRadius: 12,
             alignItems: 'center',
             justifyContent: 'center',
-            borderWidth: 1,
-            borderColor: redesignColors.border,
-            backgroundColor: redesignColors.raised,
           }}
         >
           <Plus color={redesignColors.bone} size={18} strokeWidth={2.6} />

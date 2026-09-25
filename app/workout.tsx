@@ -994,60 +994,62 @@ export default function Workout() {
               paddingHorizontal: 18,
             }}
           >
-            <View
-              style={{ flex: 1, justifyContent: 'center' }}
-            >
-              <Text
-                allowFontScaling={false}
-                style={{
-                  marginLeft: 25,
-                  fontFamily: redesignFonts.monoBold,
-                  fontSize: 10,
-                  letterSpacing: 1.8,
-                  color: redesignColors.ashDim,
-                }}
-              >
-                UP NEXT
-              </Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3 }}>
-                <View
-                  style={{
-                    width: 11,
-                    height: 11,
-                    borderRadius: 6,
-                    backgroundColor: accent,
-                    marginRight: 14,
-                  }}
-                />
+            {/* "3 SETS" and the chevron centre on the card; the dot sits on the
+                name's line, and the label is indented to start with the name. */}
+            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+              <View style={{ flex: 1, minWidth: 0 }}>
                 <Text
-                  numberOfLines={1}
                   allowFontScaling={false}
                   style={{
-                    flex: 1,
-                    minWidth: 0,
-                    fontFamily: redesignFonts.uiSemiBold,
-                    fontSize: 17,
-                    lineHeight: 21,
-                    color: redesignColors.bone,
-                  }}
-                >
-                  {nextExercise.name}
-                </Text>
-                <Text
-                  numberOfLines={1}
-                  allowFontScaling={false}
-                  style={{
-                    marginLeft: 10,
+                    marginLeft: 25,
                     fontFamily: redesignFonts.monoBold,
                     fontSize: 10,
-                    letterSpacing: 1.1,
+                    letterSpacing: 1.8,
                     color: redesignColors.ashDim,
                   }}
                 >
-                  {nextExercise.sets.length} SETS
+                  UP NEXT
                 </Text>
-                <ChevronRight color={redesignColors.ashDim} size={20} style={{ marginLeft: 7 }} />
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3 }}>
+                  <View
+                    style={{
+                      width: 11,
+                      height: 11,
+                      borderRadius: 6,
+                      backgroundColor: accent,
+                      marginRight: 14,
+                    }}
+                  />
+                  <Text
+                    numberOfLines={1}
+                    allowFontScaling={false}
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      fontFamily: redesignFonts.uiSemiBold,
+                      fontSize: 17,
+                      lineHeight: 21,
+                      color: redesignColors.bone,
+                    }}
+                  >
+                    {nextExercise.name}
+                  </Text>
+                </View>
               </View>
+              <Text
+                numberOfLines={1}
+                allowFontScaling={false}
+                style={{
+                  marginLeft: 10,
+                  fontFamily: redesignFonts.monoBold,
+                  fontSize: 10,
+                  letterSpacing: 1.1,
+                  color: redesignColors.ashDim,
+                }}
+              >
+                {nextExercise.sets.length} SETS
+              </Text>
+              <ChevronRight color={redesignColors.ashDim} size={20} style={{ marginLeft: 7 }} />
             </View>
           </AnimatedTouchableOpacity>
           ) : null}
