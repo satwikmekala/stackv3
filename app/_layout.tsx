@@ -35,7 +35,8 @@ export default function RootLayout() {
   const inOnboarding = segments[0] === '(onboarding)';
   const inCustomSplitFlow = segments[0] === 'custom-split';
   const onSplash = pathname === '/' && segments[0] !== '(tabs)';
-  const inBuildSandbox = BUILD_SANDBOX_ENABLED && (pathname === '/build-sandbox' || pathname === '/build' || pathname === '/build-casting');
+  const inBuildSandbox = BUILD_SANDBOX_ENABLED && (pathname === '/build-sandbox' || pathname === '/build' || pathname === '/build-casting'
+    || pathname === '/build-case' || pathname.startsWith('/build-case/'));
   const needsOnboardingRedirect =
     isHydrated &&
     !profile?.onboardingCompleted &&

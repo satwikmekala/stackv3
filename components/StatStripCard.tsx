@@ -9,6 +9,20 @@ export const STAT_STRIP_HEIGHT = 1920;
 const CAPTURE_SCALE = STAT_STRIP_WIDTH / 324;
 const scaled = (value: number) => value * CAPTURE_SCALE;
 
+/** Characters that fit the volume column at full size ("3,406.5"). */
+const VOLUME_FULL_SIZE_CHARS = 7;
+const VOLUME_FONT_SIZE = 27;
+
+/**
+ * The volume shrinks by its length rather than with adjustsFontSizeToFit. On iOS that fitter
+ * ignores minimumFontScale and, when no size fits the box (a sub-pixel rounding difference on
+ * some devices is enough, since the fixed line height never shrinks), falls back to 4pt, so the
+ * number vanished from the card. Sizing from the string is identical on every device.
+ */
+export function volumeFontSize(value: string) {
+  return Math.min(VOLUME_FONT_SIZE, (VOLUME_FONT_SIZE * VOLUME_FULL_SIZE_CHARS) / Math.max(1, value.length));
+}
+
 export interface StatStripCardProps {
   accent: string;
   title: string;
@@ -69,11 +83,12 @@ export const StatStripCard = forwardRef<View, StatStripCardProps>(function StatS
         <View style={styles.statsRow}>
           <View style={styles.volumeStat}>
             <Text
-              adjustsFontSizeToFit
               allowFontScaling={false}
-              minimumFontScale={0.72}
               numberOfLines={1}
-              style={styles.volumeValue}
+              style={[
+                styles.volumeValue,
+                { fontSize: scaled(volumeFontSize(volumeValue)), lineHeight: scaled(volumeFontSize(volumeValue)) },
+              ]}
             >
               {volumeValue}
             </Text>
@@ -202,8 +217,6 @@ const styles = StyleSheet.create({
   volumeValue: {
     width: '100%',
     fontFamily: redesignFonts.display,
-    fontSize: scaled(27),
-    lineHeight: scaled(27),
     letterSpacing: scaled(0.2),
     fontVariant: ['tabular-nums'],
     color: redesignColors.bone,

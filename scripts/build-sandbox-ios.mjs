@@ -22,6 +22,7 @@ const app = path.join(derived, 'Build/Products/Debug-iphonesimulator/Stack.app')
 const plist = path.join(app, 'Info.plist');
 // Only the compiled artifact changes. The project's release identity is untouched.
 run('/usr/libexec/PlistBuddy', ['-c', 'Set :CFBundleDisplayName Stack Build', plist]);
+run('/usr/libexec/PlistBuddy', ['-c', 'Set :RCTMetroPort 8087', plist]);
 run('/usr/libexec/PlistBuddy', ['-c', 'Delete :CFBundleURLTypes', plist]);
 for (const command of [
   'Add :CFBundleURLTypes array', 'Add :CFBundleURLTypes:0 dict',

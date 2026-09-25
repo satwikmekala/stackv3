@@ -43,6 +43,8 @@ test('history links and cold starts do not animate; concurrent/repeated claims c
   assert.equal(await gate.claim('loading-failure', storage), false);
   gate.issue('saved');
   assert.deepEqual(await Promise.all([gate.claim('saved', storage), gate.claim('saved', storage)]), [true, false]);
+  // The claim persists once its final beat is shown (or it is skipped).
+  await gate.commit('saved', storage);
   gate.issue('saved');
   assert.equal(await gate.claim('saved', storage), false);
   const relaunched = createCastingGate();
@@ -51,14 +53,20 @@ test('history links and cold starts do not animate; concurrent/repeated claims c
 });
 
 test('presentation storage failures decline casting without retrying or changing a workout', async () => {
-  for (const method of ['getItem', 'setItem']) {
-    const gate = createCastingGate();
-    const storage = memoryStorage();
-    storage[method] = async () => { throw new Error('unavailable storage'); };
-    gate.issue('saved');
-    assert.equal(await gate.claim('saved', storage), false);
-    assert.equal(await gate.claim('saved', memoryStorage()), false);
-  }
+  const gate = createCastingGate();
+  const storage = memoryStorage();
+  storage.getItem = async () => { throw new Error('unavailable storage'); };
+  gate.issue('saved');
+  assert.equal(await gate.claim('saved', storage), false);
+  assert.equal(await gate.claim('saved', memoryStorage()), false);
+  // Claiming no longer writes; a failed write when the final beat is shown only allows a replay.
+  const writes = createCastingGate();
+  const failing = memoryStorage();
+  failing.setItem = async () => { throw new Error('unavailable storage'); };
+  writes.issue('saved');
+  assert.equal(await writes.claim('saved', failing), true);
+  await writes.commit('saved', failing);
+  assert.equal(await writes.claim('saved', failing), false, 'no retry within the session');
 });
 
 test('only successful eligible completion opts in; normal app and retroactive attendance keep summary routing', async () => {

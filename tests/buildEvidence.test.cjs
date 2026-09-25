@@ -153,7 +153,9 @@ test('same-date history uses numeric session IDs and duplicates cannot cast twic
   const state = derive([b, a, a]);
   assert.deepEqual(state.pieces.map((p) => p.sessionId), ['2', '10']);
   assert.equal(state.pieces[1].records[0].previous.sessionId, '2');
-  assert.throws(() => derive([a, { ...a, date: '2026-09-23' }]), /Conflicting/);
+  // A conflicting duplicate never takes a surface down: the first row is kept.
+  const conflicting = derive([a, { ...a, date: '2026-09-23' }]);
+  assert.deepEqual(conflicting.pieces.map((p) => [p.sessionId, p.date]), [['2', '2026-09-22']]);
 });
 
 test('category colors follow primary archetype, mixed sessions, and custom/legacy workout types', () => {
@@ -382,6 +384,26 @@ test('fusion uses Monday-local boundaries across DST and year changes', () => {
       }
     }
   } finally { if (oldTimezone === undefined) delete process.env.TZ; else process.env.TZ = oldTimezone; }
+});
+
+test('fusion lifts pieces top first without overlap, then presses them flush by the fuse', () => {
+  const { makeFusionPreview } = load('features/build/fusionDemo.ts');
+  const { state, weekId } = makeFusionPreview();
+  const slab = buildStateToSlabs(state).find((item) => item.id === weekId);
+  assert.ok(slab.layers.length > 1);
+  for (let elapsed = 0; elapsed <= FUSION_DURATION_MS; elapsed += 10) {
+    const frame = fusionFrame(elapsed, slab.layers, slab.height);
+    frame.pieces.forEach((piece, i) => {
+      if (!i) return;
+      const below = frame.pieces[i - 1];
+      // A piece's top never passes into the one above it.
+      assert.ok(below.y + slab.layers[i - 1].height * 0.28 * below.scaleY <= piece.y + 1e-9, `overlap at ${elapsed} ms`);
+    });
+  }
+  const early = fusionFrame(300, slab.layers, slab.height).pieces;
+  const rest = fusionFrame(0, slab.layers, slab.height).pieces;
+  // The top piece has risen further from rest than the bottom one: it peels off first.
+  assert.ok(early.at(-1).y - rest.at(-1).y > early[0].y - rest[0].y);
 });
 
 test('fusion compresses preserved color/PR strata to the exact weekly bounds before seating', () => {

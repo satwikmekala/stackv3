@@ -26,6 +26,7 @@ import Animated, {
   ZoomIn,
 } from 'react-native-reanimated';
 import { ShareSheet } from '@/components/ShareSheet';
+import { BUILD_SANDBOX_ENABLED } from '@/features/build/config';
 import { motionDuration, motionEasing } from '@/constants/motion';
 import { redesignColors, redesignFonts } from '@/constants/theme';
 import { DEFAULT_WEIGHT_UNIT } from '@/store/workoutDatabase';
@@ -39,6 +40,7 @@ import {
   type WorkoutSummary,
 } from '@/store/workoutSummary';
 import { unitLabel, type WeightUnit } from '@/store/weightUnits';
+import { deriveLiftLog } from '@/store/liftLog';
 import { getWorkoutLetter } from '@/store/customSplitDraft';
 import { useWorkoutStore } from '@/store/workoutStore';
 import '@/global.css';
@@ -280,6 +282,8 @@ export default function WorkoutSummaryScreen() {
     sessionId?: string | string[];
     /** History and history-week pass source=history when reopening a recap. */
     source?: string | string[];
+    /** Build sandbox only: the demo history size a demo workout belongs to. */
+    demo?: string | string[];
   }>();
   const rawSessionId = params.sessionId;
   const sessionId = Array.isArray(rawSessionId) ? rawSessionId[0] : rawSessionId;
@@ -294,7 +298,17 @@ export default function WorkoutSummaryScreen() {
   const getCustomWorkoutLabel = useWorkoutStore(
     (state) => state.getCustomWorkoutLabel
   );
-  const session = sessions.find((item) => item.id === sessionId);
+  const rawDemo = params.demo;
+  const demo = Array.isArray(rawDemo) ? rawDemo[0] : rawDemo;
+  // Demo workouts are never saved, so the sandbox rebuilds them to show their summary.
+  const demoSessions = useMemo(() => {
+    if (!demo || !BUILD_SANDBOX_ENABLED) return undefined;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { makeMonolithDemo } = require('@/features/build/monolithDemo') as typeof import('@/features/build/monolithDemo');
+    return makeMonolithDemo(Number(demo));
+  }, [demo]);
+  const history = demoSessions ?? sessions;
+  const session = history.find((item) => item.id === sessionId);
   // A Custom Split session has no archetype to name, so the hero title comes
   // from the saved workout it was started from; a workout that has since been
   // removed falls back to the existing archetype/muscle title.
@@ -308,6 +322,11 @@ export default function WorkoutSummaryScreen() {
   const summary = useMemo(
     () => session ? deriveWorkoutSummary(session, customTitle) : null,
     [customTitle, session]
+  );
+  // Top set per lift for the Lift Log share card; PRs are judged against the saved history.
+  const liftLog = useMemo(
+    () => session ? deriveLiftLog(session, history, weightUnit) : undefined,
+    [session, history, weightUnit]
   );
   const weeklyProgress = getWeeklyProgress();
   const compact = width < 375;
@@ -607,6 +626,7 @@ export default function WorkoutSummaryScreen() {
         setCount={summary.setCount}
         repCount={summary.repCount}
         {...(stripSpecialLabel ? { specialSetLabel: stripSpecialLabel } : {})}
+        {...(liftLog ? { liftLog } : {})}
       />
     </View>
   );

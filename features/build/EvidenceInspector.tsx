@@ -6,22 +6,39 @@ import { formatWeight, type WeightUnit } from '../../store/weightUnits';
 import { getSessionLocalDate } from '../../store/workoutCalendar';
 import type { BuildState, SetPerformance } from './evidence';
 
+const volumeLabel = (kg: number, unit: WeightUnit): string | null => {
+  if (!(kg > 0)) return null;
+  if (unit === 'lbs') {
+    const rounded = Math.round(Number(formatWeight(kg, unit)));
+    return rounded > 0 ? `${rounded.toLocaleString('en-US')} LB` : null;
+  }
+  if (kg >= 1000) return `${(kg / 1000).toFixed(1)} T`;
+  const rounded = Math.round(kg);
+  return rounded > 0 ? `${rounded.toLocaleString('en-US')} KG` : null;
+};
+const countLabel = (count: number, singular: string, plural: string) => `${count} ${count === 1 ? singular : plural}`;
+
 export function EvidenceInspector({ state, visible, onClose, unit, example }: {
   state: BuildState; visible: boolean; onClose: () => void; unit: WeightUnit; example: boolean;
 }) {
   const setText = (set: SetPerformance) => `${formatWeight(set.weightKg, unit)} ${unit} × ${set.reps}`;
+  const summary = [
+    state.metrics.workouts ? countLabel(state.metrics.workouts, 'piece', 'pieces') : null,
+    volumeLabel(state.metrics.volumeKg, unit) ? `${volumeLabel(state.metrics.volumeKg, unit)} moved` : null,
+    state.metrics.records ? countLabel(state.metrics.records, 'PR', 'PRs') : null,
+  ].filter((value): value is string => Boolean(value)).join(' · ');
   return <Modal visible={visible} animationType="none" presentationStyle="pageSheet" onRequestClose={onClose}>
     <SafeAreaView style={styles.screen}>
       <View style={styles.header}><Text style={styles.title}>What earned it</Text><Pressable accessibilityRole="button" accessibilityLabel="Close evidence" onPress={onClose} style={styles.close}><X size={21} color={c.bone} /></Pressable></View>
       <FlatList
         data={[...state.pieces].reverse()} keyExtractor={(piece) => piece.id} contentContainerStyle={styles.content}
-        ListHeaderComponent={<Text style={styles.note}>{example ? 'Example sessions · fixed at 23 Sep 2026' : 'Saved workout history · read only'}{'\n'}{state.metrics.workouts} {state.metrics.workouts === 1 ? 'workout' : 'workouts'} · {formatWeight(state.metrics.volumeKg, unit)} {unit} moved · {state.metrics.records} records{state.issues.length ? `\n${state.issues.length} dated entries excluded; see diagnostics below.` : ''}</Text>}
-        ListEmptyComponent={<Text style={styles.note}>No verified completed workouts. Retroactive attendance and unfinished sessions do not create pieces.</Text>}
+        ListHeaderComponent={<Text style={styles.note}>{example ? 'Example sessions · fixed at 23 Sep 2026' : 'Saved workout history · read only'}{summary ? `\n${summary}` : ''}{state.issues.length ? `\n${state.issues.length} dated entries excluded; see diagnostics below.` : ''}</Text>}
+        ListEmptyComponent={<Text style={styles.note}>No pieces yet. Only completed pieces appear here.</Text>}
         ListFooterComponent={<>{state.issues.map((issue) => <Text key={issue.sessionId} style={styles.note}>Session {issue.sessionId}: {issue.reason}</Text>)}</>}
         renderItem={({ item: piece }) => <View style={styles.piece}>
           <Text style={[styles.label, { color: piece.color }]}>{piece.label} · {getSessionLocalDate(piece.date)}</Text>
-          <Text style={styles.summary}>{piece.height.toFixed(2)}× · {piece.metrics.liftsUp} lifts up · {piece.metrics.records} records</Text>
-          <Text style={styles.note}>Session {piece.sessionId} · week of {piece.weekStart}{'\n'}{piece.eligibleExercises} comparable exercises · {formatWeight(piece.metrics.volumeKg, unit)} {unit} moved</Text>
+          <Text style={styles.summary}>{[`${piece.height.toFixed(2)}×`, piece.metrics.liftsUp ? `${countLabel(piece.metrics.liftsUp, 'lift', 'lifts')} up` : null, piece.metrics.records ? countLabel(piece.metrics.records, 'PR', 'PRs') : null].filter(Boolean).join(' · ')}</Text>
+          <Text style={styles.note}>Session {piece.sessionId} · week of {piece.weekStart}{'\n'}{piece.eligibleExercises ? `${piece.eligibleExercises} comparable exercises · ` : ''}{volumeLabel(piece.metrics.volumeKg, unit) ? `${volumeLabel(piece.metrics.volumeKg, unit)} moved` : ''}</Text>
           {piece.comparisons.map((comparison) => <View key={`${comparison.exerciseName}:${comparison.loadType}`} style={styles.evidence}>
             <Text style={styles.label}>{comparison.exerciseName}</Text>
             <Text style={styles.note}>{comparison.previousSessionId ? `Compared with session ${comparison.previousSessionId} · ${comparison.comparableSets} matched sets` : 'No earlier comparable session: baseline thickness'}</Text>

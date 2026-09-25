@@ -27,6 +27,17 @@ export function cameraFrame(top: number, width: number, height: number, overview
   };
 }
 
+/**
+ * Your Stack's Overview: the whole tower, as large as the stage allows and set a little low. On screen
+ * the tower spans top·0.906 + 1.41 units tall and 3.32 wide (plinth corners included) under
+ * the fixed camera angle; the fill leaves a small margin on every side.
+ */
+export function overviewFillFrame(top: number, width: number, height: number) {
+  const zoom = Math.min(width * 0.84 / 3.32, height * 0.84 / (top * 0.906 + 1.41));
+  // Sit the tower slightly low: raising the target by this much lowers it 5% of the stage.
+  return { targetY: top / 2 + (height * 0.05) / (zoom * 0.906), zoom };
+}
+
 /** Keep the selected label, then pack nearby labels without overlapping touch targets. */
 export function pickRulerMarkers(markers: { id: string; top: number }[], selectedId: string) {
   const result: typeof markers = [];

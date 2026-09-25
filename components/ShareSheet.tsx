@@ -4,6 +4,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -21,6 +22,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { captureRef } from 'react-native-view-shot';
 
+import { LiftLogCard } from '@/components/LiftLogCard';
 import {
   STAT_STRIP_HEIGHT,
   STAT_STRIP_WIDTH,
@@ -29,6 +31,7 @@ import {
 } from '@/components/StatStripCard';
 import { withMotionTiming } from '@/constants/motion';
 import { redesignColors, redesignFonts } from '@/constants/theme';
+import type { LiftLog } from '@/store/liftLog';
 
 const CAPTURE_OPTIONS = {
   width: 1080,
@@ -43,7 +46,11 @@ type Feedback = 'idle' | 'copied' | 'copyError';
 interface ShareSheetProps extends StatStripCardProps {
   visible: boolean;
   onClose: () => void;
+  /** Every lift's top set; the Lift Log design is offered when it has a line. */
+  liftLog?: LiftLog;
 }
+
+const DESIGN_NAMES = ['Stat Strip', 'Lift Log'] as const;
 
 export function ShareSheet({
   visible,
@@ -56,23 +63,31 @@ export function ShareSheet({
   setCount,
   repCount,
   specialSetLabel,
+  liftLog,
 }: ShareSheetProps) {
-  const { height: screenHeight } = useWindowDimensions();
+  const { height: screenHeight, width: screenWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [isMounted, setIsMounted] = useState(visible);
   const [feedback, setFeedback] = useState<Feedback>('idle');
   const [isCopying, setIsCopying] = useState(false);
   const [captureReady, setCaptureReady] = useState(false);
   const progress = useSharedValue(visible ? 1 : 0);
-  const cardRef = useRef<View>(null);
-  const capturedUriRef = useRef<string | null>(null);
-  const capturePromiseRef = useRef<Promise<string> | null>(null);
+  const stripRef = useRef<View>(null);
+  const liftLogRef = useRef<View>(null);
+  // One capture per design, each warmed once and reused for every copy.
+  const capturedUrisRef = useRef<(string | null)[]>([null, null]);
+  const capturePromisesRef = useRef<(Promise<string> | null)[]>([null, null]);
+  const [page, setPage] = useState(0);
+  const designCount = liftLog && liftLog.lines.length > 0 ? 2 : 1;
   const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (visible) {
       setIsMounted(true);
       setFeedback('idle');
+      setPage(0);
+      // Re-capture on every opening, so a copy always matches what the sheet shows.
+      capturedUrisRef.current = [null, null];
       setCaptureReady(false);
       progress.value = withMotionTiming(
         1,
@@ -119,39 +134,45 @@ export function ShareSheet({
     }, 1800);
   }, []);
 
-  const getCapturedUri = useCallback(async () => {
-    if (capturedUriRef.current) return capturedUriRef.current;
-    if (capturePromiseRef.current) return capturePromiseRef.current;
-    if (!cardRef.current) throw new Error('Stat Strip is not ready to capture.');
+  const getCapturedUri = useCallback(async (index: number) => {
+    const cached = capturedUrisRef.current[index];
+    if (cached) return cached;
+    const pending = capturePromisesRef.current[index];
+    if (pending) return pending;
+    const target = index === 1 ? liftLogRef.current : stripRef.current;
+    if (!target) throw new Error('The share card is not ready to capture.');
 
-    const capturePromise = captureRef(cardRef.current, CAPTURE_OPTIONS);
-    capturePromiseRef.current = capturePromise;
+    const capturePromise = captureRef(target, CAPTURE_OPTIONS);
+    capturePromisesRef.current[index] = capturePromise;
 
     try {
       const uri = await capturePromise;
-      capturedUriRef.current = uri;
+      capturedUrisRef.current[index] = uri;
       return uri;
     } finally {
-      capturePromiseRef.current = null;
+      capturePromisesRef.current[index] = null;
     }
   }, []);
 
   useEffect(() => {
-    if (!visible || !captureReady || capturedUriRef.current) return;
+    if (!visible || !captureReady) return;
 
-    // Warm the capture after the sheet settles, so the first user tap only has
+    // Warm the captures after the sheet settles, so the first user tap only has
     // to write the finished PNG to the clipboard.
-    void getCapturedUri().catch(() => {
-      capturedUriRef.current = null;
-    });
-  }, [captureReady, getCapturedUri, visible]);
+    for (let index = 0; index < designCount; index += 1) {
+      if (capturedUrisRef.current[index]) continue;
+      void getCapturedUri(index).catch(() => {
+        capturedUrisRef.current[index] = null;
+      });
+    }
+  }, [captureReady, designCount, getCapturedUri, visible]);
 
   const handleCopy = useCallback(async () => {
     if (isCopying) return;
 
     setIsCopying(true);
     try {
-      const uri = await getCapturedUri();
+      const uri = await getCapturedUri(page);
       const base64Image = await new File(uri).base64();
       await Clipboard.setImageAsync(base64Image);
       if (Platform.OS !== 'web' && !(await Clipboard.hasImageAsync())) {
@@ -174,13 +195,16 @@ export function ShareSheet({
     } finally {
       setIsCopying(false);
     }
-  }, [getCapturedUri, isCopying, showFeedback]);
+  }, [getCapturedUri, isCopying, page, showFeedback]);
 
   if (!isMounted) return null;
 
   const previewHeight = Math.min(390, Math.max(276, screenHeight * 0.43));
   const previewWidth = previewHeight * (STAT_STRIP_WIDTH / STAT_STRIP_HEIGHT);
   const previewScale = previewWidth / STAT_STRIP_WIDTH;
+  // Each page is the sheet's full inner width, so a swipe moves one whole design.
+  const pageWidth = screenWidth - 48;
+  const designName = DESIGN_NAMES[page];
   const copyLabel = isCopying
     ? 'Copying…'
     : feedback === 'copied'
@@ -214,34 +238,97 @@ export function ShareSheet({
           <View style={styles.handle} />
           <Text allowFontScaling={false} style={styles.eyebrow}>SHARE WORKOUT</Text>
 
-          <View style={[styles.previewFrame, { width: previewWidth, height: previewHeight }]}>
+          <ScrollView
+            horizontal
+            pagingEnabled
+            scrollEnabled={designCount > 1}
+            showsHorizontalScrollIndicator={false}
+            style={{ width: pageWidth, alignSelf: 'center' }}
+            onMomentumScrollEnd={(event) => {
+              const next = Math.round(event.nativeEvent.contentOffset.x / pageWidth);
+              if (next !== page && next >= 0 && next < designCount) {
+                setPage(next);
+                setFeedback('idle');
+                if (Platform.OS !== 'web') void Haptics.selectionAsync();
+              }
+            }}
+          >
             <View
-              pointerEvents="none"
-              style={[
-                styles.previewScale,
-                { transform: [{ scale: previewScale }] },
-              ]}
+              accessible
+              accessibilityLabel="Stat Strip design"
+              style={[styles.page, { width: pageWidth }]}
             >
-              <StatStripCard
-                ref={cardRef}
-                accent={accent}
-                title={title}
-                date={date}
-                volumeValue={volumeValue}
-                volumeUnit={volumeUnit}
-                setCount={setCount}
-                repCount={repCount}
-                {...(specialSetLabel ? { specialSetLabel } : {})}
-              />
+              <View style={[styles.previewFrame, { width: previewWidth, height: previewHeight }]}>
+                <View
+                  pointerEvents="none"
+                  style={[styles.previewScale, { transform: [{ scale: previewScale }] }]}
+                >
+                  <StatStripCard
+                    ref={stripRef}
+                    accent={accent}
+                    title={title}
+                    date={date}
+                    volumeValue={volumeValue}
+                    volumeUnit={volumeUnit}
+                    setCount={setCount}
+                    repCount={repCount}
+                    {...(specialSetLabel ? { specialSetLabel } : {})}
+                  />
+                </View>
+              </View>
             </View>
-          </View>
+            {designCount > 1 && liftLog ? (
+              <View
+                accessible
+                accessibilityLabel="Lift Log design"
+                style={[styles.page, { width: pageWidth }]}
+              >
+                <View style={[styles.previewFrame, { width: previewWidth, height: previewHeight }]}>
+                  <View
+                    pointerEvents="none"
+                    style={[styles.previewScale, { transform: [{ scale: previewScale }] }]}
+                  >
+                    <LiftLogCard
+                      ref={liftLogRef}
+                      accent={accent}
+                      title={title}
+                      date={date}
+                      lines={liftLog.lines}
+                      more={liftLog.more}
+                      volumeValue={volumeValue}
+                      volumeUnit={volumeUnit}
+                    />
+                  </View>
+                </View>
+              </View>
+            ) : null}
+          </ScrollView>
+
+          {designCount > 1 ? (
+            <View
+              accessible
+              accessibilityRole="text"
+              accessibilityLabel={`${designName} design, ${page + 1} of ${designCount}. Swipe to change.`}
+              style={styles.pager}
+            >
+              {DESIGN_NAMES.slice(0, designCount).map((name, index) => (
+                <View
+                  key={name}
+                  style={[
+                    styles.pagerDot,
+                    index === page && [styles.pagerDotActive, { backgroundColor: accent }],
+                  ]}
+                />
+              ))}
+            </View>
+          ) : null}
 
           <View style={styles.copyAction}>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={feedback === 'copied'
-                ? 'Stat Strip copied to clipboard'
-                : 'Copy Stat Strip image to clipboard'}
+                ? `${designName} copied to clipboard`
+                : `Copy ${designName} image to clipboard`}
               accessibilityState={{ disabled: isCopying || !captureReady }}
               disabled={isCopying || !captureReady}
               onPress={() => void handleCopy()}
@@ -313,6 +400,25 @@ const styles = StyleSheet.create({
     lineHeight: 15,
     letterSpacing: 1.8,
     color: redesignColors.ash,
+  },
+  page: {
+    alignItems: 'center',
+  },
+  pager: {
+    marginTop: 14,
+    flexDirection: 'row',
+    alignSelf: 'center',
+    alignItems: 'center',
+    gap: 6,
+  },
+  pagerDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: redesignColors.hi,
+  },
+  pagerDotActive: {
+    width: 18,
   },
   previewFrame: {
     alignSelf: 'center',

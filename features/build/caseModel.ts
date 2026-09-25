@@ -22,3 +22,25 @@ export function unpackWeek(week: BuildWeek): BuildSlab[] {
   return week.pieces.map((piece) => ({ id: piece.id, height: piece.height, sealed: false,
     layers: [{ color: piece.color, height: piece.height, record: piece.records.length > 0 }] }));
 }
+
+export type CaseCard =
+  | { id: string; kind: 'week'; week: BuildWeek }
+  /** One card per run of consecutive empty weeks: Monday of the first to Sunday of the last. */
+  | { id: string; kind: 'empty'; start: string; end: string; weeks: number };
+const sunday = (weekStart: string) => {
+  const date = parseSessionDate(weekStart);
+  date.setDate(date.getDate() + 6);
+  return toLocalCalendarDate(date);
+};
+/** Collapses empty runs within the caseEntries() range; the range itself is unchanged. Newest first. */
+export function caseCards(entries: readonly CaseEntry[]): CaseCard[] {
+  const cards: CaseCard[] = [];
+  for (const entry of entries) {
+    const previous = cards.at(-1);
+    if (entry.week) cards.push({ id: entry.id, kind: 'week', week: entry.week });
+    // Entries run newest first, so each further empty week extends the run backwards in time.
+    else if (previous?.kind === 'empty') cards[cards.length - 1] = { ...previous, start: entry.weekStart, weeks: previous.weeks + 1 };
+    else cards.push({ id: entry.id, kind: 'empty', start: entry.weekStart, end: sunday(entry.weekStart), weeks: 1 });
+  }
+  return cards;
+}

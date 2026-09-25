@@ -89,7 +89,11 @@ export function deriveBuildState(sessions: readonly WorkoutSession[], now: Date,
   const unique = new Map<string, WorkoutSession>();
   for (const session of getVerifiedSessions(sessions)) {
     const existing = unique.get(session.id);
-    if (existing && JSON.stringify(existing) !== JSON.stringify(session)) throw new Error(`Conflicting Build session ID: ${session.id}`);
+    if (existing) {
+      // One bad row must never take a surface down: keep the first and report conflicts in development.
+      if (typeof __DEV__ !== 'undefined' && __DEV__ && JSON.stringify(existing) !== JSON.stringify(session)) console.warn(`[Build] Conflicting session ID ${session.id}; keeping the first row`);
+      continue;
+    }
     unique.set(session.id, session);
   }
   const ordered = [...unique.values()].map((session) => ({ session, date: parseSessionDate(session.date) }))

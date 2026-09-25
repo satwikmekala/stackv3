@@ -77,18 +77,28 @@ export function createSlabGeometry(slab: BuildSlab, tuning: BuildTuning, laminat
 }
 
 /** Only the earned seams, for casting's late gold reveal over the unchanged pigment. */
-export function createRecordSeamGeometry(slab: BuildSlab, tuning: BuildTuning): BufferGeometry {
+export function createRecordSeamGeometry(slab: BuildSlab, tuning: BuildTuning, leftToRight = false): BufferGeometry {
   const full = createSlabGeometry(slab, tuning, 'strata');
-  const positions: number[] = [];
-  const colors: number[] = [];
+  const triangles: { screenX: number; positions: number[]; colors: number[] }[] = [];
   const source = full.getAttribute('position');
   const pigment = full.getAttribute('color');
   const mask = full.getAttribute('recordMask');
   for (let i = 0; i < source.count; i++) if (mask.getX(i)) {
-    positions.push(source.getX(i), source.getY(i), source.getZ(i));
-    colors.push(pigment.getX(i), pigment.getY(i), pigment.getZ(i));
+    const point = [source.getX(i), source.getY(i), source.getZ(i)];
+    const color = [pigment.getX(i), pigment.getY(i), pigment.getZ(i)];
+    const triangle = triangles[triangles.length - 1];
+    if (!triangle || triangle.positions.length === 9) {
+      triangles.push({ screenX: 0, positions: [], colors: [] });
+    }
+    const current = triangles[triangles.length - 1];
+    current.positions.push(...point);
+    current.colors.push(...color);
+    current.screenX += point[0] * 10 - point[2] * 8;
   }
   full.dispose();
+  if (leftToRight) triangles.sort((a, b) => a.screenX - b.screenX);
+  const positions = triangles.flatMap((triangle) => triangle.positions);
+  const colors = triangles.flatMap((triangle) => triangle.colors);
   const geometry = new BufferGeometry();
   geometry.setAttribute('position', new Float32BufferAttribute(positions, 3));
   geometry.setAttribute('color', new Float32BufferAttribute(colors, 3));

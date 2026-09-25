@@ -92,6 +92,9 @@ function buildHomeEnter(delay: number) {
 const HEADER_ENTER = buildHomeEnter(0);
 const HERO_ENTER = buildHomeEnter(80);
 const CHANGE_BUTTON_ENTER = buildHomeEnter(150);
+// Build's card sits between the change button and the split card in the entrance sequence.
+const BUILD_CARD_DELAY = 195;
+const BUILD_CARD_ENTER = buildHomeEnter(BUILD_CARD_DELAY);
 const SPLIT_CARD_ENTER = buildHomeEnter(240);
 
 // The 6.1-inch and 6.3-inch phones are close in width but have meaningfully
@@ -557,6 +560,13 @@ export default function Home() {
           </Pressable>
         </Animated.View>
 
+        {BuildHome && (
+          <BuildHome
+            entering={shouldAnimateHomeEntrance ? BUILD_CARD_ENTER : undefined}
+            previewDelayMs={shouldAnimateHomeEntrance ? BUILD_CARD_DELAY + motionDuration.entrance : 0}
+          />
+        )}
+
         <Animated.View
           entering={shouldAnimateHomeEntrance ? SPLIT_CARD_ENTER : undefined}
           // When there is spare height, marginTop: 'auto' holds this card at a
@@ -572,7 +582,6 @@ export default function Home() {
             onPress={() => router.push('/your-splits')}
           />
         </Animated.View>
-        {BuildHome && <BuildHome />}
       </ScrollView>
 
       <WorkoutPicker

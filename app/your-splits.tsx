@@ -380,9 +380,9 @@ export default function YourSplitsScreen() {
           accessibilityRole="button"
           hitSlop={8}
           onPress={() => router.back()}
-          style={styles.circleButton}
+          style={styles.backButton}
         >
-          <ChevronLeft color={redesignColors.bone} size={22} strokeWidth={2.3} />
+          <ChevronLeft color={redesignColors.bone} size={23} />
         </Pressable>
         <Text style={styles.eyebrow}>TRAINING</Text>
       </View>
@@ -501,15 +501,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 16,
   },
-  circleButton: {
+  backButton: {
     width: 44,
-    height: 44,
-    borderRadius: 22,
+    minHeight: 48,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: redesignColors.surface,
-    borderWidth: 1,
-    borderColor: redesignColors.border,
+    marginLeft: -8,
   },
   eyebrow: {
     color: redesignColors.ashDim,
