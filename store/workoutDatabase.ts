@@ -111,6 +111,7 @@ export const EXERCISE_SEEDS: ExerciseSeed[] = defineExerciseSeeds([
   { name: 'Smith Machine Bench Press', workoutType: 'chest', primaryMuscle: 'Chest', secondaryMuscle: 'Triceps, Front Delts' },
   { name: 'Smith Machine Incline Press', workoutType: 'chest', primaryMuscle: 'Chest', secondaryMuscle: 'Triceps, Front Delts' },
   { name: 'Decline Dumbbell Press', workoutType: 'chest', primaryMuscle: 'Chest', secondaryMuscle: 'Triceps, Front Delts' },
+  { name: 'Decline Dumbbell Fly', workoutType: 'chest', primaryMuscle: 'Lower Chest', secondaryMuscle: 'Front Delts' },
   { name: 'Incline Machine Chest Press', workoutType: 'chest', primaryMuscle: 'Chest', secondaryMuscle: 'Triceps, Front Delts' },
   { name: 'Flat Machine Chest Press', workoutType: 'chest', primaryMuscle: 'Chest', secondaryMuscle: 'Triceps' },
   { name: 'Svend Press', workoutType: 'chest', primaryMuscle: 'Chest', secondaryMuscle: 'Front Delts, Triceps' },

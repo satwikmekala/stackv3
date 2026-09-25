@@ -134,7 +134,8 @@ function ExerciseProgressSegment({
     <Animated.View
       style={[
         {
-          flex: 1,
+          // The layout wrapper owns the row's flex; flex here would collapse the height.
+          width: '100%',
           height: 8,
           borderRadius: 4,
           shadowOffset: { width: 0, height: 0 },
@@ -262,12 +263,12 @@ function SetPip({
       accessibilityHint="Reopens this set for editing"
       activeOpacity={0.72}
       onPress={onEdit}
-      style={{ flex: 1, alignItems: 'center' }}
+      style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}
     >
       {content}
     </WorkoutTouchable>
   ) : (
-    <View style={{ flex: 1, alignItems: 'center' }}>{content}</View>
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>{content}</View>
   );
 }
 
@@ -297,7 +298,7 @@ function SetProgress({
       layout={workoutLayoutTransition}
       style={{
         flexDirection: 'row',
-        alignItems: 'center',
+        alignItems: 'stretch',
         height: 96,
         borderRadius: 22,
         paddingHorizontal: 14,

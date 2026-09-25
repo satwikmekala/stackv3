@@ -60,6 +60,12 @@ export const exerciseInfo: readonly ExerciseInfoData[] = [
     description: 'Keep a slight bend in your elbows and bring the handles together in front of your chest. Squeeze, then return slowly under control.',
   },
   {
+    title: 'Cable Crossover', category: 'Chest',
+    image: require('@/assets/images/exercises/cable-crossover.png'),
+    primaryMuscles: ['Chest'], secondaryMuscles: ['Front delts'],
+    description: 'Stand between the cable stacks and pull the handles down and across your body. Squeeze your chest, then return with control.',
+  },
+  {
     title: 'Cable Overhead Triceps Extension', category: 'Arms', aliases: ['Overhead Cable Triceps Extension'],
     image: require('@/assets/images/exercises/cable-overhead-triceps-extension.png'),
     primaryMuscles: ['Triceps'], secondaryMuscles: ['Shoulders'],
@@ -84,10 +90,34 @@ export const exerciseInfo: readonly ExerciseInfoData[] = [
     description: 'Brace your core and drive through the floor, extending your hips and knees until you are standing tall with the bar. Lower it with control.',
   },
   {
+    title: 'Decline Bench Press', category: 'Chest', aliases: ['Decline Press'],
+    image: require('@/assets/images/exercises/decline-bench-press.png'),
+    primaryMuscles: ['Lower chest', 'Triceps'], secondaryMuscles: ['Front delts'],
+    description: 'Secure your legs on the decline bench and lower the bar toward your lower chest. Press it back up with control.',
+  },
+  {
+    title: 'Decline Dumbbell Fly', category: 'Chest',
+    image: require('@/assets/images/exercises/decline-dumbbell-fly.png'),
+    primaryMuscles: ['Lower chest'], secondaryMuscles: ['Front delts'],
+    description: 'Secure your legs on the decline bench and open the dumbbells wide with a slight bend in your elbows. Bring them together above your chest, then lower slowly.',
+  },
+  {
+    title: 'Decline Dumbbell Press', category: 'Chest',
+    image: require('@/assets/images/exercises/decline-dumbbell-press.png'),
+    primaryMuscles: ['Lower chest', 'Triceps'], secondaryMuscles: ['Front delts'],
+    description: 'Secure your legs on the decline bench and press the dumbbells up from your lower chest. Lower them slowly with your elbows under control.',
+  },
+  {
     title: 'Dumbbell Lateral Raise', category: 'Shoulders', aliases: ['Lateral Raises'],
     image: require('@/assets/images/exercises/dumbbell-lateral-raise.png'),
     primaryMuscles: ['Side delts'], secondaryMuscles: ['Upper traps'],
     description: 'Raise the dumbbells out to your sides until around shoulder height, then lower them slowly while keeping your torso still.',
+  },
+  {
+    title: 'Incline Bench Press', category: 'Chest',
+    image: require('@/assets/images/exercises/incline-bench-press.png'),
+    primaryMuscles: ['Upper chest', 'Triceps'], secondaryMuscles: ['Front delts'],
+    description: 'Lower the bar toward your upper chest on an incline bench. Keep your feet planted and press the bar up with control.',
   },
   {
     title: 'Incline Dumbbell Press', category: 'Chest',
@@ -120,10 +150,34 @@ export const exerciseInfo: readonly ExerciseInfoData[] = [
     description: 'Curl your heels toward your glutes by bending your knees. Squeeze your hamstrings, then lower the weight slowly.',
   },
   {
+    title: 'Machine Chest Press', category: 'Chest', aliases: ['Flat Machine Chest Press'],
+    image: require('@/assets/images/exercises/machine-chest-press.png'),
+    primaryMuscles: ['Chest', 'Triceps'], secondaryMuscles: ['Front delts'],
+    description: 'Set the handles around chest height and press them forward until your arms are nearly straight. Return slowly without letting the weight stack slam.',
+  },
+  {
+    title: 'Pec Deck Fly', category: 'Chest', aliases: ['Pec Deck'],
+    image: require('@/assets/images/exercises/pec-deck-fly.png'),
+    primaryMuscles: ['Chest'], secondaryMuscles: ['Front delts'],
+    description: 'Sit with your back against the pad and bring the handles together in front of your chest. Squeeze, then open your arms slowly.',
+  },
+  {
     title: 'Pull-ups', category: 'Back',
     image: require('@/assets/images/exercises/pull-ups.png'),
     primaryMuscles: ['Lats', 'Upper back'], secondaryMuscles: ['Biceps', 'Forearms'],
     description: 'Pull your body upward until your chin reaches the bar, then lower yourself under control into a full hang.',
+  },
+  {
+    title: 'Push-ups', category: 'Chest',
+    image: require('@/assets/images/exercises/push-ups.png'),
+    primaryMuscles: ['Chest', 'Triceps'], secondaryMuscles: ['Front delts', 'Core'],
+    description: 'Keep your body in a straight line as you lower your chest toward the floor. Press back up without letting your hips sag.',
+  },
+  {
+    title: 'Seated Cable Row', category: 'Back',
+    image: require('@/assets/images/exercises/seated-cable-row.png'),
+    primaryMuscles: ['Mid-back', 'Lats'], secondaryMuscles: ['Biceps'],
+    description: 'Sit tall and pull the handle toward your torso while driving your elbows back. Extend your arms slowly without rounding your back.',
   },
   {
     title: 'Seated Dumbbell Shoulder Press', category: 'Shoulders',

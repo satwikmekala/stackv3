@@ -1021,7 +1021,7 @@ export const initializeWorkoutStore = (): Promise<void> => {
 // runtime pool contract. This expression is tree-shakeable and has no I/O.
 if (__DEV__) {
   const uniqueSeedNames = new Set(EXERCISE_SEEDS.map((exercise) => exercise.name));
-  if (uniqueSeedNames.size !== 158 || SPLIT_TEMPLATE_SEEDS.length !== 24) {
-    throw new Error('Workout seed data must contain 158 exercises and 24 templates');
+  if (uniqueSeedNames.size !== 159 || SPLIT_TEMPLATE_SEEDS.length !== 24) {
+    throw new Error('Workout seed data must contain 159 exercises and 24 templates');
   }
 }
