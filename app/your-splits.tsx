@@ -28,6 +28,7 @@ import {
   useCustomSplitDraftStore,
 } from '@/store/customSplitDraft';
 import { useWorkoutStore } from '@/store/workoutStore';
+import { SplitShareButton } from '@/components/SplitShareButton';
 import type { CustomSplit, CustomSplitSummary } from '@/store/customSplits';
 import '@/global.css';
 
@@ -288,6 +289,9 @@ function ProgramCard({
           summary={program.summary}
         />
       )}
+      {program.kind === 'custom' ? (
+        <SplitShareButton splitId={program.summary.id} name={program.summary.name} />
+      ) : null}
     </Animated.View>
   );
 }

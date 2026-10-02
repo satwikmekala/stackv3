@@ -2,6 +2,8 @@ import { openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
 
 import type { Archetype } from '@/constants/archetypes';
 import { EmptyCustomWorkoutError } from '@/store/customSplits';
+import { persistPortableSplit, type ImportedSplit } from '@/store/splitImport';
+import type { PortableSplit } from '@/features/sharing/splitProtocol';
 
 import type {
   CustomSplit,
@@ -383,7 +385,7 @@ const ARCHETYPE_TEMPLATE_SEEDS: ArchetypeTemplateSeed[] = [
   { archetype: 'full_body', variant: 'c', exerciseName: 'Calf Raise', matchingExerciseName: 'Calf Raises', targetReps: 15, targetWeight: 40 },
 ];
 
-const ARCHETYPE_EXERCISE_SEEDS: ExerciseSeed[] = defineExerciseSeeds([
+export const ARCHETYPE_EXERCISE_SEEDS: ExerciseSeed[] = defineExerciseSeeds([
   { name: 'Back Squat', workoutType: 'legs', primaryMuscle: 'Quads, Glutes', secondaryMuscle: 'Core' },
   { name: 'Barbell Curl', workoutType: 'arms', primaryMuscle: 'Biceps', secondaryMuscle: 'Forearms' },
   { name: 'Walking Lunge', workoutType: 'legs', primaryMuscle: 'Quads, Glutes', secondaryMuscle: 'Hamstrings' },
@@ -2051,6 +2053,15 @@ export const createCustomSplitSync = (name: string): number => {
     timestamp
   ).lastInsertRowId;
 };
+
+/** Sharing uses both seed catalogs; these names are portable, never row IDs. */
+export const BUILT_IN_EXERCISE_NAMES: ReadonlySet<string> = new Set(
+  [...EXERCISE_SEEDS, ...ARCHETYPE_EXERCISE_SEEDS].map((seed) => seed.name)
+);
+
+/** Save an independent copy without activating it. Database must be hydrated. */
+export const importPortableSplitSync = (split: PortableSplit): ImportedSplit =>
+  persistPortableSplit(getDatabase(), split, [...EXERCISE_SEEDS, ...ARCHETYPE_EXERCISE_SEEDS]);
 
 export const renameCustomSplitSync = (splitId: number, name: string): void => {
   const normalizedName = name.trim();

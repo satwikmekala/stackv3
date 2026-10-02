@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Linking } from 'react-native';
 import { Stack, usePathname, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -21,6 +22,7 @@ import { startWorkoutLiveActivitySync } from '@/services/liveActivity/sync';
 import { startWorkoutLiveActivityInteractions } from '@/services/liveActivity/interaction';
 import '@/global.css';
 import { BUILD_DEMO_ENABLED } from '@/features/build/config';
+import { splitImportRouteFromUrl } from '@/features/sharing/splitLinkRouting';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -28,6 +30,8 @@ export default function RootLayout() {
   useFrameworkReady();
   const hasHiddenSplashRef = useRef(false);
   const lastRedirectRef = useRef<string | null>(null);
+  const [initialImport, setInitialImport] = useState<ReturnType<typeof splitImportRouteFromUrl>>(null);
+  const [initialLinkRead, setInitialLinkRead] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
   const segments = useSegments();
@@ -36,21 +40,28 @@ export default function RootLayout() {
   const hydrationError = useWorkoutStore((state) => state.hydrationError);
   const inOnboarding = segments[0] === '(onboarding)';
   const inCustomSplitFlow = segments[0] === 'custom-split';
+  // A received link can be previewed and saved before first-run setup. Keep
+  // its payload on this route instead of losing it to the onboarding redirect.
+  const inSplitImport = pathname === '/import-split';
   const onSplash = pathname === '/' && segments[0] !== '(tabs)';
   const inBuildSandbox = BUILD_DEMO_ENABLED && (pathname === '/build-sandbox' || pathname === '/build' || pathname === '/build-casting'
     || pathname === '/build-case' || pathname.startsWith('/build-case/'));
   const needsOnboardingRedirect =
+    initialLinkRead && !initialImport &&
     isHydrated &&
     !profile?.onboardingCompleted &&
     !inOnboarding &&
     !inCustomSplitFlow &&
+    !inSplitImport &&
     !inBuildSandbox &&
     !onSplash;
   const needsAppRedirect =
+    initialLinkRead && !initialImport &&
     isHydrated &&
     Boolean(profile?.onboardingCompleted) &&
     (inOnboarding || onSplash);
-  const redirectPending = needsOnboardingRedirect || needsAppRedirect;
+  const redirectPending = !initialLinkRead || Boolean(initialImport && !inSplitImport && !hydrationError) ||
+    needsOnboardingRedirect || needsAppRedirect;
 
   const [fontsLoaded, fontError] = useFonts({
     'Switzer-Regular': require('@/assets/fonts/Switzer-Regular.otf'),
@@ -73,6 +84,18 @@ export default function RootLayout() {
     void initializeWorkoutStore().catch((error) => {
       console.error('Failed to initialize workout database', error);
     });
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void Linking.getInitialURL().then((url) => {
+      if (!cancelled) setInitialImport(splitImportRouteFromUrl(url));
+    }).catch(() => {
+      // Router still handles its ordinary links if the native lookup fails.
+    }).finally(() => {
+      if (!cancelled) setInitialLinkRead(true);
+    });
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => startWorkoutLiveActivitySync(), []);
@@ -102,6 +125,18 @@ export default function RootLayout() {
   }, [fontError, fontsLoaded, hydrationError, isHydrated, redirectPending]);
 
   useEffect(() => {
+    if (!initialLinkRead) return;
+    if (initialImport && !hydrationError) {
+      if (inSplitImport) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- Consume the native launch intent only after Router confirms arrival.
+        setInitialImport(null);
+        lastRedirectRef.current = null;
+      } else if ((fontsLoaded || fontError) && isHydrated && lastRedirectRef.current !== 'initial-split-import') {
+        lastRedirectRef.current = 'initial-split-import';
+        router.replace(initialImport);
+      }
+      return;
+    }
     let target: string | null = null;
     if (hydrationError && !onSplash) {
       target = '/';
@@ -121,7 +156,8 @@ export default function RootLayout() {
       // change (e.g. real logout/re-onboard) is never blocked by a stale ref.
       lastRedirectRef.current = null;
     }
-  }, [hydrationError, needsAppRedirect, needsOnboardingRedirect, onSplash, router]);
+  }, [fontError, fontsLoaded, hydrationError, initialImport, initialLinkRead, inSplitImport, isHydrated,
+    needsAppRedirect, needsOnboardingRedirect, onSplash, router]);
 
   if (
     (!fontsLoaded && !fontError) ||
@@ -187,10 +223,12 @@ export default function RootLayout() {
           name="your-splits"
           options={{ headerShown: false, animation: 'slide_from_right' }}
         />
+        <Stack.Screen name="import-split" options={{ headerShown: false, animation: 'slide_from_right' }} />
         <Stack.Screen name="settings" options={{ headerShown: false, presentation: 'modal' }} />
         <Stack.Screen name="+not-found" />
       </Stack>
-      <ActiveWorkoutBar />
+      {/* Keep the import actions unobstructed while the workout stays active. */}
+      {!inSplitImport && <ActiveWorkoutBar />}
       <StatusBar style="light" />
     </GestureHandlerRootView>
   );

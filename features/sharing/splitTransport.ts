@@ -23,7 +23,7 @@ export const MAX_SHARED_SPLIT_TOKEN_LENGTH = Math.ceil(
   (SHARED_SPLIT_LIMITS.maxPayloadBytes * 4) / 3
 );
 
-/** Custom-scheme import link base. No route handles this yet. */
+/** Custom-scheme import link handled by Expo Router's /import-split route. */
 export const SPLIT_IMPORT_URL_BASE = 'stack://import-split';
 export const SPLIT_IMPORT_QUERY_PARAM = 'd';
 

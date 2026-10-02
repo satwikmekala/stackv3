@@ -3,6 +3,11 @@
 Pure serialization and validation for sharing a Stack custom split. No database
 writes, no deep-link route, no UI, no backend.
 
+The V1 user experience and importer now wrap these pure modules. See
+[Split Sharing V1](split-sharing-v1.md) for the shipped flow, atomic import
+policy, native-link handling, transport budget and verification results. The
+future-policy notes below record the original protocol design.
+
 ```
 CustomSplit ──portableSplitFromCustomSplit──▶ PortableSplit (domain)
 PortableSplit ──serializeSharedSplit──▶ canonical JSON  ──encodeSharedSplit──▶ base64url token
