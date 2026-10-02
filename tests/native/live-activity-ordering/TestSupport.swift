@@ -29,15 +29,15 @@ final class WidgetsEvents {
   var commands: [[String: Any]] = []
   var sequence = 0
   var failJournal = false
-  func enqueueStackAction(source: String, target: String) throws -> [String: Any] {
+  func enqueueStackAction(source: String, target: String, trace: StackLATrace? = nil) throws -> [String: Any] {
     if failJournal { throw CocoaError(.fileWriteOutOfSpace) }
     sequence += 1
     let command: [String: Any] = ["source": source, "target": target, "sequence": sequence]
     commands.append(command)
     return command
   }
-  func sendNotification(type: Kind, data: [String: Any]) {}
-  func hasPendingStackActions(source: String) throws -> Bool { !commands.isEmpty }
+  func sendNotification(type: Kind, data: [String: Any], trace: StackLATrace? = nil) {}
+  func hasPendingStackActions(source: String, trace: StackLATrace? = nil) throws -> Bool { !commands.isEmpty }
 }
 
 @main struct OrderingTests {

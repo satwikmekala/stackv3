@@ -14,7 +14,7 @@ import { redesignColors, redesignFonts } from '@/constants/theme';
 
 type WorkoutIntensityPickerProps = {
   visible: boolean;
-  type: WorkoutType;
+  type?: WorkoutType;
   levels?: readonly IntensityLevelOption[];
   prompt?: string;
   subtext?: string;
@@ -57,7 +57,7 @@ export function WorkoutIntensityPicker({
   const [value, setValue] = useState(0.5);
   const valueRef = useRef(0.5);
   const committedRef = useRef(false);
-  const meta = workoutMeta[type];
+  const meta = type ? workoutMeta[type] : { label: 'Workout', color: redesignColors.ash };
   const nearestLevel = levels.reduce((closest, level) =>
     Math.abs(level.value - value) < Math.abs(closest.value - value) ? level : closest
   );

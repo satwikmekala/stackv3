@@ -21,8 +21,9 @@ import { workoutMotion, workoutTiming } from '@/constants/workoutMotion';
 import { StatusPill } from '@/components/StatusPill';
 import { redesignColors, redesignFonts } from '@/constants/theme';
 import { usePressScale } from '@/hooks/usePressScale';
-import type { ExerciseLoadType } from '@/store/workoutStore';
+import type { ExerciseLoadType, ExerciseMetric } from '@/store/workoutStore';
 import { formatWeight, lbsToKg, unitLabel, type WeightUnit } from '@/store/weightUnits';
+import { DURATION_MIN_S, DURATION_STEP_S, formatDuration, parseDurationInput } from '@/store/exerciseMeasurement';
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
@@ -32,7 +33,8 @@ interface RollingValueProps {
   label?: string;
   color?: string;
   inputLabel: string;
-  inputMode: 'decimal' | 'integer';
+  // 'duration' accepts plain seconds ("90") or m:ss ("1:30").
+  inputMode: 'decimal' | 'integer' | 'duration';
   minimum: number;
   onCommit: (value: number) => void;
 }
@@ -48,6 +50,8 @@ function RollingValue({
 }: RollingValueProps) {
   const previousValue = useRef(value);
   const manualCommit = useRef(false);
+  const editingCommit = useRef(onCommit);
+  const editingLabel = useRef(label ?? String(value));
   const reducedMotion = useReducedMotion();
   const finishingRef = useRef(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -85,6 +89,8 @@ function RollingValue({
     transform: [{ translateY: translateY.value }],
   }));
   const beginEditing = () => {
+    editingCommit.current = onCommit;
+    editingLabel.current = valueLabel;
     finishingRef.current = false;
     cancelAnimation(translateY);
     cancelAnimation(opacity);
@@ -105,20 +111,25 @@ function RollingValue({
     if (finishingRef.current) return;
     finishingRef.current = true;
 
-    const normalizedDraft = draft.trim().replace(',', '.');
-    const matchesFormat = inputMode === 'integer'
-      ? /^\d+$/.test(normalizedDraft)
-      : /^(?:\d+(?:\.\d*)?|\.\d+)$/.test(normalizedDraft);
-    const parsedValue = Number(normalizedDraft);
+    const normalizedDraft = inputMode === 'duration' ? draft.trim() : draft.trim().replace(',', '.');
+    const parsedDuration = inputMode === 'duration' ? parseDurationInput(normalizedDraft) : null;
+    const matchesFormat = inputMode === 'duration'
+      ? parsedDuration !== null
+      : inputMode === 'integer'
+        ? /^\d+$/.test(normalizedDraft)
+        : /^(?:\d+(?:\.\d*)?|\.\d+)$/.test(normalizedDraft);
+    const parsedValue = inputMode === 'duration' ? parsedDuration ?? NaN : Number(normalizedDraft);
 
     if (
       matchesFormat
       && Number.isFinite(parsedValue)
       && parsedValue >= minimum
-      && (inputMode !== 'integer' || Number.isInteger(parsedValue))
+      && (inputMode === 'decimal' || Number.isInteger(parsedValue))
+      && (inputMode !== 'duration' || parsedValue !== value)
+      && normalizedDraft !== editingLabel.current.trim().replace(',', '.')
     ) {
       manualCommit.current = true;
-      onCommit(parsedValue);
+      editingCommit.current(parsedValue);
     }
 
     Keyboard.dismiss();
@@ -154,9 +165,9 @@ function RollingValue({
           onBlur={finishEditing}
           onSubmitEditing={finishEditing}
           selectTextOnFocus
-          keyboardType={inputMode === 'decimal' ? 'decimal-pad' : 'number-pad'}
+          keyboardType={inputMode === 'decimal' ? 'decimal-pad' : inputMode === 'duration' ? 'numbers-and-punctuation' : 'number-pad'}
           keyboardAppearance="dark"
-          inputMode={inputMode === 'decimal' ? 'decimal' : 'numeric'}
+          inputMode={inputMode === 'decimal' ? 'decimal' : inputMode === 'duration' ? 'text' : 'numeric'}
           returnKeyType="done"
           inputAccessoryViewButtonLabel="Done"
           style={valueStyle}
@@ -187,7 +198,7 @@ interface StepperProps {
   step: number;
   unit: string;
   inputLabel: string;
-  inputMode: 'decimal' | 'integer';
+  inputMode: 'decimal' | 'integer' | 'duration';
   minimum: number;
   accent?: string;
   onChange: (delta: number) => void;
@@ -344,7 +355,13 @@ interface ActiveSetCardProps {
   reps: number;
   weight: number;
   loadType: ExerciseLoadType;
+  // Rendering follows loadType + metric: WEIGHT and/or REPS or TIME.
+  metric?: ExerciseMetric;
+  // Canonical seconds; duration-metric exercises only.
+  durationS?: number;
   weightDeltaLabel?: string | null;
+  // Optional derived progression nudge. Never applied unless tapped.
+  suggestion?: { label: string; accessibilityLabel: string; onAccept: () => void } | null;
   // Step size for the manual weight stepper, from the user's profile — already
   // in `weightUnit`, so it is lb-native in lbs mode rather than a converted kg.
   weightIncrement: number;
@@ -357,6 +374,8 @@ interface ActiveSetCardProps {
   onWeightChange: (delta: number) => void;
   onRepsCommit: (reps: number) => void;
   onWeightCommit: (weight: number) => void;
+  onDurationChange?: (deltaSeconds: number) => void;
+  onDurationCommit?: (seconds: number) => void;
   onLog: () => void;
   onSkip: () => void;
 }
@@ -370,7 +389,10 @@ export function ActiveSetCard({
   reps,
   weight,
   loadType,
+  metric = 'reps',
+  durationS,
   weightDeltaLabel,
+  suggestion,
   weightIncrement,
   weightUnit = 'kg',
   onWeightUnitChange,
@@ -380,6 +402,8 @@ export function ActiveSetCard({
   onWeightChange,
   onRepsCommit,
   onWeightCommit,
+  onDurationChange,
+  onDurationCommit,
   onLog,
   onSkip,
 }: ActiveSetCardProps) {
@@ -536,6 +560,7 @@ export function ActiveSetCard({
       >
         {showsWeight ? (
           <MetricBlock
+            key={weightUnit}
             label="WEIGHT"
             value={weight}
             displayValue={formatWeight(weight, weightUnit)}
@@ -550,19 +575,61 @@ export function ActiveSetCard({
             onCommit={handleWeightCommit}
           />
         ) : null}
-        <MetricBlock
-          label="REPS"
-          value={reps}
-          step={1}
-          unit="reps"
-          inputLabel="reps"
-          inputMode="integer"
-          minimum={1}
-          accent={showsWeight ? undefined : accent}
-          onChange={onRepsChange}
-          onCommit={onRepsCommit}
-        />
+        {metric === 'duration' ? (
+          // Manual value only: no stopwatch. ±5 s steps; type 90 or 1:30.
+          <MetricBlock
+            label="TIME"
+            value={durationS ?? 0}
+            displayValue={formatDuration(durationS)}
+            step={DURATION_STEP_S}
+            unit="time"
+            inputLabel="time"
+            inputMode="duration"
+            minimum={DURATION_MIN_S}
+            accent={showsWeight ? undefined : accent}
+            onChange={(delta) => onDurationChange?.(delta)}
+            onCommit={(seconds) => onDurationCommit?.(seconds)}
+          />
+        ) : (
+          <MetricBlock
+            label="REPS"
+            value={reps}
+            step={1}
+            unit="reps"
+            inputLabel="reps"
+            inputMode="integer"
+            minimum={1}
+            accent={showsWeight ? undefined : accent}
+            onChange={onRepsChange}
+            onCommit={onRepsCommit}
+          />
+        )}
       </View>
+
+      {showsWeight && suggestion ? (
+        <WorkoutTouchable
+          accessibilityRole="button"
+          accessibilityLabel={suggestion.accessibilityLabel}
+          activeOpacity={0.72}
+          onPress={suggestion.onAccept}
+          style={{
+            alignSelf: 'center',
+            marginTop: 12,
+            borderRadius: 10,
+            paddingHorizontal: 10,
+            paddingVertical: 6,
+            backgroundColor: `${accent}24`,
+          }}
+        >
+          <Text
+            numberOfLines={1}
+            allowFontScaling={false}
+            style={{ fontFamily: redesignFonts.monoBold, fontSize: 11, letterSpacing: 0.4, color: accent }}
+          >
+            {suggestion.label}
+          </Text>
+        </WorkoutTouchable>
+      ) : null}
 
       <View style={{ width: '100%', flexDirection: 'row', gap: 12, marginTop: 20 }}>
         <AnimatedTouchableOpacity

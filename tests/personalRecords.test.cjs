@@ -23,7 +23,9 @@ function evaluate(text, requireModule = require, injected = {}) {
 const dates = evaluate(source('store/workoutCalendar.ts'));
 const verified = evaluate(source('store/verifiedSessions.ts'));
 const theme = evaluate(source('constants/theme.ts'));
+const measurement = evaluate(source('store/exerciseMeasurement.ts'));
 const records = evaluate(source('store/personalRecords.ts'), (id) => {
+  if (id.endsWith('/exerciseMeasurement')) return measurement;
   if (id.endsWith('/workoutCalendar')) return dates;
   if (id.endsWith('/verifiedSessions')) return verified;
   if (id.endsWith('/theme')) return theme;
@@ -79,13 +81,13 @@ test('catalog muscle identity supports custom exercises and splits biceps from t
 
 function databaseHistory() {
   const db = new DatabaseSync(':memory:');
-  db.exec('CREATE TABLE sessions (id INTEGER, date TEXT); CREATE TABLE exercises (id INTEGER, name TEXT); CREATE TABLE session_exercises (id INTEGER, session_id INTEGER, exercise_id INTEGER, position INTEGER); CREATE TABLE sets (id INTEGER, session_exercise_id INTEGER, set_index INTEGER, weight REAL, reps INTEGER, completed INTEGER, skipped INTEGER);');
+  db.exec('CREATE TABLE sessions (id INTEGER, date TEXT); CREATE TABLE exercises (id INTEGER, name TEXT); CREATE TABLE session_exercises (id INTEGER, session_id INTEGER, exercise_id INTEGER, position INTEGER, metric TEXT); CREATE TABLE sets (id INTEGER, session_exercise_id INTEGER, set_index INTEGER, weight REAL, reps INTEGER, completed INTEGER, skipped INTEGER);');
   let eid = 0, seid = 0, sid = 0;
   for (const s of fixtures) {
     db.prepare('INSERT INTO sessions VALUES (?, ?)').run(Number(s.id), s.date);
     s.exercises.forEach((e, ei) => {
       db.prepare('INSERT INTO exercises VALUES (?, ?)').run(++eid, e.name);
-      db.prepare('INSERT INTO session_exercises VALUES (?, ?, ?, ?)').run(++seid, Number(s.id), eid, ei);
+      db.prepare('INSERT INTO session_exercises (id, session_id, exercise_id, position, metric) VALUES (?, ?, ?, ?, ?)').run(++seid, Number(s.id), eid, ei, e.metric ?? 'reps');
       e.sets.forEach((st, i) => db.prepare('INSERT INTO sets VALUES (?, ?, ?, ?, ?, ?, ?)').run(++sid, seid, i, st.weight, st.reps, +!!st.completed, +!!st.skipped));
     });
   }
@@ -131,4 +133,26 @@ test('legacy monthly timeline and fixed exercise restrictions are fully removed'
   assert.doesNotMatch(source('app/records.tsx'), /deriveRecordHistory|groupByMonth|RecordItem|RECORD_ARCHETYPES|MONTHS/);
   assert.doesNotMatch(source('app/(tabs)/profile.tsx'), /PERSONAL_RECORD_EXERCISES|TRACKED_EXERCISES|function RecordCard/);
   assert.doesNotMatch(source('app/record-detail.tsx'), /StrengthProgressionDetail|StrengthCard|deriveStrengthMetrics/);
+});
+
+test('timed sets never enter the weight/reps record pipeline (in memory or SQLite)', () => {
+  const timed = (name, durationS, weight = 0) => ({ name, metric: 'duration', loadType: weight ? 'external_weight' : 'bodyweight',
+    sets: [{ weight, reps: 0, durationS, completed: true }] });
+  const history = [
+    session(10, '2026-09-20', [timed('Plank', 60), timed('Farmer Carry', 45, 30), exercise('Bench Press', set(80, 8))]),
+    session(11, '2026-09-21', [timed('Plank', 90)]),
+  ];
+  const list = records.derivePersonalRecords(history);
+  assert.deepEqual(list.map((record) => record.name), ['Bench Press']);
+
+  const db = new DatabaseSync(':memory:');
+  try {
+    db.exec('CREATE TABLE sessions (id INTEGER, date TEXT); CREATE TABLE exercises (id INTEGER, name TEXT); CREATE TABLE session_exercises (id INTEGER, session_id INTEGER, exercise_id INTEGER, position INTEGER, metric TEXT); CREATE TABLE sets (id INTEGER, session_exercise_id INTEGER, set_index INTEGER, weight REAL, reps INTEGER, completed INTEGER, skipped INTEGER);');
+    db.exec("INSERT INTO sessions VALUES (10, '2026-09-20'); INSERT INTO exercises VALUES (1, 'Plank'); INSERT INTO session_exercises VALUES (1, 10, 1, 0, 'duration'); INSERT INTO sets VALUES (1, 1, 0, 0, 0, 1, 0);");
+    const reader = evaluate(declarations('store/workoutDatabase.ts', ['readExerciseRecordSetsSync']), require, {
+      getDatabase: () => ({ getAllSync: (sql, ...params) => db.prepare(sql).all(...params) }),
+      getVerifiedSessions: verified.getVerifiedSessions,
+    }).readExerciseRecordSetsSync;
+    assert.deepEqual(reader('Plank', history), []);
+  } finally { db.close(); }
 });

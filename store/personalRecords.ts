@@ -3,6 +3,7 @@ import type { ExerciseCatalogItem } from '@/store/workoutDatabase';
 import type { WorkoutSession } from '@/store/workoutStore';
 import { parseSessionDate, toLocalCalendarDate } from '@/store/workoutCalendar';
 import { getVerifiedSessions } from '@/store/verifiedSessions';
+import { getExerciseMetric } from '@/store/exerciseMeasurement';
 
 export type RecordSet = {
   id: string;
@@ -58,12 +59,16 @@ export function getCurrentBest(sets: readonly RecordSet[]): RecordSet | undefine
       ? set : best, undefined);
 }
 
-/** Every distinct logged name is included; unfinished/skipped sets never count. */
+/**
+ * Every distinct logged name is included; unfinished/skipped sets never count.
+ * Weight/reps records only: timed sets have no record semantics yet.
+ */
 export function derivePersonalRecords(sessions: readonly WorkoutSession[]): PersonalRecord[] {
   const records = new Map<string, PersonalRecord>();
   for (const session of getVerifiedSessions(sessions)) {
     const date = parseSessionDate(session.date);
     session.exercises.forEach((exercise, exerciseIndex) => {
+      if (getExerciseMetric(exercise) !== 'reps') return;
       exercise.sets.forEach((set, setIndex) => {
         if (!set.completed || set.skipped) return;
         const candidate: RecordSet = {

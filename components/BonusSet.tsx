@@ -7,12 +7,29 @@ import Animated from 'react-native-reanimated';
 import { ActiveSetCard } from '@/components/ActiveSetCard';
 import { redesignColors, redesignFonts } from '@/constants/theme';
 import { formatWeight, unitLabel, type WeightUnit } from '@/store/weightUnits';
-import type { BonusSetType, ExerciseLoadType } from '@/store/workoutStore';
+import { clampDuration, formatDuration } from '@/store/exerciseMeasurement';
+import type { BonusSetType, ExerciseLoadType, ExerciseMetric } from '@/store/workoutStore';
 
 export type BonusSetSelection = {
   type: BonusSetType;
   reps: number;
   weight: number;
+  /** Duration-metric exercises only. */
+  durationS?: number;
+};
+
+/** "1:00", "30 kg · 0:45", "12 reps" or "60 kg × 8" for one bonus set. */
+const describeBonusSet = (
+  set: BonusSetSelection,
+  loadType: ExerciseLoadType,
+  metric: ExerciseMetric,
+  weightUnit: WeightUnit
+) => {
+  const load = `${formatWeight(set.weight, weightUnit)} ${unitLabel(weightUnit)}`;
+  if (metric === 'duration') {
+    return loadType === 'bodyweight' ? formatDuration(set.durationS) : `${load} · ${formatDuration(set.durationS)}`;
+  }
+  return loadType === 'bodyweight' ? `${set.reps} reps` : `${load} × ${set.reps}`;
 };
 
 export const BONUS_SET_META: Record<BonusSetType, { title: string; shortTitle: string; color: string }> = {
@@ -28,6 +45,7 @@ export function BonusSet({
   weightIncrement,
   weightUnit,
   loadType,
+  metric,
   onDone,
   onCancel,
 }: {
@@ -35,11 +53,13 @@ export function BonusSet({
   weightIncrement: number;
   weightUnit?: WeightUnit;
   loadType: ExerciseLoadType;
+  metric: ExerciseMetric;
   onDone: (set: BonusSetSelection) => void;
   onCancel: () => void;
 }) {
   const [reps, setReps] = useState(selection.reps);
   const [weight, setWeight] = useState(selection.weight);
+  const [durationS, setDurationS] = useState(selection.durationS);
   const meta = BONUS_SET_META[selection.type];
 
   return (
@@ -49,6 +69,8 @@ export function BonusSet({
       reps={reps}
       weight={weight}
       loadType={loadType}
+      metric={metric}
+      durationS={durationS}
       weightIncrement={weightIncrement}
       weightUnit={weightUnit}
       accent={meta.color}
@@ -58,7 +80,9 @@ export function BonusSet({
       onWeightChange={(delta) => setWeight((current) => Math.max(0, current + delta))}
       onRepsCommit={setReps}
       onWeightCommit={setWeight}
-      onLog={() => onDone({ type: selection.type, reps, weight })}
+      onDurationChange={(delta) => setDurationS((current) => clampDuration((current ?? 0) + delta))}
+      onDurationCommit={(seconds) => setDurationS(clampDuration(seconds))}
+      onLog={() => onDone({ type: selection.type, reps, weight, ...(metric === 'duration' ? { durationS } : {}) })}
       onSkip={onCancel}
     />
   );
@@ -68,11 +92,13 @@ export function BonusSetAcknowledgement({
   set,
   weightUnit = 'kg',
   loadType,
+  metric,
   onAdvance,
 }: {
   set: BonusSetSelection;
   weightUnit?: WeightUnit;
   loadType: ExerciseLoadType;
+  metric: ExerciseMetric;
   onAdvance: () => void;
 }) {
   const meta = BONUS_SET_META[set.type];
@@ -92,11 +118,7 @@ export function BonusSetAcknowledgement({
   return (
     <WorkoutTouchable
       accessibilityRole="button"
-      accessibilityLabel={
-        loadType === 'bodyweight'
-          ? `Well done. ${set.reps} reps. Continue.`
-          : `Well done. ${formatWeight(set.weight, weightUnit)} ${unitLabel(weightUnit)} by ${set.reps}. Continue.`
-      }
+      accessibilityLabel={`Well done. ${describeBonusSet(set, loadType, metric, weightUnit)}. Continue.`}
       activeOpacity={0.92}
       onPress={advanceOnce}
       style={{
@@ -150,9 +172,7 @@ export function BonusSetAcknowledgement({
           color: meta.color,
         }}
       >
-        {loadType === 'bodyweight'
-          ? `${set.reps} reps`
-          : `${formatWeight(set.weight, weightUnit)} ${unitLabel(weightUnit)} × ${set.reps}`}
+        {describeBonusSet(set, loadType, metric, weightUnit)}
       </Text>
       <Text
         allowFontScaling={false}

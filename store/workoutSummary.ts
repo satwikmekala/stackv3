@@ -1,16 +1,28 @@
-import { ARCHETYPE_COMPOSITIONS } from '@/constants/archetypes';
+import { ARCHETYPE_COMPOSITIONS, getSessionWorkoutDisplay } from '@/constants/archetypes';
 import { workoutMeta } from '@/constants/workouts';
 import type {
   BonusSetType,
+  ExerciseLoadType,
   IntensityLevel,
   WorkoutSession,
 } from '@/store/workoutStore';
-import { kgToLbs, type WeightUnit } from '@/store/weightUnits';
+import { performedSets, formatRepScheme } from '@/store/liftLog';
+import { formatDuration, formatDurationScheme, getExerciseMetric, type ExerciseMetric } from '@/store/exerciseMeasurement';
+import { formatWeight, kgToLbs, unitLabel, type WeightUnit } from '@/store/weightUnits';
 
 export type WorkoutSummaryExercise = {
   name: string;
+  loadType: ExerciseLoadType;
+  metric: ExerciseMetric;
   setCount: number;
+  /** Rep-metric only; timed exercises contribute 0. */
   repCount: number;
+  repsBySet: number[];
+  /** Duration-metric only, in seconds. */
+  durationsBySet: number[];
+  /** Canonical kg per performed set, for weighted timed exercises. */
+  weightsBySet: number[];
+  /** weight × reps; timed exercises have no traditional volume. */
   volumeKg: number;
 };
 
@@ -45,33 +57,40 @@ export function deriveWorkoutSummary(
   titleOverride?: string | null
 ): WorkoutSummary {
   const exercises = session.exercises.flatMap<WorkoutSummaryExercise>((exercise) => {
-    const performedSets = exercise.sets.filter(
-      (set) => set.completed && !set.skipped
-    );
+    const sets = performedSets(exercise.sets);
 
-    if (performedSets.length === 0) return [];
+    if (sets.length === 0) return [];
+    const metric = getExerciseMetric(exercise);
+    const timed = metric === 'duration';
 
     return [{
       name: exercise.name,
-      setCount: performedSets.length,
-      repCount: performedSets.reduce((sum, set) => sum + set.reps, 0),
-      volumeKg: performedSets.reduce(
+      loadType: exercise.loadType,
+      metric,
+      setCount: sets.length,
+      repsBySet: timed ? [] : sets.map((set) => set.reps),
+      repCount: timed ? 0 : sets.reduce((sum, set) => sum + set.reps, 0),
+      durationsBySet: timed ? sets.map((set) => set.durationS ?? 0) : [],
+      weightsBySet: sets.map((set) => set.weight),
+      volumeKg: timed ? 0 : sets.reduce(
         (sum, set) => sum + set.reps * set.weight,
         0
       ),
     }];
   });
 
-  const performedSets = session.exercises.flatMap((exercise) =>
-    exercise.sets.filter((set) => set.completed && !set.skipped)
-  );
+  const allPerformedSets = session.exercises.flatMap((exercise) => performedSets(exercise.sets));
+  // Totals count rep-metric sets only: seconds are never reps or volume.
+  const repMetricSets = session.exercises
+    .filter((exercise) => getExerciseMetric(exercise) === 'reps')
+    .flatMap((exercise) => performedSets(exercise.sets));
 
   const specialSets: Record<BonusSetType, number> = {
     pr: 0,
     dropset: 0,
     extra: 0,
   };
-  performedSets.forEach((set) => {
+  allPerformedSets.forEach((set) => {
     if (set.type && SPECIAL_SET_TYPES.includes(set.type)) {
       specialSets[set.type] += 1;
     }
@@ -89,20 +108,20 @@ export function deriveWorkoutSummary(
 
   return {
     id: session.id,
-    title:
+    title: session.origin === 'adhoc' ? getSessionWorkoutDisplay(session).label :
       titleOverride?.trim() ||
       (primaryArchetype
         ? secondaryArchetype
           ? `${primaryArchetype.shortLabel} + ${secondaryArchetype.shortLabel}`
           : primaryArchetype.shortLabel
         : legacyMeta?.label ?? 'Workout'),
-    accent: primaryArchetype?.color ?? legacyMeta?.color ?? '#FF7A3D',
+    accent: session.origin === 'adhoc' ? getSessionWorkoutDisplay(session).color : primaryArchetype?.color ?? legacyMeta?.color ?? '#FF7A3D',
     date: new Date(session.date),
     intensity: session.intensity ?? 'medium',
-    setCount: performedSets.length,
+    setCount: allPerformedSets.length,
     exerciseCount: exercises.length,
-    repCount: performedSets.reduce((sum, set) => sum + set.reps, 0),
-    volumeKg: performedSets.reduce(
+    repCount: repMetricSets.reduce((sum, set) => sum + set.reps, 0),
+    volumeKg: repMetricSets.reduce(
       (sum, set) => sum + set.reps * set.weight,
       0
     ),
@@ -152,4 +171,45 @@ export function specialSetSummaryLabel(
   }
 
   return `${total} SPECIAL SET${total === 1 ? '' : 'S'} LOGGED`;
+}
+
+/** Load carried through timed sets: "30 kg", or "30–32.5 kg" when it varied. */
+function formatLoadRange(weightsKg: readonly number[], unit: WeightUnit): string {
+  const low = Math.min(...weightsKg), high = Math.max(...weightsKg);
+  const range = low === high
+    ? formatWeight(low, unit)
+    : `${formatWeight(low, unit)}–${formatWeight(high, unit)}`;
+  return `${range} ${unitLabel(unit)}`;
+}
+
+/**
+ * Same performed-set rule as Lift Log: bonus included, skipped excluded.
+ * Timed exercises show their durations ("3 × 1:00", "1:00 · 0:45 · 1:10")
+ * and, when weighted, the load held; never reps and never volume.
+ */
+export function formatExerciseRecap(
+  exercise: WorkoutSummaryExercise,
+  unit: WeightUnit
+): { scheme: string; volume: string | null } {
+  if (exercise.metric === 'duration') {
+    return {
+      scheme: formatDurationScheme(exercise.durationsBySet),
+      volume: exercise.loadType === 'external_weight' && exercise.weightsBySet.length > 0
+        ? formatLoadRange(exercise.weightsBySet, unit)
+        : null,
+    };
+  }
+  return {
+    scheme: formatRepScheme(exercise.repsBySet),
+    volume: `${formatSummaryNumber(displayVolume(exercise.volumeKg, unit))} ${unitLabel(unit)}`,
+  };
+}
+
+/** Spoken recap; timed exercises are described in time, never reps. */
+export function exerciseRecapAccessibilityLabel(exercise: WorkoutSummaryExercise, unit: WeightUnit): string {
+  if (exercise.metric === 'duration') {
+    const load = formatExerciseRecap(exercise, unit).volume;
+    return `${exercise.setCount} sets, ${exercise.durationsBySet.map(formatDuration).join(', ')}${load ? `, ${load}` : ''}`;
+  }
+  return `${exercise.setCount} sets, ${exercise.repCount} reps, ${formatSummaryNumber(displayVolume(exercise.volumeKg, unit))} ${unitLabel(unit)} volume`;
 }

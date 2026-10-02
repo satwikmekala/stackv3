@@ -25,13 +25,18 @@ import Animated, {
   ReduceMotion,
   ZoomIn,
 } from 'react-native-reanimated';
+import { SaveAdhocRoutine } from '@/components/SaveAdhocRoutine';
 import { ShareSheet } from '@/components/ShareSheet';
+import { buildWorkoutReport } from '@/features/report/workoutReport';
+import { WorkoutReportSheet } from '@/features/report/WorkoutReportSheet';
 import { BUILD_DEMO_ENABLED } from '@/features/build/config';
 import { motionDuration, motionEasing } from '@/constants/motion';
 import { redesignColors, redesignFonts } from '@/constants/theme';
 import { DEFAULT_WEIGHT_UNIT } from '@/store/workoutDatabase';
 import {
   deriveWorkoutSummary,
+  exerciseRecapAccessibilityLabel,
+  formatExerciseRecap,
   displayVolume,
   formatSummaryDate,
   formatSummaryNumber,
@@ -237,15 +242,16 @@ function ExerciseRecap({
             {exercise.name}
           </Text>
           <Text
-            accessibilityLabel={`${exercise.setCount} sets, ${exercise.repCount} reps, ${formatSummaryNumber(displayVolume(exercise.volumeKg, weightUnit))} ${unitLabel(weightUnit)} volume`}
+            accessibilityLabel={exerciseRecapAccessibilityLabel(exercise, weightUnit)}
             allowFontScaling={false}
             numberOfLines={1}
             style={styles.exerciseMetric}
           >
             <Text style={styles.exerciseMetricMuted}>
-              {exercise.setCount} × {exercise.repCount} ·{' '}
+              {formatExerciseRecap(exercise, weightUnit).scheme}
+              {formatExerciseRecap(exercise, weightUnit).volume ? ' · ' : ''}
             </Text>
-            {formatSummaryNumber(displayVolume(exercise.volumeKg, weightUnit))}
+            {formatExerciseRecap(exercise, weightUnit).volume}
           </Text>
         </View>
       ))}
@@ -328,9 +334,15 @@ export default function WorkoutSummaryScreen() {
     () => session ? deriveLiftLog(session, history, weightUnit) : undefined,
     [session, history, weightUnit]
   );
+  // Full set-by-set report, in the global Settings unit, for sending to a coach or partner.
+  const report = useMemo(
+    () => session ? buildWorkoutReport(session, { unit: weightUnit, titleOverride: customTitle, history }) : null,
+    [customTitle, history, session, weightUnit]
+  );
   const weeklyProgress = getWeeklyProgress();
   const compact = width < 375;
   const [shareVisible, setShareVisible] = useState(false);
+  const [reportVisible, setReportVisible] = useState(false);
 
   if (!summary) return <MissingSummary />;
 
@@ -573,6 +585,7 @@ export default function WorkoutSummaryScreen() {
           style={StyleSheet.absoluteFill}
         />
         <View style={styles.actionColumn}>
+          {session?.origin === 'adhoc' && session.completed ? <SaveAdhocRoutine key={session.id} session={session} /> : null}
           <View
             style={[
               styles.actionRow,
@@ -595,6 +608,24 @@ export default function WorkoutSummaryScreen() {
                 </Text>
               </Pressable>
             ) : null}
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Open workout report"
+              hitSlop={6}
+              onPress={() => {
+                if (Platform.OS !== 'web') void Haptics.selectionAsync();
+                setReportVisible(true);
+              }}
+              style={({ pressed }) => [
+                styles.reportButton,
+                pressed && styles.buttonPressed,
+              ]}
+            >
+              <Text allowFontScaling={false} style={styles.progressButtonText}>
+                Report
+              </Text>
+            </Pressable>
 
             <Pressable
               accessibilityRole="button"
@@ -628,6 +659,14 @@ export default function WorkoutSummaryScreen() {
         {...(stripSpecialLabel ? { specialSetLabel: stripSpecialLabel } : {})}
         {...(liftLog ? { liftLog } : {})}
       />
+
+      {report ? (
+        <WorkoutReportSheet
+          visible={reportVisible}
+          report={report}
+          onClose={() => setReportVisible(false)}
+        />
+      ) : null}
     </View>
   );
 }
@@ -944,6 +983,12 @@ const styles = StyleSheet.create({
   },
   historyShareButton: {
     alignItems: 'center',
+  },
+  reportButton: {
+    minWidth: 72,
+    height: 47,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   progressButtonText: {
     fontFamily: redesignFonts.uiSemiBold,

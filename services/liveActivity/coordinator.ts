@@ -16,6 +16,7 @@ type Options = {
   factory: ActivityFactory;
   endTestActivities: () => Promise<void>;
   onError: (error: unknown) => void;
+  onTrace?: (stage: string, commandId?: string, detail?: string) => void;
 };
 
 // No timers or React dependency. Native operations are serialized, while edits
@@ -57,7 +58,9 @@ export function createWorkoutLiveActivityCoordinator(options: Options) {
     } else if (request.forceRedraw || primary.getId() !== acknowledgedId || request.key !== acknowledgedKey) {
       // expo-widgets exposes ID discovery but no content readback. A recovered
       // instance gets one authoritative update, then identical payloads are skipped.
+      options.onTrace?.('rnAuthoritativeNativeCallBegin', '', `revision=${request.state.acknowledgedRevision ?? '?'}`);
       await primary.update(request.state);
+      options.onTrace?.('rnAuthoritativeNativeCallEnd', '', `revision=${request.state.acknowledgedRevision ?? '?'}`);
       acknowledgedId = primary.getId();
       acknowledgedKey = request.key;
     }

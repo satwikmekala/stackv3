@@ -42,15 +42,18 @@ import {
 } from '@/store/workoutStore';
 
 type SwapExerciseSheetProps = {
+  mode?: 'manage' | 'add';
+  sessionId?: string;
+  onAdded?: () => void;
   visible: boolean;
   dayLabel: string;
   accent: string;
-  currentExerciseIndex: number;
-  currentExerciseName: string;
-  completedSetCount: number;
+  currentExerciseIndex?: number;
+  currentExerciseName?: string;
+  completedSetCount?: number;
   sessionExercises: Exercise[];
   onNavigate: (exerciseIndex: number) => void;
-  onReplace: (name: string) => void;
+  onReplace?: (name: string) => void;
   onClose: () => void;
 };
 
@@ -60,7 +63,7 @@ type ExerciseSwapRowProps = {
   isCurrent: boolean;
   isCompleted?: boolean;
   isAdded?: boolean;
-  action?: 'navigate' | 'replace';
+  action?: 'navigate' | 'replace' | 'add';
   isLast: boolean;
   onPress: () => void;
   onAdd?: () => void;
@@ -133,7 +136,7 @@ function ExerciseSwapRow({
         <ReanimatedTouchableOpacity
           accessibilityRole="button"
           accessibilityLabel={
-            action === 'replace'
+            action === 'add' ? `Add ${name}${isAdded ? ', already added' : ''}` : action === 'replace'
               ? `Replace current exercise with ${name}`
               : `${name}${isCompleted ? ', completed' : ''}${
                   isCurrent ? ', current exercise' : ''
@@ -170,7 +173,7 @@ function ExerciseSwapRow({
               allowFontScaling={false}
               style={[styles.exerciseName, isCurrent && { color: accent }]}
             >
-              {name}
+              {name}{action === 'add' && isAdded ? ' · Already added' : ''}
             </Text>
             {isCurrent ? (
               <View style={styles.currentBadge}>
@@ -325,12 +328,15 @@ function SwipeableExerciseRow({
 }
 
 export function SwapExerciseSheet({
+  mode = 'manage',
+  sessionId,
+  onAdded,
   visible,
   dayLabel,
   accent,
   currentExerciseIndex,
   currentExerciseName,
-  completedSetCount,
+  completedSetCount = 0,
   sessionExercises,
   onNavigate,
   onReplace,
@@ -349,7 +355,7 @@ export function SwapExerciseSheet({
     otherSectionY: number;
   } | null>(null);
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
-  const addExerciseToSplit = useWorkoutStore((state) => state.addExerciseToSplit);
+  const createCustomExercise = useWorkoutStore((state) => state.createCustomExercise);
   const appendExerciseToSession = useWorkoutStore((state) => state.appendExerciseToSession);
   const renameExercise = useWorkoutStore((state) => state.renameExercise);
   const hasExerciseHistory = useWorkoutStore((state) => state.hasExerciseHistory);
@@ -360,11 +366,12 @@ export function SwapExerciseSheet({
   const [addCatalog, setAddCatalog] = useState<ExerciseCatalogItem[]>([]);
   const [addMuscleGroup, setAddMuscleGroup] = useState<CustomSplitMuscleGroup | null>(null);
   const [pendingExerciseName, setPendingExerciseName] = useState<string | null>(null);
-  // Exercises added from this sheet land in Other Exercises, not the session —
-  // the user adds or swaps it in when they choose to.
+  // Manage mode can stage catalog entries; add mode inserts directly into the session.
   const [addedExerciseNames, setAddedExerciseNames] = useState<string[]>([]);
   const [editor, setEditor] = useState<ExerciseEditor>(null);
   const [exerciseName, setExerciseName] = useState('');
+  const [loadType, setLoadType] = useState<'external_weight' | 'bodyweight'>('external_weight');
+  const [metric, setMetric] = useState<'reps' | 'duration'>('reps');
   const [nameFocused, setNameFocused] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -440,8 +447,8 @@ export function SwapExerciseSheet({
     setOtherQuery('');
     const catalog = refreshCatalog();
     const currentExercise = catalog.find((exercise) => exercise.name === currentExerciseName);
-    setOtherMuscleGroup(currentExercise ? getMuscleGroupForExercise(currentExercise) : null);
-  }, [closeOpenSwipeable, currentExerciseName, refreshCatalog, translateY, visible]);
+    setOtherMuscleGroup(mode === 'manage' && currentExercise ? getMuscleGroupForExercise(currentExercise) : null);
+  }, [closeOpenSwipeable, currentExerciseName, mode, refreshCatalog, translateY, visible]);
 
   const finishDrag = (distance: number, velocity: number) => {
     if (distance > 80 || velocity > 0.85) {
@@ -489,6 +496,8 @@ export function SwapExerciseSheet({
     closeOpenSwipeable();
     setPendingExerciseName(null);
     setEditor({ kind: 'add' });
+    setLoadType('external_weight');
+    setMetric('reps');
     setExerciseName('');
     setAddMuscleGroup(null);
     setFormError(null);
@@ -517,7 +526,8 @@ export function SwapExerciseSheet({
 
   const chooseAddExercise = (name: string) => {
     selectionFeedback();
-    rememberAddedExercise(name);
+    if (mode === 'add') addExerciseToSession(name);
+    else rememberAddedExercise(name);
     closeEditor();
   };
 
@@ -547,7 +557,8 @@ export function SwapExerciseSheet({
       (exercise) => exercise.name.toLowerCase() === name.toLowerCase()
     );
     if (existingMatch) {
-      rememberAddedExercise(existingMatch.name);
+      if (mode === 'add') addExerciseToSession(existingMatch.name);
+      else rememberAddedExercise(existingMatch.name);
       closeEditor();
       return;
     }
@@ -559,8 +570,10 @@ export function SwapExerciseSheet({
 
     try {
       const newExerciseType = getWorkoutTypeForMuscleGroup(addMuscleGroup);
-      addExerciseToSplit(newExerciseType, name, addMuscleGroup);
-      rememberAddedExercise(name);
+      const id = createCustomExercise(name, newExerciseType, addMuscleGroup, 'Other', loadType, metric);
+      if (id === undefined) { setFormError('Could not create exercise. Please try again.'); return; }
+      if (mode === 'add') addExerciseToSession(name);
+      else rememberAddedExercise(name);
       refreshCatalog();
       closeEditor();
     } catch (error) {
@@ -570,6 +583,7 @@ export function SwapExerciseSheet({
 
   const chooseExercise = (name: string) => {
     closeOpenSwipeable();
+    if (mode === 'add') { addExerciseToSession(name); return; }
     if (name === currentExerciseName) {
       onClose();
       return;
@@ -580,18 +594,25 @@ export function SwapExerciseSheet({
       return;
     }
 
-    onReplace(name);
+    onReplace?.(name);
   };
 
   const confirmSwap = () => {
     if (pendingExerciseName) {
       selectionFeedback();
-      onReplace(pendingExerciseName);
+      onReplace?.(pendingExerciseName);
     }
   };
 
   const addExerciseToSession = (name: string) => {
-    if (scheduledNames.has(name)) return;
+    if (scheduledNames.has(name)) {
+      Alert.alert('Already added', 'This exercise is already in your workout.');
+      return;
+    }
+    if (mode === 'add') {
+      if (appendExerciseToSession(name, sessionId)) { onAdded?.(); onClose(); }
+      return;
+    }
 
     const previousExerciseCount = useWorkoutStore.getState().currentSession?.exercises.length;
     const otherSectionY = otherSectionYRef.current;
@@ -692,7 +713,7 @@ export function SwapExerciseSheet({
             <View style={styles.handle} />
             <View style={styles.titleRow}>
               <Text allowFontScaling={false} style={styles.title}>
-                Exercises
+                {mode === 'add' ? 'Add Exercise' : 'Exercises'}
               </Text>
               <Pressable
                 accessibilityRole="button"
@@ -809,6 +830,21 @@ export function SwapExerciseSheet({
                     })}
                   </View>
 
+                  <Text style={styles.fieldLabel}>MEASUREMENT</Text>
+                  <View style={styles.muscleTags}>
+                    {(['external_weight', 'bodyweight'] as const).map((value) => (
+                      <WorkoutTouchable key={value} accessibilityRole="radio" accessibilityState={{ checked: loadType === value }}
+                        onPress={() => setLoadType(value)} style={[styles.muscleTag, loadType === value && { borderColor: accent }]}>
+                        <Text style={styles.muscleTagLabel}>{value === 'bodyweight' ? 'Bodyweight' : 'External weight'}</Text>
+                      </WorkoutTouchable>
+                    ))}
+                    {(['reps', 'duration'] as const).map((value) => (
+                      <WorkoutTouchable key={value} accessibilityRole="radio" accessibilityState={{ checked: metric === value }}
+                        onPress={() => setMetric(value)} style={[styles.muscleTag, metric === value && { borderColor: accent }]}>
+                        <Text style={styles.muscleTagLabel}>{value === 'reps' ? 'Reps' : 'Time'}</Text>
+                      </WorkoutTouchable>
+                    ))}
+                  </View>
                   {addMuscleGroup ? (
                     <View style={styles.addMatches}>
                       <Text allowFontScaling={false} style={styles.muscleHint}>
@@ -1027,7 +1063,11 @@ export function SwapExerciseSheet({
                 ))}
               </View>
             </ScrollView>
-            {otherMatches.map((exercise, index) => (
+            {otherMatches.map((exercise, index) => mode === 'add' ? (
+              <ExerciseSwapRow key={exercise.id} name={exercise.name} accent={accent}
+                isCurrent={false} isAdded={scheduledNames.has(exercise.name)} action="add"
+                isLast={index === otherMatches.length - 1} onPress={() => chooseExercise(exercise.name)} />
+            ) : (
               <SwipeableExerciseRow
                 key={exercise.id}
                 name={exercise.name}

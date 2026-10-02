@@ -23,7 +23,7 @@ import {
 import {
   readExerciseCatalogSync,
 } from '@/store/workoutDatabase';
-import { useWorkoutStore } from '@/store/workoutStore';
+import { useWorkoutStore, type ExerciseLoadType, type ExerciseMetric } from '@/store/workoutStore';
 import '@/global.css';
 
 const GROUP_COLORS: Record<CustomSplitMuscleGroup, string> = {
@@ -45,7 +45,57 @@ const EQUIPMENT = [
 
 type Equipment = typeof EQUIPMENT[number]['value'];
 
+// Fixed once created: logged history keeps the measurement it was recorded in.
+const LOAD_OPTIONS: { label: string; value: ExerciseLoadType }[] = [
+  { label: 'External weight', value: 'external_weight' },
+  { label: 'Bodyweight', value: 'bodyweight' },
+];
+const MEASURE_OPTIONS: { label: string; value: ExerciseMetric }[] = [
+  { label: 'Reps', value: 'reps' },
+  { label: 'Time', value: 'duration' },
+];
+
 const alpha = (color: string, opacity: string) => `${color}${opacity}`;
+
+function ChoiceRow<T extends string>({ label, options, value, onSelect }: {
+  label: string;
+  options: { label: string; value: T }[];
+  value: T;
+  onSelect: (value: T) => void;
+}) {
+  return (
+    <>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <View accessibilityRole="radiogroup" style={styles.equipmentRow}>
+        {options.map((item) => {
+          const selected = item.value === value;
+          return (
+            <Pressable
+              accessibilityLabel={item.label}
+              accessibilityRole="radio"
+              accessibilityState={{ selected }}
+              key={item.value}
+              onPress={() => {
+                void Haptics.selectionAsync();
+                onSelect(item.value);
+              }}
+              style={[styles.equipmentChip, selected && styles.equipmentChipSelected]}
+            >
+              <Text
+                style={[styles.equipmentChipText, selected && styles.equipmentChipTextSelected]}
+                adjustsFontSizeToFit
+                minimumFontScale={0.82}
+                numberOfLines={1}
+              >
+                {item.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </>
+  );
+}
 
 export default function NewCustomExerciseScreen() {
   const router = useRouter();
@@ -57,6 +107,8 @@ export default function NewCustomExerciseScreen() {
   const [name, setName] = useState('');
   const [primaryMuscle, setPrimaryMuscle] = useState<CustomSplitMuscleGroup | null>(null);
   const [equipment, setEquipment] = useState<Equipment | null>(null);
+  const [loadType, setLoadType] = useState<ExerciseLoadType>('external_weight');
+  const [metric, setMetric] = useState<ExerciseMetric>('reps');
   const [nameFocused, setNameFocused] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -93,7 +145,9 @@ export default function NewCustomExerciseScreen() {
         normalizedName,
         workoutType,
         primaryMuscle,
-        equipment
+        equipment,
+        loadType,
+        metric
       );
       if (exerciseId === undefined) {
         setError('Couldn’t add this exercise. Please try again.');
@@ -233,6 +287,19 @@ export default function NewCustomExerciseScreen() {
               })}
             </View>
 
+            <ChoiceRow
+              label="LOAD"
+              options={LOAD_OPTIONS}
+              value={loadType}
+              onSelect={(value) => { setLoadType(value); setError(null); }}
+            />
+            <ChoiceRow
+              label="MEASURE"
+              options={MEASURE_OPTIONS}
+              value={metric}
+              onSelect={(value) => { setMetric(value); setError(null); }}
+            />
+
             {error ? (
               <Text accessibilityRole="alert" style={styles.error}>{error}</Text>
             ) : null}
@@ -270,7 +337,7 @@ const styles = StyleSheet.create({
   },
   keyboardView: { flex: 1, justifyContent: 'flex-end' },
   sheet: {
-    height: '64%',
+    height: '74%',
     overflow: 'hidden',
     borderTopLeftRadius: 32,
     borderTopRightRadius: 32,

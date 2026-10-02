@@ -52,6 +52,7 @@ export function TestLiveActivityControls() {
         compactName: 'Bench',
         setNumber: 2,
         totalSets: 4,
+        metric: 'reps',
         weight: 80,
         unit: 'kg',
         reps: 8,

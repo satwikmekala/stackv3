@@ -20,7 +20,8 @@ try {
   const layout = path.join(temp, 'layout.txt');
   fs.writeFileSync(layout, require('./helpers/widgetRuntime.cjs')().layout);
   const runtime = 'node_modules/expo-widgets/ios/Widgets/WidgetsJSRuntime.swift';
-  run('swiftc', [runtime, 'tests/native/live-activity-presentation/main.swift', '-o', bin]);
+  const profiler = 'node_modules/expo-widgets/ios/StackLiveActivityLatency.swift';
+  run('swiftc', [profiler, runtime, 'tests/native/live-activity-presentation/main.swift', '-o', bin]);
   run(bin, [layout]);
   // Extract the production executor verbatim; only ActivityKit/storage services
   // are replaced by test doubles. No copy of its ordering algorithm lives here.
@@ -29,10 +30,10 @@ try {
   if (!intent.includes(marker)) throw Error('Production presentation executor not found');
   const actor = path.join(temp, 'ProductionActor.swift');
   fs.writeFileSync(actor, 'import Foundation\n' + intent.slice(intent.indexOf(marker)));
-  run('swiftc', ['-parse-as-library', runtime, actor, 'tests/native/live-activity-ordering/TestSupport.swift', '-o', bin]);
+  run('swiftc', ['-parse-as-library', profiler, runtime, actor, 'tests/native/live-activity-ordering/TestSupport.swift', '-o', bin]);
   run(bin, [layout]);
   const inbox = path.join(temp, 'inbox-test');
-  run('swiftc', ['node_modules/expo-widgets/ios/WidgetsEvents.swift', 'tests/native/live-activity-inbox/main.swift', '-o', inbox]);
+  run('swiftc', [profiler, 'node_modules/expo-widgets/ios/WidgetsEvents.swift', 'tests/native/live-activity-inbox/main.swift', '-o', inbox]);
   run(inbox, []);
 } finally {
   fs.rmSync(temp, { recursive: true, force: true });

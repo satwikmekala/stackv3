@@ -35,13 +35,13 @@ function source() {
     currentSession: {
       id: '42', completed: false,
       exercises: [
-        { name: 'Bench Press', loadType: 'external_weight', sets: [
+        { name: 'Bench Press', entryUnit: 'kg', loadType: 'external_weight', sets: [
           { weight: 75, reps: 8, completed: true },
           { weight: 80, reps: 8 },
           { weight: 82.5, reps: 7 },
           { weight: 85, reps: 6 },
         ] },
-        { name: 'Incline Dumbbell Press', loadType: 'external_weight', sets: [
+        { name: 'Incline Dumbbell Press', entryUnit: 'kg', loadType: 'external_weight', sets: [
           { weight: 25, reps: 10 }, { weight: 27.5, reps: 8 }, { weight: 30, reps: 6 },
         ] },
       ],
@@ -86,9 +86,11 @@ test('payload uses current committed set values, identity, and shared weight for
   const state = source();
   assert.deepEqual(derive(state), {
     workoutId: '42', exerciseId: 'Bench Press', exerciseName: 'Bench Press', compactName: 'Bench',
-    setNumber: 2, totalSets: 4, weight: '80', reps: 8, unit: 'kg',
+    setNumber: 2, totalSets: 4, metric: 'reps', weight: '80', reps: 8, unit: 'kg',
   });
   state.profile.weightUnit = 'lbs';
+  assert.equal(derive(state).unit, 'kg');
+  state.currentSession.exercises[0].entryUnit = 'lbs';
   assert.equal(derive(state).weight, formatWeight(80, 'lbs'));
   assert.equal(derive(state).unit, 'lbs');
   state.currentSession.exercises[0].sets[1].weight = 0;
@@ -361,4 +363,72 @@ test('iOS bridge consumes while backgrounded, validates native activity state an
   stop();
   assert.equal(listeners.size, 0);
   assert.equal(foregroundListeners.size, 0);
+});
+
+test('payload carries only the active measurement for all four combinations', () => {
+  const only = (exercise) => {
+    const state = source();
+    state.currentSession.exercises = [{ entryUnit: 'kg', ...exercise }];
+    const { metric, weight, reps, duration, unit } = derive(state);
+    return { metric, weight, reps, duration, unit };
+  };
+  const { createLiveActivityActionTargets } = load('@/services/liveActivity/actions');
+  const { getMeasurementActions } = load('@/store/workoutSetActions');
+  assert.deepEqual(only({ name: 'Bench Press', loadType: 'external_weight', metric: 'reps', sets: [{ weight: 80, reps: 10 }] }),
+    { metric: 'reps', weight: '80', reps: 10, duration: undefined, unit: 'kg' });
+  assert.deepEqual(only({ name: 'Push-ups', loadType: 'bodyweight', metric: 'reps', sets: [{ weight: 0, reps: 20 }] }),
+    { metric: 'reps', weight: '—', reps: 20, duration: undefined, unit: '' });
+  assert.deepEqual(only({ name: 'Plank', loadType: 'bodyweight', metric: 'duration', sets: [{ weight: 0, reps: 0, durationS: 60 }] }),
+    { metric: 'duration', weight: '—', reps: undefined, duration: '1:00', unit: '' });
+  assert.deepEqual(only({ name: 'Farmer Carry', loadType: 'external_weight', metric: 'duration', sets: [{ weight: 30, reps: 0, durationS: 45 }] }),
+    { metric: 'duration', weight: '30', reps: undefined, duration: '0:45', unit: 'kg' });
+  assert.deepEqual(getMeasurementActions('external_weight', 'reps'), ['increaseWeight', 'decreaseWeight', 'increaseReps', 'decreaseReps', 'completeSet']);
+  assert.deepEqual(getMeasurementActions('bodyweight', 'reps'), ['increaseReps', 'decreaseReps', 'completeSet']);
+  assert.deepEqual(getMeasurementActions('bodyweight', 'duration'), ['increaseDuration', 'decreaseDuration', 'completeSet']);
+  assert.deepEqual(getMeasurementActions('external_weight', 'duration'), ['increaseWeight', 'decreaseWeight', 'increaseDuration', 'decreaseDuration', 'completeSet']);
+  const target = { workoutId: '42', workoutStartedAt: '2026-09-23', exerciseId: '4', setId: '5', exerciseName: 'Plank', exerciseIndex: 0, setIndex: 0 };
+  assert.deepEqual(Object.keys(createLiveActivityActionTargets(target, true, 2.5, 'duration')), ['increaseDuration', 'decreaseDuration', 'completeSet']);
+});
+
+test('widget layout renders TIME (or WEIGHT + TIME) controls and never a fake weight for bodyweight', () => {
+  const runtime = require('./helpers/widgetRuntime.cjs')();
+  const render = (props) => JSON.stringify(runtime.render({ exerciseName: 'X', compactName: 'X', setNumber: 1, totalSets: 3,
+    actionTarget: 't:', interaction: { weightKg: 0, weightStepKg: 2.5, displayFactor: 1 }, ...props }));
+  const plank = render({ metric: 'duration', weight: '—', duration: '1:00', unit: '',
+    actions: { increaseDuration: 'increaseDuration', decreaseDuration: 'decreaseDuration', completeSet: 'completeSet' } });
+  assert.match(plank, /Increase time/);
+  assert.doesNotMatch(plank, /Increase weight|Increase reps|"reps"/);
+  const carry = render({ metric: 'duration', weight: '30', duration: '0:45', unit: 'kg',
+    actions: { increaseWeight: 'increaseWeight', increaseDuration: 'increaseDuration', completeSet: 'completeSet' } });
+  assert.match(carry, /Increase weight/);
+  assert.match(carry, /Increase time/);
+  assert.doesNotMatch(carry, /Increase reps/);
+  const pushUps = render({ metric: 'reps', weight: '—', reps: 20, unit: '', actions: { increaseReps: 'increaseReps', completeSet: 'completeSet' } });
+  assert.match(pushUps, /Increase reps/);
+  assert.doesNotMatch(pushUps, /Increase weight|Increase time/);
+});
+
+test('Adhoc: empty has no activity; first exercise starts once; append updates same activity; discard ends it', async () => {
+  const h = setup();
+  const state = source();
+  const exercises = state.currentSession.exercises;
+  state.currentSession.origin = 'adhoc';
+  state.currentSession.exercises = [];
+  state.workoutFocus = null;
+  await h.coordinator.sync(derive(state), true);
+  assert.equal(h.factory.events.length, 0);
+  state.currentSession.exercises = [exercises[0]];
+  await h.coordinator.sync(derive(state), true);
+  assert.equal(h.factory.events[0][0], 'start');
+  const id = h.factory.instances[0].getId();
+  state.currentSession.exercises.push(exercises[1]);
+  state.workoutFocus = { workoutId: state.currentSession.id, exerciseIndex: 1 };
+  await h.coordinator.sync(derive(state), true);
+  assert.equal(h.factory.instances[0].getId(), id);
+  assert.equal(h.factory.events.at(-1)[0], 'update');
+  assert.equal(h.factory.events.at(-1)[2].exerciseName, exercises[1].name);
+  state.currentSession = null;
+  await h.coordinator.sync(derive(state), true);
+  assert.equal(h.factory.instances.length, 0);
+  assert.equal(h.factory.events.at(-1)[0], 'end');
 });

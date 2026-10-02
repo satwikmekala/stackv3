@@ -19,8 +19,8 @@ export function ActiveWorkoutCard({ session, onPress, onLayout, style }: {
   const nextSetIndex = exercise?.sets.findIndex((set) => !set.completed) ?? -1;
   const progress = nextSetIndex >= 0
     ? `Set ${nextSetIndex + 1} of ${exercise.sets.length}`
-    : 'Ready to finish';
-  const accent = session.archetype
+    : session.exercises.length === 0 ? 'Add your first exercise' : 'Ready to finish';
+  const accent = session.origin === 'adhoc' ? redesignColors.ash : session.archetype
     ? ARCHETYPE_COMPOSITIONS[session.archetype].color
     : workoutLoggingColors[session.workoutTypes[0]];
 
@@ -28,7 +28,7 @@ export function ActiveWorkoutCard({ session, onPress, onLayout, style }: {
     <TouchableOpacity
       testID="active-workout-bar"
       accessibilityRole="button"
-      accessibilityLabel={`Resume workout, ${exercise?.name ?? 'Active workout'}, ${progress}`}
+      accessibilityLabel={`Resume workout, ${exercise?.name ?? 'Workout'}, ${progress}`}
       onPress={onPress}
       onLayout={onLayout}
       disabled={!onPress}
@@ -36,7 +36,7 @@ export function ActiveWorkoutCard({ session, onPress, onLayout, style }: {
       style={[styles.bar, { borderColor: accent, shadowColor: accent }, style]}
     >
       <View style={styles.details}>
-        <Text numberOfLines={1} style={styles.exercise}>{exercise?.name ?? 'Active workout'}</Text>
+        <Text numberOfLines={1} style={styles.exercise}>{exercise?.name ?? 'Workout'}</Text>
         <Text style={styles.progress}>{progress}</Text>
       </View>
       <Text style={[styles.resume, { color: accent }]}>Resume</Text>

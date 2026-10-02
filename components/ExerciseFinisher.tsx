@@ -9,8 +9,9 @@ import {
   workoutRowEntering,
 } from '@/constants/workoutLayoutTransitions';
 import { usePressScale } from '@/hooks/usePressScale';
-import type { ExerciseLoadType, ExerciseSet } from '@/store/workoutStore';
+import type { ExerciseLoadType, ExerciseMetric, ExerciseSet } from '@/store/workoutStore';
 import { formatWeight, unitLabel, type WeightUnit } from '@/store/weightUnits';
+import { DEFAULT_DURATION_S, formatDuration } from '@/store/exerciseMeasurement';
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
@@ -106,18 +107,24 @@ export function ExerciseFinisher({
   sets,
   nextExerciseName,
   onAdvance,
+  onAddAnother,
+  canFinish = true,
   onEditSet,
   onSelectBonus,
   enteringSetIndex,
   weightUnit = 'kg',
   loadType,
+  metric,
 }: {
   sets: ExerciseSet[];
   nextExerciseName?: string;
   // Display unit only — the plate/PR math below stays kg-based.
   weightUnit?: WeightUnit;
   loadType: ExerciseLoadType;
+  metric: ExerciseMetric;
   onAdvance: () => void;
+  onAddAnother?: () => void;
+  canFinish?: boolean;
   onEditSet: (setIndex: number) => void;
   onSelectBonus: (selection: BonusSetSelection) => void;
   enteringSetIndex?: number | null;
@@ -131,6 +138,16 @@ export function ExerciseFinisher({
   const prJump = Math.max(2.5, roundToPlate(lastWeight * 0.1));
   const prWeight = isBodyweight ? 0 : lastWeight + prJump;
   const prReps = Math.max(1, lastReps - Math.max(2, Math.ceil(lastReps * 0.35)));
+  // Timed exercises offer only a repeat: drop sets and PR attempts are
+  // weight/reps ideas with no duration semantics yet.
+  const timed = metric === 'duration';
+  const lastDuration = lastSet?.durationS ?? DEFAULT_DURATION_S;
+  const setValue = (set: ExerciseSet) => timed
+    ? isBodyweight ? formatDuration(set.durationS) : `${formatWeight(set.weight, weightUnit)} ${unitLabel(weightUnit)}`
+    : isBodyweight ? `${set.reps} reps` : `${formatWeight(set.weight, weightUnit)} ${unitLabel(weightUnit)}`;
+  const setDetail = (set: ExerciseSet) => timed
+    ? isBodyweight ? 'Completed' : `· ${formatDuration(set.durationS)}`
+    : isBodyweight ? 'Completed' : `× ${set.reps} reps`;
   return (
     <View>
       <Animated.View layout={workoutLayoutTransition} style={{ flexDirection: 'row', gap: 8 }}>
@@ -141,7 +158,7 @@ export function ExerciseFinisher({
             entering={index === enteringSetIndex ? workoutRowEntering : undefined}
             accessibilityRole="button"
             accessibilityLabel={`Edit set ${index + 1}`}
-            accessibilityHint="Reopens this completed set for editing"
+            accessibilityHint="Shows logged values without changing workout progress"
             activeOpacity={0.72}
             onPress={() => onEditSet(index)}
             style={{
@@ -178,9 +195,7 @@ export function ExerciseFinisher({
                 color: redesignColors.bone,
               }}
             >
-              {isBodyweight
-                ? `${set.reps} reps`
-                : `${formatWeight(set.weight, weightUnit)} ${unitLabel(weightUnit)}`}
+              {setValue(set)}
             </Text>
             <Text
               allowFontScaling={false}
@@ -191,7 +206,7 @@ export function ExerciseFinisher({
               color: redesignColors.ash,
             }}
           >
-            {isBodyweight ? 'Completed' : `× ${set.reps} reps`}
+            {setDetail(set)}
           </Text>
           </AnimatedTouchableOpacity>
         ))}
@@ -210,6 +225,19 @@ export function ExerciseFinisher({
         Tap a set to edit it, push a little further, or move on.
       </Text>
 
+      {timed ? (
+        <View style={{ flexDirection: 'row', gap: 9 }}>
+          <FinisherOption
+            title="Extra Set"
+            metric={isBodyweight
+              ? formatDuration(lastDuration)
+              : `${formatWeight(lastWeight, weightUnit)} ${unitLabel(weightUnit)} · ${formatDuration(lastDuration)}`}
+            color={BONUS_SET_META.extra.color}
+            icon={<Plus color={BONUS_SET_META.extra.color} size={25} strokeWidth={2.6} />}
+            onPress={() => onSelectBonus({ type: 'extra', reps: 0, weight: lastWeight, durationS: lastDuration })}
+          />
+        </View>
+      ) : (
       <View style={{ flexDirection: 'row', gap: 9 }}>
         <FinisherOption
           title="Extra Set"
@@ -239,9 +267,19 @@ export function ExerciseFinisher({
           onPress={() => onSelectBonus({ type: 'pr', reps: prReps, weight: prWeight })}
         />
       </View>
+      )}
 
+      {onAddAnother ? (
+        <TouchableOpacity accessibilityRole="button" onPress={onAddAnother}
+          style={{ padding: 18, marginTop: 20, borderRadius: 18, backgroundColor: redesignColors.raised, alignItems: 'center' }}>
+          <Text style={{ fontFamily: redesignFonts.uiSemiBold, fontSize: 16, color: redesignColors.bone }}>Add another exercise</Text>
+        </TouchableOpacity>
+      ) : null}
+      {!nextExerciseName && !canFinish ? <Text style={{ color: redesignColors.ash, marginTop: 12 }}>Log at least one non-skipped set to finish.</Text> : null}
       <AnimatedTouchableOpacity
         accessibilityRole="button"
+        accessibilityState={{ disabled: !nextExerciseName && !canFinish }}
+        disabled={!nextExerciseName && !canFinish}
         onPress={onAdvance}
         onPressIn={advancePressScale.onPressIn}
         onPressOut={advancePressScale.onPressOut}

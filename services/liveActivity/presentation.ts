@@ -1,7 +1,8 @@
 import type { UserProfile, WorkoutFocus, WorkoutSession } from '@/store/workoutStore';
 import { getActiveSetIndex, getCurrentWorkoutExerciseIndex } from '@/utils/workoutResume';
 import { getWeightIncrementKg, kgToLbs } from '@/store/weightUnits';
-import { getNextIncompleteExerciseIndex, isExerciseComplete, projectSetToggle, workoutSetActions, type WorkoutSetTarget } from '@/store/workoutSetActions';
+import { getMeasurementActions, getNextIncompleteExerciseIndex, isExerciseComplete, projectSetToggle, type WorkoutSetTarget } from '@/store/workoutSetActions';
+import { DURATION_STEP_S, getExerciseMetric, isValidDuration } from '@/store/exerciseMeasurement';
 import { createActionTargetPrefix } from '@/services/liveActivity/actions';
 import { deriveWorkoutLiveActivityState, type WorkoutLiveActivityState } from '@/services/liveActivity/state';
 
@@ -17,18 +18,21 @@ export function deriveInteractiveWorkoutPresentation(source: Source, readTarget:
     const si = getActiveSetIndex(exercise);
     const set = exercise.sets[si];
     const target = readTarget(ei, si);
+    const metric = getExerciseMetric(exercise);
     if (set.completed || !target || target.workoutId !== snapshot.currentSession.id ||
         target.workoutStartedAt !== snapshot.currentSession.date || target.exerciseName !== exercise.name ||
-        !Number.isFinite(set.weight) || !Number.isFinite(set.reps)) return display;
-    const step = getWeightIncrementKg(snapshot.profile);
+        !Number.isFinite(set.weight) ||
+        (metric === 'duration' ? !isValidDuration(set.durationS) : !Number.isFinite(set.reps))) return display;
+    const step = getWeightIncrementKg(snapshot.profile, exercise.entryUnit);
     if (!Number.isFinite(step) || step <= 0) return display;
     display.actionTarget = createActionTargetPrefix(target, step);
-    display.actions = Object.fromEntries(workoutSetActions
-      .filter((action) => exercise.loadType !== 'bodyweight' || !action.endsWith('Weight'))
+    // Only the controls this measurement exposes in-app; seconds have their own actions.
+    display.actions = Object.fromEntries(getMeasurementActions(exercise.loadType, metric)
       .map((action) => [action, action]));
     display.interaction = {
       weightKg: set.weight, weightStepKg: step,
-      displayFactor: snapshot.profile.weightUnit === 'lbs' ? kgToLbs(1) : 1,
+      displayFactor: exercise.entryUnit === 'lbs' ? kgToLbs(1) : 1,
+      ...(metric === 'duration' ? { durationS: set.durationS, durationStepS: DURATION_STEP_S } : {}),
     };
     return display;
   };
@@ -49,6 +53,7 @@ export function deriveInteractiveWorkoutPresentation(source: Source, readTarget:
       if (nextIndex === ei && propagation?.setIndex === getActiveSetIndex(exercises[nextIndex])) {
         result.interaction.nextWeightOffsetKg = propagation.weightOffsetKg;
         result.interaction.nextRepsFromCurrent = propagation.repsFromCurrent;
+        if (propagation.durationFromCurrent) result.interaction.nextDurationFromCurrent = true;
       }
     }
   }

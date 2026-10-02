@@ -1,5 +1,6 @@
-import type { UserProfile, WorkoutFocus, WorkoutSession } from '@/store/workoutStore';
+import type { ExerciseMetric, UserProfile, WorkoutFocus, WorkoutSession } from '@/store/workoutStore';
 import { formatWeight, unitLabel } from '@/store/weightUnits';
+import { formatDuration, getExerciseMetric } from '@/store/exerciseMeasurement';
 import { getActiveSetIndex, getCurrentWorkoutExerciseIndex } from '@/utils/workoutResume';
 import { compactExerciseName } from '@/services/liveActivity/compactExerciseName';
 import type { LiveActivityActionTargets } from '@/services/liveActivity/actions';
@@ -9,8 +10,13 @@ export type WorkoutLiveActivityDisplayState = {
   compactName: string;
   setNumber: number;
   totalSets: number;
+  /** With `unit` ('' = bodyweight), the whole measurement the layout needs. */
+  metric: ExerciseMetric;
   weight: number | string;
-  reps: number | string;
+  /** Rep-metric exercises only. */
+  reps?: number | string;
+  /** Duration-metric exercises only, as m:ss. */
+  duration?: string;
   unit: string;
   actions?: LiveActivityActionTargets;
   actionTarget?: string;
@@ -20,9 +26,13 @@ export type WorkoutLiveActivityDisplayState = {
     weightKg: number;
     weightStepKg: number;
     displayFactor: number;
+    /** Duration-metric only: canonical seconds and the fixed app step. */
+    durationS?: number;
+    durationStepS?: number;
     next?: WorkoutLiveActivityDisplayState;
     nextWeightOffsetKg?: number;
     nextRepsFromCurrent?: boolean;
+    nextDurationFromCurrent?: boolean;
   };
   acknowledgedRevision?: number;
 };
@@ -49,7 +59,8 @@ export function deriveWorkoutLiveActivityState(source: WorkoutLiveActivitySource
   const setIndex = getActiveSetIndex(exercise);
   const set = exercise.sets[setIndex];
   const bodyweight = exercise.loadType === 'bodyweight';
-  const unit = source.profile.weightUnit;
+  const metric = getExerciseMetric(exercise);
+  const unit = exercise.entryUnit;
   return {
     workoutId: session.id,
     exerciseId: exercise.name,
@@ -57,10 +68,14 @@ export function deriveWorkoutLiveActivityState(source: WorkoutLiveActivitySource
     compactName: compactExerciseName(exercise.name),
     setNumber: setIndex + 1,
     totalSets: exercise.sets.length,
+    metric,
     // Match ActiveSetCard's committed display value exactly. Targets are not
     // substitutes for actual set values. Bodyweight has no weight input in-app.
     weight: bodyweight || !Number.isFinite(set.weight) ? '—' : formatWeight(set.weight, unit),
-    reps: Number.isFinite(set.reps) ? set.reps : '—',
+    // Only the active measurement is sent: timed sets have no reps field.
+    ...(metric === 'duration'
+      ? { duration: formatDuration(set.durationS) }
+      : { reps: Number.isFinite(set.reps) ? set.reps : '—' }),
     unit: bodyweight ? '' : unitLabel(unit),
   };
 }

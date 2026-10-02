@@ -4,6 +4,13 @@ import { create } from 'zustand';
 
 import type { Archetype } from '@/constants/archetypes';
 import {
+  DURATION_STEP_S,
+  clampDuration,
+  isDurationExercise,
+  isValidDuration,
+  type ExerciseMetric,
+} from '@/store/exerciseMeasurement';
+import {
   EMPTY_CUSTOM_WORKOUT_MESSAGE,
   EmptyCustomWorkoutError,
   type CustomSplit,
@@ -35,37 +42,40 @@ import {
   getNextCustomSplitNameAsync,
   hasExerciseHistory as hasExerciseHistoryRecord,
   logArchetypeCompletedRetroactively as persistRetroactiveArchetypeWorkout,
-  moveExerciseInSplitRecords,
   moveWorkoutSync,
   readCompletedSessionsSync,
   readCustomSplitWorkoutLabelSync,
-  readExerciseLoadTypeSync,
+  readExerciseMeasurementSync,
   readExerciseWorkoutTypeSync,
   readLastCompletedCustomWorkoutIdSync,
   readInitialWorkoutSnapshot,
-  readLastExerciseSync,
+  readLastExerciseHistorySync,
   readLastWorkoutOfTypeSync,
   readMostOverdueTypeSync,
   readExercisesForWorkoutTypeSync,
   readPrimaryMusclesForWorkoutTypeSync,
   readProfileSync,
   readSplitTemplatesSync,
-  removeExerciseFromSplitRecords,
   removeExerciseFromWorkoutSync,
   renameCustomSplitSync,
   saveCustomSplitDraftSync,
+  saveAdhocRoutineSync,
   updateCustomSplitDraftSync,
   renameWorkoutSync,
   renameExercise as renameExerciseRecord,
   replaceCurrentSession,
   replaceCurrentSessionExercise,
   resetWorkoutDatabase,
+  startEmptyWorkout as persistEmptyWorkout,
   startWorkoutFromArchetype as persistWorkoutFromArchetype,
   startWorkoutFromCustomWorkout as persistWorkoutFromCustomWorkout,
   setActiveSplitSync,
   updateCurrentSet,
   updateCurrentSets,
   readCurrentSetTarget,
+  readCurrentWorkoutFocusSync,
+  writeCurrentWorkoutFocus,
+  writeExerciseEntryUnit,
   writeProfile,
 } from '@/store/workoutDatabase';
 import {
@@ -73,8 +83,8 @@ import {
   makeDefaultExercise,
 } from '@/store/workoutProgression';
 import { getWeightIncrementKg, type WeightUnit } from '@/store/weightUnits';
-import { getActiveSetIndex, getCurrentWorkoutExerciseIndex, getInitialExerciseIndex } from '@/utils/workoutResume';
-import { projectSetToggle, getNextIncompleteExerciseIndex, isExerciseComplete, type WorkoutSetAction, type WorkoutSetActionResult, type WorkoutSetTarget } from '@/store/workoutSetActions';
+import { getActiveSetIndex, getCurrentWorkoutExerciseIndex } from '@/utils/workoutResume';
+import { projectSetToggle, getNextIncompleteExerciseIndex, isExerciseComplete, type WorkoutSetAction, type WorkoutSetActionResult, type WorkoutSetTarget, type WorkoutSetEditTarget, type WorkoutSetValueAction, sameSetTarget } from '@/store/workoutSetActions';
 
 export { toLocalCalendarDate, parseSessionDate, getSessionLocalDate, getStartOfWeek } from '@/store/workoutCalendar';
 
@@ -91,24 +101,48 @@ export type IntensityLevel = 'easy' | 'medium' | 'hard';
 export type ExperienceLevel = 'beginner' | 'intermediate' | 'advanced';
 export type BonusSetType = 'extra' | 'dropset' | 'pr';
 export type ExerciseLoadType = 'external_weight' | 'bodyweight';
+export type { ExerciseMetric };
 
 export interface Exercise {
   name: string;
+  /** Is external load recorded? Independent of `metric`. */
   loadType: ExerciseLoadType;
+  /** The repeated set measure. Duration sets never carry meaningful reps. */
+  metric: ExerciseMetric;
   sets: ExerciseSet[];
 }
 
+/**
+ * Logging choices belong to this workout occurrence, never the catalog.
+ * `loadType`/`metric` are snapshotted when the exercise enters the session, so
+ * history keeps its meaning even if the catalog row changes later.
+ */
+export interface SessionExercise extends Exercise {
+  entryUnit: WeightUnit;
+}
+
+export type SetValueOrigin = 'template' | 'history' | 'propagated' | 'user';
+
 export interface ExerciseSet {
+  /** Explicit edits protect the whole set from automatic propagation. */
+  valueOrigin?: SetValueOrigin;
+  /** Rep-metric sets only. Duration sets store a neutral 0 here. */
   reps: number;
   weight: number;
+  /** Duration-metric sets only: canonical integer seconds. */
+  durationS?: number;
   type?: BonusSetType;
   targetReps?: number;
   targetWeight?: number;
+  targetDurationS?: number;
   completed?: boolean;
   skipped?: boolean;
 }
 
+export type SessionOrigin = 'archetype' | 'custom' | 'adhoc' | 'legacy';
+
 export interface WorkoutSession {
+  origin: SessionOrigin;
   id: string;
   date: string;
   archetype: Archetype | null;
@@ -116,7 +150,9 @@ export interface WorkoutSession {
   archetypeVariant: string | null;
   secondaryArchetypeVariant: string | null;
   workoutTypes: WorkoutType[];
-  exercises: Exercise[];
+  exercises: SessionExercise[];
+  /** Elapsed duration ends here; unknown historical/retroactive times stay null. */
+  completedAt: string | null;
   intensity?: IntensityLevel;
   completed: boolean;
   retroactive: boolean;
@@ -142,16 +178,22 @@ export interface UserProfile {
 // can pass its former dead counter without that value entering state or SQLite.
 type UserProfileInput = UserProfile & { workoutsCompletedThisWeek?: number };
 
-export type WorkoutFocus = { workoutId: string; exerciseIndex: number };
+export type WorkoutFocus = { workoutId: string; exerciseIndex: number; exerciseId?: string };
 
 interface WorkoutStore {
   profile: UserProfile | null;
   sessions: WorkoutSession[];
   currentSession: WorkoutSession | null;
-  // The workout screen's current selection, shared with read-only surfaces.
-  // On process restart, the existing first-incomplete resume rule still applies.
+  // Persisted current exercise for progression and Live Activity.
+  // Set inspection is ephemeral and never changes this focus.
   workoutFocus: WorkoutFocus | null;
+  selectedSet: WorkoutSetEditTarget | null;
+  selectWorkoutSet: (exerciseIndex: number, setIndex: number) => void;
+  clearSelectedSet: () => void;
+  getSetEditTarget: () => WorkoutSetEditTarget | null;
+  applySetValueAction: (target: WorkoutSetEditTarget, action: WorkoutSetValueAction, value?: number, expectedWeightStepKg?: number) => WorkoutSetActionResult;
   setWorkoutExerciseIndex: (exerciseIndex: number) => void;
+  setExerciseEntryUnit: (target: WorkoutSetTarget, unit: WeightUnit) => WorkoutSetActionResult;
   getActiveSetTarget: () => WorkoutSetTarget | null;
   applyActiveSetAction: (target: WorkoutSetTarget, action: WorkoutSetAction, expectedWeightStepKg?: number) => WorkoutSetActionResult;
   splitTemplates: Record<WorkoutType, Exercise[]>;
@@ -182,7 +224,9 @@ interface WorkoutStore {
     name: string,
     workoutType: WorkoutType,
     primaryMuscle: string,
-    equipment: string
+    equipment: string,
+    loadType?: ExerciseLoadType,
+    metric?: ExerciseMetric
   ) => number | undefined;
   setActiveSplit: (splitId: number | null) => void;
   saveCustomSplitDraft: (
@@ -196,21 +240,26 @@ interface WorkoutStore {
     workouts: CustomSplitDraftWorkoutInput[]
   ) => Promise<boolean>;
 
+  savedAdhocRoutineIds: Record<string, number>;
+  saveAdhocRoutine: (sessionId: string, name: string) => number | undefined;
+  startEmptyWorkout: () => boolean;
   startWorkout: (workoutTypes: WorkoutType[]) => void;
   startWorkoutFromArchetype: (archetypes: Archetype[]) => void;
   startWorkoutFromCustomWorkout: (splitId: number, workoutId: number) => boolean;
   logArchetypeCompletedRetroactively: (archetypes: Archetype[], date: string) => void;
-  updateExerciseSet: (exerciseIndex: number, setIndex: number, reps: number, weight: number) => boolean | undefined;
+  /** `durationS` is required for, and only used by, duration-metric exercises. */
+  updateExerciseSet: (exerciseIndex: number, setIndex: number, reps: number, weight: number, durationS?: number) => boolean | undefined;
   appendBonusSet: (
     exerciseIndex: number,
     type: BonusSetType,
     reps: number,
-    weight: number
+    weight: number,
+    durationS?: number
   ) => void;
   toggleSetCompleted: (exerciseIndex: number, setIndex: number) => boolean | undefined;
   toggleSetSkipped: (exerciseIndex: number, setIndex: number) => void;
   swapCurrentSessionExercise: (exerciseIndex: number, name: string) => void;
-  appendExerciseToSession: (name: string) => void;
+  appendExerciseToSession: (name: string, expectedSessionId?: string) => boolean | undefined;
   completeWorkout: (intensity: IntensityLevel) => WorkoutSession | undefined;
   discardWorkout: () => void;
 
@@ -221,8 +270,6 @@ interface WorkoutStore {
   getExerciseWorkoutType: (name: string) => WorkoutType | undefined;
   getExercisesForWorkoutType: (type: WorkoutType) => ExerciseCatalogItem[];
   getPrimaryMusclesForWorkoutType: (type: WorkoutType) => string[];
-  removeExerciseFromSplit: (type: WorkoutType, exerciseIndex: number) => void;
-  moveExerciseInSplit: (type: WorkoutType, fromIndex: number, toIndex: number) => void;
 
   getLastCompletedCustomWorkoutId: (splitId: number) => number | null;
   getCustomWorkoutLabel: (workoutId: number) => CustomSplitWorkoutLabel | null;
@@ -239,14 +286,14 @@ interface WorkoutStore {
 
 const WORKOUT_ROTATION: WorkoutType[] = ['chest', 'back', 'shoulders', 'arms', 'legs', 'core'];
 
-const cloneExercises = (exercises: Exercise[]): Exercise[] =>
+const cloneExercises = <T extends Exercise>(exercises: T[]): T[] =>
   JSON.parse(JSON.stringify(exercises));
 
-const renameExercises = (
-  exercises: Exercise[],
+const renameExercises = <T extends Exercise>(
+  exercises: T[],
   oldName: string,
   newName: string
-): Exercise[] =>
+): T[] =>
   exercises.map((exercise) =>
     exercise.name === oldName ? { ...exercise, name: newName } : exercise
   );
@@ -262,15 +309,15 @@ const seedSplitTemplates = (): Record<WorkoutType, Exercise[]> => {
   };
 
   for (const seed of SPLIT_TEMPLATE_SEEDS) {
+    const catalog = EXERCISE_SEEDS.find((exercise) => exercise.name === seed.name);
+    const metric = catalog?.metric ?? 'reps';
     templates[seed.workoutType].push({
       name: seed.name,
-      loadType:
-        EXERCISE_SEEDS.find((exercise) => exercise.name === seed.name)?.loadType ??
-        'external_weight',
-      sets: Array.from({ length: 3 }, () => ({
-        reps: seed.targetReps,
-        weight: seed.targetWeight,
-      })),
+      loadType: catalog?.loadType ?? 'external_weight',
+      metric,
+      sets: Array.from({ length: 3 }, () => metric === 'duration'
+        ? { reps: 0, weight: seed.targetWeight, durationS: seed.targetDurationS }
+        : { reps: seed.targetReps, weight: seed.targetWeight }),
     });
   }
   return templates;
@@ -354,6 +401,64 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
   sessions: [],
   currentSession: null,
   workoutFocus: null,
+  selectedSet: null,
+  selectWorkoutSet: (exerciseIndex, setIndex) => runGuardedAction('selectWorkoutSet', () => {
+    const { currentSession, workoutFocus } = get();
+    if (!currentSession || currentSession.completed ||
+        exerciseIndex !== getCurrentWorkoutExerciseIndex(currentSession, workoutFocus)) return;
+    const inspected = currentSession.exercises[exerciseIndex]?.sets[setIndex];
+    if (!inspected?.completed) return;
+    const target = readCurrentSetTarget(exerciseIndex, setIndex);
+    if (!target || target.workoutId !== currentSession.id || target.workoutStartedAt !== currentSession.date ||
+        target.exerciseName !== currentSession.exercises[exerciseIndex].name) return;
+    set({ selectedSet: { ...target, completed: Boolean(inspected.completed) } });
+  }),
+  clearSelectedSet: () => set({ selectedSet: null }),
+  getSetEditTarget: () => {
+    const { selectedSet, currentSession } = get();
+    if (selectedSet && currentSession) {
+      const currentSet = currentSession.exercises[selectedSet.exerciseIndex]?.sets[selectedSet.setIndex];
+      try {
+        const actual = readCurrentSetTarget(selectedSet.exerciseIndex, selectedSet.setIndex);
+        if (actual && sameSetTarget(actual, selectedSet) && currentSession.id === actual.workoutId &&
+            Boolean(currentSet?.completed) === selectedSet.completed) return selectedSet;
+      } catch { return null; }
+      return null;
+    }
+    const active = get().getActiveSetTarget();
+    return active ? { ...active, completed: false } : null;
+  },
+  applySetValueAction: (target, action, value, expectedWeightStepKg) => {
+    const state = get();
+    if (!state.isHydrated || state.hydrationError || !state.profile) return { status: 'unavailable' };
+    return runGuardedAction('applySetValueAction', (): WorkoutSetActionResult => {
+      const actual = get().getSetEditTarget();
+      if (!actual || !sameSetTarget(actual, target) || actual.completed !== target.completed) return { status: 'stale' };
+      const exercise = get().currentSession!.exercises[actual.exerciseIndex];
+      const currentSet = exercise.sets[actual.setIndex];
+      const timed = isDurationExercise(exercise);
+      let { reps, weight, durationS } = currentSet;
+      if (action === 'setReps' || action === 'increaseReps' || action === 'decreaseReps') {
+        // Seconds are never edited through rep actions, on any surface.
+        if (timed) return { status: 'unavailable' };
+        if (action === 'setReps') reps = value!;
+        else reps += action === 'increaseReps' ? 1 : -1;
+      } else if (action === 'setDuration' || action === 'increaseDuration' || action === 'decreaseDuration') {
+        if (!timed) return { status: 'unavailable' };
+        if (action === 'setDuration') durationS = value!;
+        else durationS = clampDuration((durationS ?? 0) + (action === 'increaseDuration' ? 1 : -1) * DURATION_STEP_S);
+      } else if (action === 'setWeight' || action === 'increaseWeight' || action === 'decreaseWeight') {
+        if (exercise.loadType === 'bodyweight') return { status: 'unavailable' };
+        if (action === 'setWeight') weight = value!;
+        else {
+          const step = getWeightIncrementKg(state.profile!, exercise.entryUnit);
+          if (expectedWeightStepKg !== undefined && expectedWeightStepKg !== step) return { status: 'stale' };
+          weight += (action === 'increaseWeight' ? 1 : -1) * step;
+        }
+      } else return { status: 'unavailable' };
+      return { status: get().updateExerciseSet(actual.exerciseIndex, actual.setIndex, reps, weight, durationS) ? 'applied' : 'failed' };
+    }) ?? { status: 'failed' };
+  },
   getActiveSetTarget: () => {
     const { currentSession, workoutFocus } = get();
     if (!currentSession || currentSession.completed) return null;
@@ -377,42 +482,80 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
     if (!state.isHydrated || state.hydrationError || !state.profile) return { status: 'unavailable' };
     return runGuardedAction('applyActiveSetAction', (): WorkoutSetActionResult => {
       const active = get().getActiveSetTarget();
-      if (!active || Object.keys(active).some((key) => active[key as keyof WorkoutSetTarget] !== target[key as keyof WorkoutSetTarget])) {
+      if (!active || !sameSetTarget(active, target)) {
         return { status: 'stale' };
       }
       const { exerciseIndex, setIndex } = active;
       const exercise = get().currentSession!.exercises[exerciseIndex];
       const currentSet = exercise.sets[setIndex];
       if (action === 'completeSet') {
-        // Never toggle a completed set back off. Every caller supplies the set it
-        // displayed, so a second Done cannot accidentally complete the next one.
-        if (!get().toggleSetCompleted(exerciseIndex, setIndex)) return { status: 'failed' };
-        const exercises = get().currentSession!.exercises;
+        const session = get().currentSession!;
+        const { exercises, updates } = projectSetToggle(session.exercises, exerciseIndex, setIndex, state.profile);
         const completedExercise = isExerciseComplete(exercises[exerciseIndex]);
         const next = getNextIncompleteExerciseIndex(exercises, exerciseIndex);
-        if (completedExercise && next !== -1) get().setWorkoutExerciseIndex(next);
+        // Persist completion, propagation and automatic focus advance together.
+        // A failed focus write cannot strand the widget on a finished exercise.
+        const focus = updateCurrentSets(exerciseIndex, updates, completedExercise && next !== -1
+          ? { workoutId: session.id, exerciseIndex: next } : undefined);
+        set({ currentSession: { ...session, exercises },
+          workoutFocus: focus ?? get().workoutFocus,
+          selectedSet: focus ? null : get().selectedSet });
         return { status: 'applied', completedExercise, needsFeedback: completedExercise && next === -1 };
       }
-      let { reps, weight } = currentSet;
-      if (action === 'increaseReps') reps += 1;
-      else if (action === 'decreaseReps') reps -= 1;
-      else if (action === 'increaseWeight' || action === 'decreaseWeight') {
+      const timed = isDurationExercise(exercise);
+      let { reps, weight, durationS } = currentSet;
+      if (action === 'increaseReps' || action === 'decreaseReps') {
+        if (timed) return { status: 'unavailable' };
+        reps += action === 'increaseReps' ? 1 : -1;
+      } else if (action === 'increaseDuration' || action === 'decreaseDuration') {
+        if (!timed) return { status: 'unavailable' };
+        durationS = clampDuration((durationS ?? 0) + (action === 'increaseDuration' ? 1 : -1) * DURATION_STEP_S);
+      } else if (action === 'increaseWeight' || action === 'decreaseWeight') {
         if (exercise.loadType === 'bodyweight') return { status: 'unavailable' };
-        const step = getWeightIncrementKg(state.profile!);
+        const step = getWeightIncrementKg(state.profile!, exercise.entryUnit);
         if (expectedWeightStepKg !== undefined && expectedWeightStepKg !== step) return { status: 'stale' };
         weight += (action === 'increaseWeight' ? 1 : -1) * step;
       } else return { status: 'unavailable' };
-      return { status: get().updateExerciseSet(exerciseIndex, setIndex, reps, weight) ? 'applied' : 'failed' };
+      return { status: get().updateExerciseSet(exerciseIndex, setIndex, reps, weight, durationS) ? 'applied' : 'failed' };
+    }) ?? { status: 'failed' };
+  },
+  setExerciseEntryUnit: (target, unit) => {
+    const state = get();
+    if (!state.isHydrated || state.hydrationError) return { status: 'unavailable' };
+    if (unit !== 'kg' && unit !== 'lbs') return { status: 'unavailable' };
+    return runGuardedAction('setExerciseEntryUnit', (): WorkoutSetActionResult => {
+      const session = get().currentSession;
+      const actual = readCurrentSetTarget(target.exerciseIndex, target.setIndex);
+      if (!session || session.completed || !actual || !sameSetTarget(actual, target) ||
+          session.id !== actual.workoutId || session.date !== actual.workoutStartedAt ||
+          target.exerciseIndex !== getCurrentWorkoutExerciseIndex(session, get().workoutFocus)) return { status: 'stale' };
+      writeExerciseEntryUnit(actual, unit);
+      const exercises = session.exercises.map((exercise, index) =>
+        index === actual.exerciseIndex ? { ...exercise, entryUnit: unit } : exercise);
+      set({ currentSession: { ...session, exercises } });
+      return { status: 'applied' };
     }) ?? { status: 'failed' };
   },
   setWorkoutExerciseIndex: (exerciseIndex) => {
     const { currentSession, workoutFocus } = get();
     if (!currentSession || !Number.isInteger(exerciseIndex) || !currentSession.exercises[exerciseIndex]) return;
     if (workoutFocus?.workoutId === currentSession.id && workoutFocus.exerciseIndex === exerciseIndex) return;
-    set({ workoutFocus: { workoutId: currentSession.id, exerciseIndex } });
+    runGuardedAction('setWorkoutExerciseIndex', () => {
+      const focus = writeCurrentWorkoutFocus(currentSession.id, exerciseIndex);
+      set({ workoutFocus: focus, selectedSet: null });
+    });
   },
   splitTemplates: seedSplitTemplates(),
   customSplits: [],
+  savedAdhocRoutineIds: {},
+  saveAdhocRoutine: (sessionId, name) => runGuardedAction('saveAdhocRoutine', () => {
+    const existing = get().savedAdhocRoutineIds[sessionId];
+    if (existing !== undefined) return existing;
+    const splitId = saveAdhocRoutineSync(sessionId, name);
+    set({ savedAdhocRoutineIds: { ...get().savedAdhocRoutineIds, [sessionId]: splitId } });
+    void get().refreshCustomSplits();
+    return splitId;
+  }),
   currentCustomSplit: null,
   isHydrated: false,
   hydrationError: null,
@@ -552,9 +695,9 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
     });
   },
 
-  createCustomExercise: (name, workoutType, primaryMuscle, equipment) =>
+  createCustomExercise: (name, workoutType, primaryMuscle, equipment, loadType, metric) =>
     runGuardedAction('createCustomExercise', () =>
-      createCustomExerciseSync(name, workoutType, primaryMuscle, equipment)
+      createCustomExerciseSync(name, workoutType, primaryMuscle, equipment, loadType, metric)
     ),
 
   setActiveSplit: (splitId) => runGuardedAction('setActiveSplit', () => {
@@ -593,13 +736,13 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
       throw new Error('A workout session must have one or two distinct workout types');
     }
     const template = readSplitTemplatesSync()[type];
-    const lastWorkout = readLastWorkoutOfTypeSync(type);
     const profile = readProfileSync();
     if (!profile) throw new Error('A profile is required to start a workout');
+    // History is global by exercise, never scoped to the routine or split type.
     const exercises = template.map((templateExercise) =>
       createSessionExercise(
         templateExercise,
-        lastWorkout?.exercises.find((exercise) => exercise.name === templateExercise.name),
+        readLastExerciseHistorySync(templateExercise.name),
         profile
       )
     );
@@ -607,7 +750,9 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
       // SQLite assigns the AUTOINCREMENT key; it is mapped back to the existing
       // public string ID shape before state is published.
       id: '',
+      origin: 'legacy',
       date: new Date().toISOString(),
+      completedAt: null,
       archetype: null,
       secondaryArchetype: null,
       archetypeVariant: null,
@@ -617,19 +762,26 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
       completed: false,
       retroactive: false,
     });
-    set({ currentSession: newSession, workoutFocus: { workoutId: newSession.id, exerciseIndex: getInitialExerciseIndex(newSession.exercises) } });
+    set({ currentSession: newSession, workoutFocus: readCurrentWorkoutFocusSync(), selectedSet: null });
   },
+
+  startEmptyWorkout: () => runGuardedAction('startEmptyWorkout', () => {
+    if (!get().isHydrated || !get().profile) return false;
+    const currentSession = persistEmptyWorkout();
+    set({ currentSession, workoutFocus: readCurrentWorkoutFocusSync(), selectedSet: null });
+    return true;
+  }) === true,
 
   startWorkoutFromArchetype: (archetypes) => runGuardedAction('startWorkoutFromArchetype', () => {
     const newSession = persistWorkoutFromArchetype(archetypes);
-    set({ currentSession: newSession, workoutFocus: { workoutId: newSession.id, exerciseIndex: getInitialExerciseIndex(newSession.exercises) } });
+    set({ currentSession: newSession, workoutFocus: readCurrentWorkoutFocusSync(), selectedSet: null });
   }),
 
   startWorkoutFromCustomWorkout: (splitId, workoutId) =>
     runGuardedAction('startWorkoutFromCustomWorkout', () => {
       try {
         const newSession = persistWorkoutFromCustomWorkout(splitId, workoutId);
-        set({ currentSession: newSession, workoutFocus: { workoutId: newSession.id, exerciseIndex: getInitialExerciseIndex(newSession.exercises) } });
+        set({ currentSession: newSession, workoutFocus: readCurrentWorkoutFocusSync(), selectedSet: null });
         return true;
       } catch (error) {
         if (!(error instanceof EmptyCustomWorkoutError)) throw error;
@@ -644,16 +796,20 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
       set({ sessions: [...get().sessions, completedSession] });
     }),
 
-  updateExerciseSet: (exerciseIndex, setIndex, reps, weight) => runGuardedAction('updateExerciseSet', () => {
+  updateExerciseSet: (exerciseIndex, setIndex, reps, weight, durationS) => runGuardedAction('updateExerciseSet', () => {
     const session = get().currentSession;
     if (!session) return;
     const exercises = cloneExercises(session.exercises);
-    const target = exercises[exerciseIndex].sets[setIndex];
-    if (!target || !Number.isFinite(reps) || !Number.isInteger(reps) || !Number.isFinite(weight)) return false;
+    const target = exercises[exerciseIndex]?.sets[setIndex];
+    if (!target || !Number.isFinite(weight)) return false;
+    const timed = isDurationExercise(exercises[exerciseIndex]);
+    if (timed ? !isValidDuration(durationS) : !Number.isFinite(reps) || !Number.isInteger(reps)) return false;
     const updated = {
       ...target,
-      reps: Math.max(1, reps),
+      valueOrigin: 'user' as const,
+      reps: timed ? 0 : Math.max(1, reps),
       weight: exercises[exerciseIndex].loadType === 'bodyweight' ? 0 : Math.max(0, weight),
+      ...(timed ? { durationS } : {}),
     };
     updateCurrentSet(exerciseIndex, setIndex, updated);
     exercises[exerciseIndex].sets[setIndex] = updated;
@@ -661,16 +817,20 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
     return true;
   }),
 
-  appendBonusSet: (exerciseIndex, type, reps, weight) => runGuardedAction('appendBonusSet', () => {
+  appendBonusSet: (exerciseIndex, type, reps, weight, durationS) => runGuardedAction('appendBonusSet', () => {
     const session = get().currentSession;
     if (!session) return;
     const exercises = cloneExercises(session.exercises);
     const exercise = exercises[exerciseIndex];
     if (!exercise) return;
+    const timed = isDurationExercise(exercise);
+    if (timed && !isValidDuration(durationS)) return;
 
     const storedWeight = exercise.loadType === 'bodyweight' ? 0 : weight;
-    appendCurrentBonusSet(exerciseIndex, type, reps, storedWeight);
-    exercise.sets.push({ type, reps, weight: storedWeight, completed: true, skipped: false });
+    const storedReps = timed ? 0 : reps;
+    appendCurrentBonusSet(exerciseIndex, type, storedReps, storedWeight, timed ? durationS : undefined);
+    exercise.sets.push({ type, reps: storedReps, weight: storedWeight, ...(timed ? { durationS } : {}),
+      completed: true, skipped: false, valueOrigin: 'user' });
     set({ currentSession: { ...session, exercises } });
   }),
 
@@ -678,6 +838,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
     const session = get().currentSession;
     if (!session) return;
     const { exercises, updates } = projectSetToggle(session.exercises, exerciseIndex, setIndex, get().profile);
+    if (updates.length === 0) return true;
     updateCurrentSets(exerciseIndex, updates);
     set({ currentSession: { ...session, exercises } });
     return true;
@@ -687,18 +848,9 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
     const session = get().currentSession;
     if (!session) return;
     const exercises = cloneExercises(session.exercises);
-    const target = exercises[exerciseIndex].sets[setIndex];
-    const updated = target.skipped
-      ? { ...target, completed: false, skipped: false }
-      : {
-          ...target,
-          completed: true,
-          skipped: true,
-          reps: target.targetReps ?? target.reps,
-          weight: exercises[exerciseIndex].loadType === 'bodyweight'
-            ? 0
-            : target.targetWeight ?? target.weight,
-        };
+    const target = exercises[exerciseIndex]?.sets[setIndex];
+    if (!target || target.completed) return;
+    const updated = { ...target, completed: true, skipped: true };
 
     updateCurrentSet(exerciseIndex, setIndex, updated);
     exercises[exerciseIndex].sets[setIndex] = updated;
@@ -725,15 +877,18 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
     }
     if (session.exercises[exerciseIndex].name === name) return;
 
-    const lastExercise = readLastExerciseSync(type, name);
+    const lastExercise = readLastExerciseHistorySync(name);
+    // A new session exercise always takes the catalog's current measurement,
+    // never one snapshotted on an older history row.
+    const measurement = readExerciseMeasurementSync(name);
     const templateExercise =
       readSplitTemplatesSync()[type].find((exercise) => exercise.name === name) ??
-      lastExercise ??
-      makeDefaultExercise(name, readExerciseLoadTypeSync(name));
+      (lastExercise?.metric === measurement.metric ? lastExercise : undefined) ??
+      makeDefaultExercise(name, measurement.loadType, measurement.metric);
     const profile = readProfileSync();
     if (!profile) throw new Error('A profile is required to swap an exercise');
     const replacement = createSessionExercise(
-      { ...templateExercise, name },
+      { ...templateExercise, ...measurement, name },
       lastExercise,
       profile
     );
@@ -741,29 +896,33 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
     replaceCurrentSessionExercise(exerciseIndex, replacement);
     const exercises = [...session.exercises];
     exercises[exerciseIndex] = replacement;
-    set({ currentSession: { ...session, exercises } });
+    set({ currentSession: { ...session, exercises }, selectedSet: null });
   }),
 
-  appendExerciseToSession: (name) => runGuardedAction('appendExerciseToSession', () => {
+  appendExerciseToSession: (name, expectedSessionId) => runGuardedAction('appendExerciseToSession', () => {
     const session = get().currentSession;
     const type = readExerciseWorkoutTypeSync(name);
-    if (!session || !type) return;
-    if (session.exercises.some((exercise) => exercise.name === name)) return;
+    if (!session || !type || (expectedSessionId && session.id !== expectedSessionId)) return false;
+    if (session.exercises.some((exercise) => exercise.name === name)) {
+      Alert.alert('Already added', 'This exercise is already in your workout.');
+      return false;
+    }
 
-    const lastExercise = readLastExerciseSync(type, name);
+    const lastExercise = readLastExerciseHistorySync(name);
+    const measurement = readExerciseMeasurementSync(name);
     const templateExercise =
       readSplitTemplatesSync()[type].find((exercise) => exercise.name === name) ??
-      lastExercise ??
-      makeDefaultExercise(name, readExerciseLoadTypeSync(name));
+      (lastExercise?.metric === measurement.metric ? lastExercise : undefined) ??
+      makeDefaultExercise(name, measurement.loadType, measurement.metric);
     const profile = readProfileSync();
     if (!profile) throw new Error('A profile is required to append an exercise');
     const newExercise = createSessionExercise(
-      { ...templateExercise, name },
+      { ...templateExercise, ...measurement, name },
       lastExercise,
       profile
     );
 
-    appendCurrentSessionExercise(newExercise);
+    appendCurrentSessionExercise(newExercise, session.id, session.origin === 'adhoc');
     set({
       currentSession: {
         ...session,
@@ -772,30 +931,39 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
           : [...session.workoutTypes, type],
         exercises: [...session.exercises, newExercise],
       },
+      workoutFocus: readCurrentWorkoutFocusSync(),
+      selectedSet: session.origin === 'adhoc' ? null : get().selectedSet,
     });
+    return true;
   }),
 
   completeWorkout: (intensity) => runGuardedAction('completeWorkout', () => {
     const session = get().currentSession;
     if (!session) return undefined;
-    completeCurrentSession(intensity);
+    if (!session.exercises.some((exercise) => exercise.sets.some((set) => set.completed === true && set.skipped !== true))) {
+      Alert.alert('Log a set first', 'Log at least one non-skipped set before finishing your workout.');
+      return undefined;
+    }
+    const completedAt = completeCurrentSession(intensity);
     const completedSession = {
       ...session,
       workoutTypes: [...session.workoutTypes],
       intensity,
       completed: true,
+      completedAt,
     };
     set({
       sessions: [...get().sessions, completedSession],
       currentSession: null,
       workoutFocus: null,
+      selectedSet: null,
     });
     return completedSession;
   }),
 
   discardWorkout: () => runGuardedAction('discardWorkout', () => {
     discardCurrentSession();
-    set({ currentSession: null, workoutFocus: null });
+    set({ currentSession: null, workoutFocus: null, selectedSet: null });
   }),
 
   addExerciseToSplit: (type, name, primaryMuscle) => {
@@ -864,53 +1032,6 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
   getPrimaryMusclesForWorkoutType: (type) =>
     readPrimaryMusclesForWorkoutTypeSync(type),
 
-  removeExerciseFromSplit: (type, exerciseIndex) => {
-    const state = get();
-    if (state.splitTemplates[type].length <= 1) return;
-    removeExerciseFromSplitRecords(type, exerciseIndex);
-    const splitTemplates = {
-      ...state.splitTemplates,
-      [type]: state.splitTemplates[type].filter((_, index) => index !== exerciseIndex),
-    };
-    const currentSession =
-      state.currentSession?.workoutTypes.includes(type)
-        ? {
-            ...state.currentSession,
-            exercises: state.currentSession.exercises.filter(
-              (_, index) => index !== exerciseIndex
-            ),
-          }
-        : state.currentSession;
-    set({ splitTemplates, currentSession });
-  },
-
-  moveExerciseInSplit: (type, fromIndex, toIndex) => {
-    const state = get();
-    const templateList = [...state.splitTemplates[type]];
-    if (
-      toIndex < 0 ||
-      toIndex >= templateList.length ||
-      fromIndex < 0 ||
-      fromIndex >= templateList.length
-    ) {
-      return;
-    }
-
-    moveExerciseInSplitRecords(type, fromIndex, toIndex);
-    const [moved] = templateList.splice(fromIndex, 1);
-    templateList.splice(toIndex, 0, moved);
-    const splitTemplates = { ...state.splitTemplates, [type]: templateList };
-
-    let currentSession = state.currentSession;
-    if (currentSession?.workoutTypes.includes(type)) {
-      const sessionList = [...currentSession.exercises];
-      const [movedSession] = sessionList.splice(fromIndex, 1);
-      sessionList.splice(toIndex, 0, movedSession);
-      currentSession = { ...currentSession, exercises: sessionList };
-    }
-    set({ splitTemplates, currentSession });
-  },
-
   // Rotation state for Custom Splits lives in completed session history, so
   // both getters read straight through to SQLite rather than mirroring a
   // cursor in memory.
@@ -949,6 +1070,8 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
     for (const session of readCompletedSessionsSync()) {
       let volume = 0;
       for (const exercise of session.exercises) {
+        // Traditional volume is weight × reps; timed sets have none.
+        if (isDurationExercise(exercise)) continue;
         for (const exerciseSet of exercise.sets) {
           if (exerciseSet.completed) volume += exerciseSet.reps * exerciseSet.weight;
         }
@@ -981,7 +1104,9 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
     const snapshot = resetWorkoutDatabase();
     set({
       ...snapshot,
+      savedAdhocRoutineIds: {},
       workoutFocus: null,
+      selectedSet: null,
       currentCustomSplit: null,
       isHydrated: true,
       hydrationError: null,
@@ -999,9 +1124,7 @@ export const initializeWorkoutStore = (): Promise<void> => {
     .then((snapshot) => {
       useWorkoutStore.setState({
         ...snapshot,
-        workoutFocus: snapshot.currentSession
-          ? { workoutId: snapshot.currentSession.id, exerciseIndex: getInitialExerciseIndex(snapshot.currentSession.exercises) }
-          : null,
+        selectedSet: null,
         isHydrated: true,
         hydrationError: null,
       });

@@ -1,6 +1,7 @@
 import { getSessionWorkoutDisplay } from '../../constants/archetypes';
 import { compareSetPerformance, getCurrentBest, type RecordSet } from '../../store/personalRecords';
 import { getVerifiedSessions } from '../../store/verifiedSessions';
+import { getExerciseMetric } from '../../store/exerciseMeasurement';
 import { getStartOfWeek, parseSessionDate, toLocalCalendarDate } from '../../store/workoutCalendar';
 import type { ExerciseLoadType, ExerciseSet, WorkoutSession } from '../../store/workoutStore';
 import { DEFAULT_TUNING, HEIGHTS, weeklyHeight } from './model';
@@ -115,6 +116,9 @@ export function deriveBuildState(sessions: readonly WorkoutSession[], now: Date,
     const candidates = new Map<string, RecordSet>();
     let volumeKg = 0;
     session.exercises.forEach((exercise, exerciseIndex) => {
+      // Timed sets are real training (the session still casts a piece) but are
+      // not reps, volume, lift-improvement or record evidence.
+      if (getExerciseMetric(exercise) !== 'reps') return;
       const key = JSON.stringify([exercise.name, exercise.loadType]);
       const group = groups.get(key) ?? { name: exercise.name, loadType: exercise.loadType, regular: [] };
       // Keep unperformed regular slots so a skipped set cannot shift comparison positions.

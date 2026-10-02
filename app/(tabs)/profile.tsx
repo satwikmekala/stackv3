@@ -41,6 +41,7 @@ import { formatWeight, unitLabel, type WeightUnit } from '@/store/weightUnits';
 import { DEFAULT_WEIGHT_UNIT } from '@/store/workoutDatabase';
 import { derivePersonalRecords } from '@/store/personalRecords';
 import { getVerifiedSessions } from '@/store/verifiedSessions';
+import { isDurationExercise } from '@/store/exerciseMeasurement';
 import '@/global.css';
 
 type StrengthMetric = {
@@ -141,6 +142,8 @@ function deriveStrengthMetrics(
     if (date < rangeStart || date >= rangeEnd) return;
 
     session.exercises.forEach((exercise) => {
+      // Strength trends are weight/reps evidence; timed sets are not lifts.
+      if (isDurationExercise(exercise)) return;
       const completedSets = exercise.sets.filter((set) => set.completed);
       const sets = completedSets.length > 0 ? completedSets : exercise.sets;
       if (sets.length === 0) return;

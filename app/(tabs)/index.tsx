@@ -481,7 +481,11 @@ export default function Home() {
           entering={shouldAnimateHomeEntrance ? HERO_ENTER : undefined}
           style={{ marginTop: blend(16, 12, compactness) }}
         >
-          {isCustomMode ? (
+          {currentSession ? (
+            <WorkoutHeroCard title="Resume workout" groupLabel={currentSession.origin === 'adhoc' ? 'Workout' : 'In progress'}
+              exerciseCount={currentSession.exercises.length} accentColor={redesignColors.ash}
+              verticalCompactness={compactness} onPress={() => resumeWorkout(router)} />
+          ) : isCustomMode ? (
             <WorkoutHeroCard
               hideStartButton={!isFocused && startingWorkoutRef.current}
               exerciseCount={selectedCustomWorkout?.exercises.length ?? 0}
@@ -525,6 +529,15 @@ export default function Home() {
               onPress={nextUp.length > 0 ? handleStartWorkout : handleOpenWorkoutPicker}
             />
           )}
+          {!currentSession ? (
+            <Pressable accessibilityRole="button" onPress={() => {
+              const state = useWorkoutStore.getState();
+              if (state.currentSession) { resumeWorkout(router); return; }
+              if (state.startEmptyWorkout()) router.push('/workout');
+            }} style={{ alignItems: 'center', padding: 16 }}>
+              <Text style={{ fontFamily: redesignFonts.uiSemiBold, color: redesignColors.bone }}>Start Empty Workout</Text>
+            </Pressable>
+          ) : null}
           {isCustomMode && selectedCustomWorkout && !customWorkoutReady ? (
             <Text accessibilityLiveRegion="polite" style={styles.emptyWorkoutMessage}>
               {EMPTY_CUSTOM_WORKOUT_MESSAGE}

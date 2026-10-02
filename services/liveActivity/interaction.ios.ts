@@ -3,6 +3,7 @@ import { requireOptionalNativeModule } from 'expo';
 import { useWorkoutStore } from '@/store/workoutStore';
 import { createLiveActivityActionBridge, type LiveActivityActionEvent } from '@/services/liveActivity/actions';
 import { refreshWorkoutLiveActivity } from '@/services/liveActivity/sync';
+import { markLiveActivityLatency } from './latency.ios';
 
 type NativeActions = {
   takeStackLiveActivityActions?: () => LiveActivityActionEvent[];
@@ -40,8 +41,12 @@ export function startWorkoutLiveActivityInteractions(onApplied: (workoutId: stri
       },
       reconcile: refreshWorkoutLiveActivity,
       onError: (error) => console.warn('[WorkoutLiveActivity] Interaction failed', error),
+      onTrace: markLiveActivityLatency,
     });
-    const subscription = native.addListener('onExpoWidgetsUserInteraction', drain);
+    const subscription = native.addListener('onExpoWidgetsUserInteraction', () => {
+      markLiveActivityLatency('rnNotificationReceived');
+      drain();
+    });
     const foreground = AppState.addEventListener('change', (state) => { if (state === 'active') { drain(); deliverFeedback(); } });
     drain();
     return () => { subscription.remove(); foreground.remove(); };

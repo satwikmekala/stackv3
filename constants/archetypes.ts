@@ -1,4 +1,4 @@
-import type { ExperienceLevel, WorkoutType } from '@/store/workoutStore';
+import type { ExperienceLevel, WorkoutType, SessionOrigin } from '@/store/workoutStore';
 import { workoutMeta } from '@/constants/workouts';
 import { redesignColors } from '@/constants/theme';
 
@@ -72,6 +72,8 @@ export const ARCHETYPE_COMPOSITIONS: Record<Archetype, ArchetypeComposition> = {
 };
 
 export type SessionWorkoutClassification = {
+  origin?: SessionOrigin;
+  completed?: boolean;
   archetype: Archetype | null;
   secondaryArchetype: Archetype | null;
   workoutTypes: readonly WorkoutType[];
@@ -85,6 +87,11 @@ export type SessionWorkoutClassification = {
 export function getSessionWorkoutDisplay(
   session: SessionWorkoutClassification
 ): { label: string; color: string; isMerged: boolean } {
+  if (session.origin === 'adhoc') {
+    const groups = session.workoutTypes.map((type) => workoutMeta[type].shortLabel);
+    return { label: session.completed && groups.length ? `Workout · ${groups.join(' / ')}` : 'Workout',
+      color: redesignColors.ash, isMerged: false };
+  }
   if (session.archetype) {
     const primary = ARCHETYPE_COMPOSITIONS[session.archetype];
     const secondary = session.secondaryArchetype

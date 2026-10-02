@@ -530,3 +530,22 @@ test('all accessibility reward exits bypass the timeline without changing traini
   assert.equal(shouldSkipBuildReward(false, false, false, 1), false);
   for (const options of [[true, false, false, 1], [false, true, false, 1], [false, false, true, 1], [false, false, false, 2]]) assert.equal(shouldSkipBuildReward(...options), true);
 });
+
+test('timed exercises still cast a piece but are never reps, volume, lift-improvement or record evidence', () => {
+  const hold = (name, durationS, weight = 0) => ({ name, metric: 'duration', loadType: weight ? 'external_weight' : 'bodyweight',
+    sets: [{ weight, reps: 0, durationS, completed: true }, { weight, reps: 0, durationS, completed: true }] });
+  const result = derive([
+    session(1, '2026-09-14', [hold('Plank', 60), hold('Farmer Carry', 30, 30)]),
+    session(2, '2026-09-21', [hold('Plank', 90), hold('Farmer Carry', 45, 40)]),
+  ]);
+  assert.deepEqual(result.pieces.map((piece) => piece.sessionId), ['1', '2']);
+  assert.ok(result.pieces.every((piece) => piece.comparisons.length === 0 && piece.records.length === 0 && piece.eligibleExercises === 0));
+  assert.deepEqual(result.metrics, { workouts: 2, volumeKg: 0, liftsUp: 0, records: 0 });
+  // A legacy-shaped timed row (seconds wrongly in reps) is still excluded by its metric.
+  const legacy = derive([session(3, '2026-09-21', [{ name: 'Plank', metric: 'duration', loadType: 'external_weight', sets: [set(20, 60)] }])]);
+  assert.equal(legacy.metrics.volumeKg, 0);
+  // Rep lifts in the same session keep their evidence.
+  const mixed = derive([session(4, '2026-09-14', [lift('Bench', [set(50, 8)])]),
+    session(5, '2026-09-21', [lift('Bench', [set(52.5, 8)]), hold('Plank', 60)])]);
+  assert.deepEqual([mixed.pieces[1].metrics.liftsUp, mixed.pieces[1].metrics.volumeKg], [1, 420]);
+});

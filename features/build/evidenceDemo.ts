@@ -2,10 +2,10 @@ import type { WorkoutSession } from '../../store/workoutStore';
 
 export const EVIDENCE_DEMO_NOW = new Date(2026, 8, 23, 12);
 const session = (id: string, date: string, values: [number, number][]): WorkoutSession => ({
-  id, date, completed: true, retroactive: false, archetype: 'push', secondaryArchetype: null,
+  id, date, origin: 'archetype', completed: true, completedAt: null, retroactive: false, archetype: 'push', secondaryArchetype: null,
   archetypeVariant: null, secondaryArchetypeVariant: null, workoutTypes: ['chest', 'shoulders', 'arms'],
   exercises: ['Bench Press', 'Incline Dumbbell Press', 'Cable Fly'].map((name, index) => ({
-    name, loadType: 'external_weight', sets: Array.from({ length: 3 }, () => ({ weight: values[index][0], reps: values[index][1], completed: true })),
+    name, entryUnit: 'kg', loadType: 'external_weight', metric: 'reps', sets: Array.from({ length: 3 }, () => ({ weight: values[index][0], reps: values[index][1], completed: true })),
   })),
 });
 
