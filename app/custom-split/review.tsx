@@ -11,9 +11,11 @@ import { showActions } from '@/components/custom-split/showActions';
 import { Action, ui } from '@/components/custom-split/ui';
 import { resolveDayColor } from '@/features/custom-split/colors';
 import { redesignColors as c } from '@/constants/theme';
-import { getWorkoutDisplayName, splitRevision, useCustomSplitDraftStore } from '@/store/customSplitDraft';
+import { countPendingImports, getWorkoutDisplayName, splitRevision, useCustomSplitDraftStore } from '@/store/customSplitDraft';
 import { getCustomSplitDetailAsync } from '@/store/workoutDatabase';
 import { useWorkoutStore } from '@/store/workoutStore';
+import { clearOnboardingDraft, loadOnboardingDraft, useOnboardingDraft } from '@/store/onboardingDraft';
+import { loadSharedRoutineHandoff, onboardingDestination } from '@/store/sharedRoutineHandoff';
 
 export default function ReviewSplit() {
   useMuscleColors(state => state.preferences);
@@ -26,6 +28,8 @@ export default function ReviewSplit() {
   const [error, setError] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
   const locked = useRef(false);
+  /** First-run save that committed before setup finished: a retry finishes setup instead of saving twice. */
+  const [savedBeforeSetup, setSavedBeforeSetup] = useState<number | null>(null);
   const busy = saving || deleting;
   useEffect(() => {
     return navigation.addListener('beforeRemove', event => {
@@ -36,15 +40,18 @@ export default function ReviewSplit() {
   const editing = state.editingSplitId !== null;
   // Stack's plan is always updated in place: never deleted, renamed or saved as a new routine.
   const stackPlan = state.source === 'stack';
+  // First-run setup (e.g. a pasted routine) creates the profile only when the routine is saved.
+  // A committed first-run save keeps this screen on the first-run path, so a retry finishes setup instead of saving twice.
+  const firstRun = state.source === 'onboarding' && (!workouts.profile || savedBeforeSetup !== null);
   const discard = useCallback(() => {
     if (!draft || locked.current) return;
     Alert.alert('Discard this draft?', 'This removes your unfinished changes. Your saved routine and workout history stay intact.', [
       { text: 'Keep building', style: 'cancel' }, { text: 'Discard draft', style: 'destructive', onPress: () => {
         if (locked.current) return;
-        state.discardDraft(); router.dismissTo('/your-splits');
+        state.discardDraft(); router.dismissTo(firstRun ? '/paste-routine' : '/your-splits');
       } },
     ]);
-  }, [draft, state, router]);
+  }, [draft, state, router, firstRun]);
   const deleteSplit = useCallback(() => {
     const splitId = state.editingSplitId;
     if (!draft || splitId === null || locked.current) return;
@@ -87,7 +94,10 @@ export default function ReviewSplit() {
         ...(editing && !stackPlan ? [{ title: 'Delete routine', destructive: true, onPress: deleteSplit }] : []),
       ])}><MoreHorizontal color={c.bone} size={22} /></Pressable>,
   }), [busy, draft, editing, stackPlan, discard, deleteSplit, router]);
-  const invalid = !draft?.name.trim() ? 'Give your routine a name.' : draft.workouts.some(day => !day.exercises.length) ? 'Add exercises to every workout, or remove the workouts you don’t need.' : null;
+  const pendingCount = countPendingImports(draft);
+  const invalid = !draft?.name.trim() ? 'Give your routine a name.'
+    : pendingCount ? `Check the ${pendingCount === 1 ? 'exercise' : `${pendingCount} exercises`} Stack wasn’t sure about before saving.`
+    : draft.workouts.some(day => !day.exercises.length) ? 'Add exercises to every workout, or remove the workouts you don’t need.' : null;
   const save = async (activate: boolean) => {
     if (!draft || invalid || locked.current) return;
     locked.current = true; setSaving(true); setError(null);
@@ -102,6 +112,22 @@ export default function ReviewSplit() {
         name: getWorkoutDisplayName(day) || workoutEntryLabel(index), color: day.color ?? null,
         exerciseIds: day.exercises.map(exercise => exercise.id), persistedWorkoutId: day.persistedWorkoutId ?? null,
       }));
+      if (firstRun) {
+        // Same order as Hevy import: save the routine, then finish setup, then use the routine.
+        const splitId = savedBeforeSetup ?? await workouts.saveCustomSplitDraft(draft.name.trim(), inputs, { activate: false });
+        if (splitId === undefined) throw new Error('Couldn’t save your routine.');
+        setSavedBeforeSetup(splitId);
+        await loadOnboardingDraft();
+        const profile = workouts.completeNoProgramOnboarding(useOnboardingDraft.getState().draft.name);
+        if (!profile.onboardingCompleted) throw new Error('Couldn’t finish setup.');
+        workouts.activateSharedRoutine(splitId);
+        await clearOnboardingDraft().catch(() => {});
+        await loadSharedRoutineHandoff().catch(() => {});
+        locked.current = false;
+        state.discardDraft();
+        router.replace(onboardingDestination());
+        return;
+      }
       const success = state.editingSplitId !== null
         ? await workouts.updateCustomSplitDraft(state.editingSplitId, draft.name.trim(), inputs)
         : stackPlan
@@ -154,8 +180,12 @@ export default function ReviewSplit() {
           {day.exercises.length ? <View style={{ gap: 12 }}>{day.exercises.map((exercise, position) => <View key={exercise.id} style={[ui.row, { alignItems: 'flex-start' }]}>
             <Text style={[ui.number, { paddingTop: 3 }]}>{String(position + 1).padStart(2, '0')}</Text>
             <Text style={[ui.body, { flex: 1, color: c.bone }]}>{displayExerciseName(exercise.name)}</Text>
-          </View>)}</View> : <Text style={ui.body}>This workout needs exercises before you can save.</Text>}
-          <Action title={day.exercises.length ? 'Edit workout' : 'Add exercises'} secondary icon={<Pencil color={c.bone} size={16} />} disabled={busy} label={`Edit ${workoutEntryLabel(index)}`}
+          </View>)}</View> : day.pendingImports?.length ? null : <Text style={ui.body}>This workout needs exercises before you can save.</Text>}
+          {day.pendingImports?.length ? <View style={{ gap: 6 }}>{day.pendingImports.map(item => <View key={item.key} style={ui.row}>
+            <View style={[ui.dot, { backgroundColor: c.accent }]} />
+            <Text style={[ui.body, { flex: 1 }]}>“{item.rawName}” needs a check</Text>
+          </View>)}</View> : null}
+          <Action title={day.pendingImports?.length ? 'Check exercises' : day.exercises.length ? 'Edit workout' : 'Add exercises'} secondary icon={<Pencil color={c.bone} size={16} />} disabled={busy} label={`Edit ${workoutEntryLabel(index)}`}
             onPress={() => { state.selectWorkout(day.id); router.back(); }} />
         </View>)}
         <Text style={ui.body}>Your draft stays on this device until you save or discard it.</Text>

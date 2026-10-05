@@ -7,12 +7,13 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { useAnimatedRef, useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
 import { SelectedExerciseList } from '@/components/custom-split/SelectedExerciseList';
+import { PendingImportList } from '@/components/custom-split/PendingImportList';
 import { WorkoutTabs } from '@/components/custom-split/WorkoutTabs';
 import { Action, StackMark, ui } from '@/components/custom-split/ui';
 import { ChevronLeft, MoreHorizontal, Plus, SlidersHorizontal } from 'lucide-react-native';
 import { useMuscleColors } from '@/store/muscleColors';
 import { redesignColors as c, redesignFonts as f } from '@/constants/theme';
-import { getWorkoutDisplayName, splitRevision, useCustomSplitDraftStore, type CustomSplitSource, type DraftExercise } from '@/store/customSplitDraft';
+import { countPendingImports, getWorkoutDisplayName, splitRevision, useCustomSplitDraftStore, type CustomSplitSource, type DraftExercise } from '@/store/customSplitDraft';
 import { getCustomSplitDetailAsync, getNextArchetypeVariant, getNextCustomSplitNameAsync, readArchetypeTemplateCatalogSync, readArchetypeVariantsSync } from '@/store/workoutDatabase';
 import { useWorkoutStore } from '@/store/workoutStore';
 import { getProgramFrequency } from '@/store/trainingPreferences';
@@ -113,6 +114,8 @@ export default function CustomSplitBuilderScreen() {
   const index = state.draft.workouts.indexOf(workout);
   const title = getWorkoutDisplayName(workout) || workoutEntryLabel(index);
   const add = () => { state.openPicker(workout.id); router.push('/custom-split/exercises'); };
+  const pending = workout.pendingImports ?? [];
+  const pendingElsewhere = countPendingImports(state.draft) - pending.length;
   const removeDay = () => {
     if (state.draft!.workouts.length <= 1) return;
     const remove = () => state.deleteWorkout(workout.id);
@@ -153,13 +156,17 @@ export default function CustomSplitBuilderScreen() {
                 ...(state.draft!.workouts.length > 1 ? [{ title: 'Delete workout', destructive: true, onPress: removeDay }] : []),
               ])}><MoreHorizontal color={c.ash} size={22} /></Pressable>
           </View>
+          {pendingElsewhere > 0 ? <Text style={ui.label}>{pendingElsewhere === 1 ? '1 exercise' : `${pendingElsewhere} exercises`} in other workouts {pendingElsewhere === 1 ? 'needs' : 'need'} a check.</Text> : null}
         </View>
+        {pending.length ? <PendingImportList items={pending}
+          onResolve={(key, exercise) => state.resolvePendingImport(workout.id, key, exercise)}
+          onSearch={item => { state.openPicker(workout.id, { pendingKey: item.key, query: item.rawName }); router.push('/custom-split/exercises'); }} /> : null}
         {workout.exercises.length ? <SelectedExerciseList key={workout.id} exercises={workout.exercises}
           scrollRef={scrollRef} scrollOffset={scrollOffset} maxScrollOffset={maxScrollOffset} measureViewport={measureViewport}
           onDragStateChange={setReordering} onRemove={id => {
             const position = workout.exercises.findIndex(exercise => exercise.id === id);
             setUndo({ dayId: workout.id, exercise: workout.exercises[position], index: position }); state.removeExercise(workout.id, id);
-          }} onReorder={(from, to) => state.reorderExercise(workout.id, from, to)} /> :
+          }} onReorder={(from, to) => state.reorderExercise(workout.id, from, to)} /> : pending.length ? null :
           <View style={[ui.card, { padding: 24, gap: 16 }]}>
             <StackMark />
             <Text style={ui.subtitle}>Choose your exercises.</Text>

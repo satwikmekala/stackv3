@@ -4,8 +4,42 @@
     {
       "name": "expo-web",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["expo", "start", "--web", "--port", "8090"],
+      "runtimeArgs": [
+        "expo",
+        "start",
+        "--web",
+        "--port",
+        "8090"
+      ],
       "port": 8090,
+      "autoPort": false
+    },
+    {
+      "name": "routine-import-api",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "--env-file=server/.env",
+        "server/src/server.mjs"
+      ],
+      "port": 8080,
+      "autoPort": false
+    },
+    {
+      "name": "paste-preview-metro",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "expo",
+        "start",
+        "--port",
+        "8095",
+        "--localhost"
+      ],
+      "env": {
+        "EXPO_PUBLIC_ONBOARDING_PREVIEW": "1",
+        "EXPO_PUBLIC_ROUTINE_IMPORT_URL": "http://localhost:8080",
+        "EXPO_NO_TELEMETRY": "1"
+      },
+      "port": 8095,
       "autoPort": false
     }
   ]

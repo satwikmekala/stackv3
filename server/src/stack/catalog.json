@@ -1,0 +1,1257 @@
+{
+  "exercises": [
+    {
+      "name": "Bench Press",
+      "workoutType": "chest",
+      "primaryMuscle": "Chest",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Incline Dumbbell Press",
+      "workoutType": "chest",
+      "primaryMuscle": "Upper Chest",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Chest Dips",
+      "workoutType": "chest",
+      "primaryMuscle": "Lower Chest, Triceps",
+      "loadType": "bodyweight",
+      "metric": "reps"
+    },
+    {
+      "name": "Cable Fly",
+      "workoutType": "chest",
+      "primaryMuscle": "Chest",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Incline Bench Press",
+      "workoutType": "chest",
+      "primaryMuscle": "Upper Chest",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Push-ups",
+      "workoutType": "chest",
+      "primaryMuscle": "Chest",
+      "loadType": "bodyweight",
+      "metric": "reps"
+    },
+    {
+      "name": "Pec Deck",
+      "workoutType": "chest",
+      "primaryMuscle": "Chest",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Decline Press",
+      "workoutType": "chest",
+      "primaryMuscle": "Lower Chest",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Machine Chest Press",
+      "workoutType": "chest",
+      "primaryMuscle": "Chest",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Incline Cable Fly",
+      "workoutType": "chest",
+      "primaryMuscle": "Upper Chest",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Dumbbell Bench Press",
+      "workoutType": "chest",
+      "primaryMuscle": "Chest",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Dumbbell Fly",
+      "workoutType": "chest",
+      "primaryMuscle": "Chest",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Cable Crossover",
+      "workoutType": "chest",
+      "primaryMuscle": "Chest",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Low-to-High Cable Fly",
+      "workoutType": "chest",
+      "primaryMuscle": "Chest",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "High-to-Low Cable Fly",
+      "workoutType": "chest",
+      "primaryMuscle": "Chest",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Single-Arm Cable Fly",
+      "workoutType": "chest",
+      "primaryMuscle": "Chest",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Smith Machine Bench Press",
+      "workoutType": "chest",
+      "primaryMuscle": "Chest",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Smith Machine Incline Press",
+      "workoutType": "chest",
+      "primaryMuscle": "Chest",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Decline Dumbbell Press",
+      "workoutType": "chest",
+      "primaryMuscle": "Chest",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Decline Dumbbell Fly",
+      "workoutType": "chest",
+      "primaryMuscle": "Lower Chest",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Incline Machine Chest Press",
+      "workoutType": "chest",
+      "primaryMuscle": "Chest",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Flat Machine Chest Press",
+      "workoutType": "chest",
+      "primaryMuscle": "Chest",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Svend Press",
+      "workoutType": "chest",
+      "primaryMuscle": "Chest",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Deadlift",
+      "workoutType": "back",
+      "primaryMuscle": "Back, Hamstrings, Glutes",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Pull-ups",
+      "workoutType": "back",
+      "primaryMuscle": "Lats",
+      "loadType": "bodyweight",
+      "metric": "reps"
+    },
+    {
+      "name": "Barbell Rows",
+      "workoutType": "back",
+      "primaryMuscle": "Lats, Mid-back",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Lat Pulldown",
+      "workoutType": "back",
+      "primaryMuscle": "Lats",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Seated Cable Row",
+      "workoutType": "back",
+      "primaryMuscle": "Mid-back, Lats",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "T-Bar Row",
+      "workoutType": "back",
+      "primaryMuscle": "Mid-back",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Single-Arm Dumbbell Row",
+      "workoutType": "back",
+      "primaryMuscle": "Lats",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Back Extensions",
+      "workoutType": "back",
+      "primaryMuscle": "Lower Back",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Chest-Supported Row",
+      "workoutType": "back",
+      "primaryMuscle": "Mid-back",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Straight-Arm Pulldown",
+      "workoutType": "back",
+      "primaryMuscle": "Lats",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Chin-ups",
+      "workoutType": "back",
+      "primaryMuscle": "Back",
+      "loadType": "bodyweight",
+      "metric": "reps"
+    },
+    {
+      "name": "Wide-Grip Lat Pulldown",
+      "workoutType": "back",
+      "primaryMuscle": "Back",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Close-Grip Lat Pulldown",
+      "workoutType": "back",
+      "primaryMuscle": "Back",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Neutral-Grip Lat Pulldown",
+      "workoutType": "back",
+      "primaryMuscle": "Back",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Single-Arm Lat Pulldown",
+      "workoutType": "back",
+      "primaryMuscle": "Back",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Pendlay Row",
+      "workoutType": "back",
+      "primaryMuscle": "Back",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Meadows Row",
+      "workoutType": "back",
+      "primaryMuscle": "Back",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Machine Row",
+      "workoutType": "back",
+      "primaryMuscle": "Back",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "High Row Machine",
+      "workoutType": "back",
+      "primaryMuscle": "Back",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Dumbbell Pullover",
+      "workoutType": "back",
+      "primaryMuscle": "Back",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Cable Pullover",
+      "workoutType": "back",
+      "primaryMuscle": "Back",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Seal Row",
+      "workoutType": "back",
+      "primaryMuscle": "Back",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Rack Pull",
+      "workoutType": "back",
+      "primaryMuscle": "Back",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Inverted Row",
+      "workoutType": "back",
+      "primaryMuscle": "Back",
+      "loadType": "bodyweight",
+      "metric": "reps"
+    },
+    {
+      "name": "Overhead Press",
+      "workoutType": "shoulders",
+      "primaryMuscle": "Front/Side Delts",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Lateral Raises",
+      "workoutType": "shoulders",
+      "primaryMuscle": "Side Delts",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Face Pulls",
+      "workoutType": "shoulders",
+      "primaryMuscle": "Rear Delts",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Front Raises",
+      "workoutType": "shoulders",
+      "primaryMuscle": "Front Delts",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Arnold Press",
+      "workoutType": "shoulders",
+      "primaryMuscle": "Front/Side Delts",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Rear Delt Fly",
+      "workoutType": "shoulders",
+      "primaryMuscle": "Rear Delts",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Upright Rows",
+      "workoutType": "shoulders",
+      "primaryMuscle": "Side Delts, Traps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Shrugs",
+      "workoutType": "shoulders",
+      "primaryMuscle": "Traps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Cable Lateral Raise",
+      "workoutType": "shoulders",
+      "primaryMuscle": "Side Delts",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Landmine Press",
+      "workoutType": "shoulders",
+      "primaryMuscle": "Front Delts, Chest",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Seated Dumbbell Shoulder Press",
+      "workoutType": "shoulders",
+      "primaryMuscle": "Shoulders",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Machine Shoulder Press",
+      "workoutType": "shoulders",
+      "primaryMuscle": "Shoulders",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Smith Machine Shoulder Press",
+      "workoutType": "shoulders",
+      "primaryMuscle": "Shoulders",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Single-Arm Cable Lateral Raise",
+      "workoutType": "shoulders",
+      "primaryMuscle": "Shoulders",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Lean-Away Cable Lateral Raise",
+      "workoutType": "shoulders",
+      "primaryMuscle": "Shoulders",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Cable Rear Delt Fly",
+      "workoutType": "shoulders",
+      "primaryMuscle": "Shoulders",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Reverse Pec Deck",
+      "workoutType": "shoulders",
+      "primaryMuscle": "Shoulders",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Dumbbell Rear Delt Fly",
+      "workoutType": "shoulders",
+      "primaryMuscle": "Shoulders",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Y Raise",
+      "workoutType": "shoulders",
+      "primaryMuscle": "Shoulders",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Plate Front Raise",
+      "workoutType": "shoulders",
+      "primaryMuscle": "Shoulders",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Cable Front Raise",
+      "workoutType": "shoulders",
+      "primaryMuscle": "Shoulders",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Bradford Press",
+      "workoutType": "shoulders",
+      "primaryMuscle": "Shoulders",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Bicep Curls",
+      "workoutType": "arms",
+      "primaryMuscle": "Biceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Dumbbell Curl",
+      "workoutType": "arms",
+      "primaryMuscle": "Biceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Hammer Curls",
+      "workoutType": "arms",
+      "primaryMuscle": "Biceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Preacher Curls",
+      "workoutType": "arms",
+      "primaryMuscle": "Biceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Cable Curls",
+      "workoutType": "arms",
+      "primaryMuscle": "Biceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Tricep Extensions",
+      "workoutType": "arms",
+      "primaryMuscle": "Triceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Tricep Dips",
+      "workoutType": "arms",
+      "primaryMuscle": "Triceps",
+      "loadType": "bodyweight",
+      "metric": "reps"
+    },
+    {
+      "name": "Tricep Pushdown",
+      "workoutType": "arms",
+      "primaryMuscle": "Triceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Skull Crushers",
+      "workoutType": "arms",
+      "primaryMuscle": "Triceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Close-Grip Bench Press",
+      "workoutType": "arms",
+      "primaryMuscle": "Triceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "EZ-Bar Curl",
+      "workoutType": "arms",
+      "primaryMuscle": "Biceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Incline Dumbbell Curl",
+      "workoutType": "arms",
+      "primaryMuscle": "Biceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Concentration Curl",
+      "workoutType": "arms",
+      "primaryMuscle": "Biceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Bayesian Cable Curl",
+      "workoutType": "arms",
+      "primaryMuscle": "Biceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Spider Curl",
+      "workoutType": "arms",
+      "primaryMuscle": "Biceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Reverse Curl",
+      "workoutType": "arms",
+      "primaryMuscle": "Biceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Rope Hammer Curl",
+      "workoutType": "arms",
+      "primaryMuscle": "Biceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Cross-Body Hammer Curl",
+      "workoutType": "arms",
+      "primaryMuscle": "Biceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Machine Bicep Curl",
+      "workoutType": "arms",
+      "primaryMuscle": "Biceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Single-Arm Cable Curl",
+      "workoutType": "arms",
+      "primaryMuscle": "Biceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Drag Curl",
+      "workoutType": "arms",
+      "primaryMuscle": "Biceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Zottman Curl",
+      "workoutType": "arms",
+      "primaryMuscle": "Biceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Rope Triceps Pushdown",
+      "workoutType": "arms",
+      "primaryMuscle": "Triceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Overhead Cable Triceps Extension",
+      "workoutType": "arms",
+      "primaryMuscle": "Triceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Single-Arm Cable Triceps Pushdown",
+      "workoutType": "arms",
+      "primaryMuscle": "Triceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Single-Arm Overhead Cable Extension",
+      "workoutType": "arms",
+      "primaryMuscle": "Triceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Dumbbell Overhead Triceps Extension",
+      "workoutType": "arms",
+      "primaryMuscle": "Triceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Triceps Kickback",
+      "workoutType": "arms",
+      "primaryMuscle": "Triceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Cable Triceps Kickback",
+      "workoutType": "arms",
+      "primaryMuscle": "Triceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "JM Press",
+      "workoutType": "arms",
+      "primaryMuscle": "Triceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Reverse-Grip Triceps Pushdown",
+      "workoutType": "arms",
+      "primaryMuscle": "Triceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Assisted Dip",
+      "workoutType": "arms",
+      "primaryMuscle": "Triceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Machine Dip",
+      "workoutType": "arms",
+      "primaryMuscle": "Triceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Squats",
+      "workoutType": "legs",
+      "primaryMuscle": "Quads",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Leg Press",
+      "workoutType": "legs",
+      "primaryMuscle": "Quads",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Romanian Deadlift",
+      "workoutType": "legs",
+      "primaryMuscle": "Hamstrings",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Lunges",
+      "workoutType": "legs",
+      "primaryMuscle": "Quads, Glutes",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Leg Curl",
+      "workoutType": "legs",
+      "primaryMuscle": "Hamstrings",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Leg Extension",
+      "workoutType": "legs",
+      "primaryMuscle": "Quads",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Calf Raises",
+      "workoutType": "legs",
+      "primaryMuscle": "Calves",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Hip Thrusts",
+      "workoutType": "legs",
+      "primaryMuscle": "Glutes",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Front Squat",
+      "workoutType": "legs",
+      "primaryMuscle": "Quads",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Bulgarian Split Squat",
+      "workoutType": "legs",
+      "primaryMuscle": "Quads, Glutes",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Hack Squat",
+      "workoutType": "legs",
+      "primaryMuscle": "Legs",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Goblet Squat",
+      "workoutType": "legs",
+      "primaryMuscle": "Legs",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Smith Machine Squat",
+      "workoutType": "legs",
+      "primaryMuscle": "Legs",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Sumo Deadlift",
+      "workoutType": "legs",
+      "primaryMuscle": "Legs",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Good Morning",
+      "workoutType": "legs",
+      "primaryMuscle": "Legs",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Step-Up",
+      "workoutType": "legs",
+      "primaryMuscle": "Legs",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Reverse Lunge",
+      "workoutType": "legs",
+      "primaryMuscle": "Legs",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Walking Dumbbell Lunge",
+      "workoutType": "legs",
+      "primaryMuscle": "Legs",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Seated Leg Curl",
+      "workoutType": "legs",
+      "primaryMuscle": "Legs",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Lying Leg Curl",
+      "workoutType": "legs",
+      "primaryMuscle": "Legs",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Nordic Hamstring Curl",
+      "workoutType": "legs",
+      "primaryMuscle": "Legs",
+      "loadType": "bodyweight",
+      "metric": "reps"
+    },
+    {
+      "name": "Single-Leg Curl",
+      "workoutType": "legs",
+      "primaryMuscle": "Legs",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Adductor Machine",
+      "workoutType": "legs",
+      "primaryMuscle": "Legs",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Abductor Machine",
+      "workoutType": "legs",
+      "primaryMuscle": "Legs",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Seated Calf Raise",
+      "workoutType": "legs",
+      "primaryMuscle": "Legs",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Standing Calf Raise",
+      "workoutType": "legs",
+      "primaryMuscle": "Legs",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Donkey Calf Raise",
+      "workoutType": "legs",
+      "primaryMuscle": "Legs",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Glute Bridge",
+      "workoutType": "legs",
+      "primaryMuscle": "Legs",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Cable Pull-Through",
+      "workoutType": "legs",
+      "primaryMuscle": "Legs",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Belt Squat",
+      "workoutType": "legs",
+      "primaryMuscle": "Legs",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Pendulum Squat",
+      "workoutType": "legs",
+      "primaryMuscle": "Legs",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Single-Leg Press",
+      "workoutType": "legs",
+      "primaryMuscle": "Legs",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Plank",
+      "workoutType": "core",
+      "primaryMuscle": "Abs / Core Stability",
+      "loadType": "bodyweight",
+      "metric": "duration"
+    },
+    {
+      "name": "Crunches",
+      "workoutType": "core",
+      "primaryMuscle": "Abs",
+      "loadType": "bodyweight",
+      "metric": "reps"
+    },
+    {
+      "name": "Cable Crunch",
+      "workoutType": "core",
+      "primaryMuscle": "Abs",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Hanging Leg Raise",
+      "workoutType": "core",
+      "primaryMuscle": "Abs",
+      "loadType": "bodyweight",
+      "metric": "reps"
+    },
+    {
+      "name": "Leg Raises",
+      "workoutType": "core",
+      "primaryMuscle": "Lower Abs",
+      "loadType": "bodyweight",
+      "metric": "reps"
+    },
+    {
+      "name": "Russian Twists",
+      "workoutType": "core",
+      "primaryMuscle": "Obliques",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Ab Wheel Rollout",
+      "workoutType": "core",
+      "primaryMuscle": "Abs",
+      "loadType": "bodyweight",
+      "metric": "reps"
+    },
+    {
+      "name": "Mountain Climbers",
+      "workoutType": "core",
+      "primaryMuscle": "Abs",
+      "loadType": "bodyweight",
+      "metric": "reps"
+    },
+    {
+      "name": "Side Plank",
+      "workoutType": "core",
+      "primaryMuscle": "Obliques",
+      "loadType": "bodyweight",
+      "metric": "duration"
+    },
+    {
+      "name": "Cable Woodchopper",
+      "workoutType": "core",
+      "primaryMuscle": "Obliques",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Hanging Knee Raise",
+      "workoutType": "core",
+      "primaryMuscle": "Core",
+      "loadType": "bodyweight",
+      "metric": "reps"
+    },
+    {
+      "name": "Reverse Crunch",
+      "workoutType": "core",
+      "primaryMuscle": "Core",
+      "loadType": "bodyweight",
+      "metric": "reps"
+    },
+    {
+      "name": "Bicycle Crunch",
+      "workoutType": "core",
+      "primaryMuscle": "Core",
+      "loadType": "bodyweight",
+      "metric": "reps"
+    },
+    {
+      "name": "Dead Bug",
+      "workoutType": "core",
+      "primaryMuscle": "Core",
+      "loadType": "bodyweight",
+      "metric": "reps"
+    },
+    {
+      "name": "Pallof Press",
+      "workoutType": "core",
+      "primaryMuscle": "Core",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "V-Ups",
+      "workoutType": "core",
+      "primaryMuscle": "Core",
+      "loadType": "bodyweight",
+      "metric": "reps"
+    },
+    {
+      "name": "Hollow Body Hold",
+      "workoutType": "core",
+      "primaryMuscle": "Core",
+      "loadType": "bodyweight",
+      "metric": "duration"
+    },
+    {
+      "name": "Decline Crunch",
+      "workoutType": "core",
+      "primaryMuscle": "Core",
+      "loadType": "bodyweight",
+      "metric": "reps"
+    },
+    {
+      "name": "Ab Crunch Machine",
+      "workoutType": "core",
+      "primaryMuscle": "Core",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Toe Touches",
+      "workoutType": "core",
+      "primaryMuscle": "Core",
+      "loadType": "bodyweight",
+      "metric": "reps"
+    },
+    {
+      "name": "Kneeling Cable Crunch",
+      "workoutType": "core",
+      "primaryMuscle": "Core",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Weighted Sit-Up",
+      "workoutType": "core",
+      "primaryMuscle": "Core",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Bird Dog",
+      "workoutType": "core",
+      "primaryMuscle": "Core",
+      "loadType": "bodyweight",
+      "metric": "reps"
+    },
+    {
+      "name": "Suitcase Carry",
+      "workoutType": "core",
+      "primaryMuscle": "Core",
+      "loadType": "external_weight",
+      "metric": "duration"
+    },
+    {
+      "name": "Farmer Carry",
+      "workoutType": "core",
+      "primaryMuscle": "Core",
+      "loadType": "external_weight",
+      "metric": "duration"
+    },
+    {
+      "name": "Back Squat",
+      "workoutType": "legs",
+      "primaryMuscle": "Quads, Glutes",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Barbell Curl",
+      "workoutType": "arms",
+      "primaryMuscle": "Biceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Walking Lunge",
+      "workoutType": "legs",
+      "primaryMuscle": "Quads, Glutes",
+      "loadType": "external_weight",
+      "metric": "reps"
+    },
+    {
+      "name": "Overhead Triceps Extension",
+      "workoutType": "arms",
+      "primaryMuscle": "Triceps",
+      "loadType": "external_weight",
+      "metric": "reps"
+    }
+  ],
+  "aliases": [
+    {
+      "alias": "Squat",
+      "name": "Squats",
+      "source": "stack_template"
+    },
+    {
+      "alias": "Pull-Up",
+      "name": "Pull-ups",
+      "source": "stack_template"
+    },
+    {
+      "alias": "Barbell Bench Press",
+      "name": "Bench Press",
+      "source": "stack_template"
+    },
+    {
+      "alias": "Dips",
+      "name": "Chest Dips",
+      "source": "stack_template"
+    },
+    {
+      "alias": "Lateral Raise",
+      "name": "Lateral Raises",
+      "source": "stack_template"
+    },
+    {
+      "alias": "Barbell Row",
+      "name": "Barbell Rows",
+      "source": "stack_template"
+    },
+    {
+      "alias": "Face Pull",
+      "name": "Face Pulls",
+      "source": "stack_template"
+    },
+    {
+      "alias": "Calf Raise",
+      "name": "Calf Raises",
+      "source": "stack_template"
+    },
+    {
+      "alias": "Biceps Curl",
+      "name": "Bicep Curls",
+      "source": "stack_template"
+    },
+    {
+      "alias": "Hip Thrust",
+      "name": "Hip Thrusts",
+      "source": "stack_template"
+    },
+    {
+      "alias": "Triceps Pushdown",
+      "name": "Tricep Pushdown",
+      "source": "stack_template"
+    },
+    {
+      "alias": "Incline Barbell Press",
+      "name": "Incline Bench Press",
+      "source": "stack_template"
+    },
+    {
+      "alias": "Hammer Curl",
+      "name": "Hammer Curls",
+      "source": "stack_template"
+    },
+    {
+      "alias": "Barbell Bicep Curl",
+      "name": "Bicep Curls",
+      "source": "exercise_info"
+    },
+    {
+      "alias": "Barbell Hip Thrust",
+      "name": "Hip Thrusts",
+      "source": "exercise_info"
+    },
+    {
+      "alias": "Barbell Squat",
+      "name": "Squats",
+      "source": "exercise_info"
+    },
+    {
+      "alias": "Bench-Supported Tricep Dip",
+      "name": "Tricep Dips",
+      "source": "exercise_info"
+    },
+    {
+      "alias": "Cable Chest Fly",
+      "name": "Cable Fly",
+      "source": "exercise_info"
+    },
+    {
+      "alias": "Cable Overhead Triceps Extension",
+      "name": "Overhead Cable Triceps Extension",
+      "source": "exercise_info"
+    },
+    {
+      "alias": "Decline Bench Press",
+      "name": "Decline Press",
+      "source": "exercise_info"
+    },
+    {
+      "alias": "Dumbbell Lateral Raise",
+      "name": "Lateral Raises",
+      "source": "exercise_info"
+    },
+    {
+      "alias": "Pec Deck Fly",
+      "name": "Pec Deck",
+      "source": "exercise_info"
+    }
+  ]
+}

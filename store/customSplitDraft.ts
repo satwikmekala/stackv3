@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { DayColor } from '@/features/custom-split/colors';
+import type { ImportedDraftWorkout, PendingImportExercise } from '@/features/routineImport/importDraft';
 
 import type { Archetype } from '@/constants/archetypes';
 import type { CustomSplit } from '@/store/customSplits';
@@ -52,6 +53,11 @@ export interface DraftWorkout {
   exercises: DraftExercise[];
   selectedMuscleGroups: CustomSplitMuscleGroup[];
   prefillEnabled: boolean;
+  /**
+   * Pasted exercises Stack wasn't sure about. Each must be confirmed (it then
+   * joins `exercises`) or removed before the routine can be saved.
+   */
+  pendingImports?: PendingImportExercise[];
 }
 
 export interface DraftCustomSplit {
@@ -83,8 +89,9 @@ interface CustomSplitDraftStore {
   setWorkoutColor: (id: string, color: DayColor | null) => void;
   reorderWorkout: (from: number, to: number) => void;
   restoreExercise: (id: string, exercise: DraftExercise, position: number) => void;
-  picker: { workoutId: string; query: string; group: CustomSplitMuscleGroup | null; selected: DraftExercise[] } | null;
-  openPicker: (workoutId: string) => void;
+  /** `pendingKey`: the picker is choosing the exercise for a pasted exercise Stack wasn't sure about. */
+  picker: { workoutId: string; query: string; group: CustomSplitMuscleGroup | null; selected: DraftExercise[]; pendingKey?: string } | null;
+  openPicker: (workoutId: string, options?: { pendingKey?: string; query?: string }) => void;
   updatePicker: (update: Partial<NonNullable<CustomSplitDraftStore['picker']>>) => void;
   closePicker: () => void;
   draft: DraftCustomSplit | null;
@@ -102,6 +109,10 @@ interface CustomSplitDraftStore {
   initializeStackPlanDraft: (workouts: { name: string; exercises: DraftExercise[] }[]) => void;
   /** A newly generated Stack's plan makes unfinished edits of the old one obsolete. */
   discardStackPlanDrafts: () => void;
+  /** Starts a new routine from a pasted routine. Replaces any open new-routine draft: the paste is the newer intent. */
+  initializeImportedDraft: (name: string, workouts: ImportedDraftWorkout[], source: CustomSplitSource) => void;
+  /** Confirms a pending pasted exercise as `exercise`, or removes it when `exercise` is null. */
+  resolvePendingImport: (workoutId: string, key: string, exercise: DraftExercise | null) => void;
   discardDraft: () => void;
   setSplitName: (name: string) => void;
   selectWorkout: (workoutId: string) => void;
@@ -213,6 +224,9 @@ export const getDerivedWorkoutName = (workout: DraftWorkout): string => {
   return groups.join(', ');
 };
 
+export const countPendingImports = (draft: DraftCustomSplit | null | undefined): number =>
+  draft?.workouts.reduce((total, workout) => total + (workout.pendingImports?.length ?? 0), 0) ?? 0;
+
 export const getWorkoutDisplayName = (workout: DraftWorkout): string =>
   workout.customName.trim() || getDerivedWorkoutName(workout);
 
@@ -306,7 +320,8 @@ export const useCustomSplitDraftStore = create<CustomSplitDraftStore>()(persist(
   setHydrated: () => rawSet({ hydrated: true, storageError: null }),
   sourceRevision: null,
   picker: null,
-  openPicker: (workoutId) => set({ picker: { workoutId, query: '', group: null, selected: [] } }),
+  openPicker: (workoutId, options) => set({ picker: { workoutId, query: options?.query ?? '', group: null, selected: [],
+    ...(options?.pendingKey ? { pendingKey: options.pendingKey } : {}) } }),
   updatePicker: (update) => set(state => ({ picker: state.picker ? { ...state.picker, ...update } : null })),
   closePicker: () => set({ picker: null }),
   resumeDraft: (id, source) => {
@@ -380,6 +395,51 @@ export const useCustomSplitDraftStore = create<CustomSplitDraftStore>()(persist(
         sourceRevision: null,
       };
     }),
+
+  initializeImportedDraft: (name, importedWorkouts, source) =>
+    set(() => {
+      if (!importedWorkouts.length) return {};
+      const workouts = importedWorkouts.map(({ name: workoutName, exercises, pending }): DraftWorkout => ({
+        ...createEmptyWorkout(),
+        customName: workoutName,
+        exercises: exercises.map((exercise) => ({ ...exercise })),
+        selectedMuscleGroups: exercises.map(getMuscleGroupForExercise)
+          .filter((group, index, groups) => groups.indexOf(group) === index),
+        ...(pending.length ? { pendingImports: pending.map((item) => ({ ...item })) } : {}),
+      }));
+      return {
+        draft: { name, workouts },
+        activeWorkoutId: workouts[0].id,
+        source,
+        editingSplitId: null,
+        sourceRevision: null,
+        picker: null,
+      };
+    }),
+
+  resolvePendingImport: (workoutId, key, exercise) =>
+    set((state) => ({
+      draft: updateWorkout(state.draft, workoutId, (workout) => {
+        const pending = workout.pendingImports?.find((item) => item.key === key);
+        if (!pending) return workout;
+        const pendingImports = workout.pendingImports!.filter((item) => item.key !== key);
+        const rest = pendingImports.length ? { pendingImports } : { pendingImports: undefined };
+        // Confirming an exercise the workout already has just clears the question.
+        if (!exercise || workout.exercises.some((item) => item.id === exercise.id)) return { ...workout, ...rest };
+        // Back where it was pasted: after the exercises that came before it.
+        const exercises = [...workout.exercises];
+        exercises.splice(Math.min(pending.position, exercises.length), 0, { ...exercise });
+        const group = getMuscleGroupForExercise(exercise);
+        return {
+          ...workout,
+          ...rest,
+          exercises,
+          selectedMuscleGroups: workout.selectedMuscleGroups.includes(group)
+            ? workout.selectedMuscleGroups
+            : [...workout.selectedMuscleGroups, group],
+        };
+      }),
+    })),
 
   discardStackPlanDrafts: () => rawSet(state => ({
     drafts: Object.fromEntries(Object.entries(state.drafts).filter(([, snapshot]) => snapshot.source !== 'stack')),
@@ -476,6 +536,7 @@ export const useCustomSplitDraftStore = create<CustomSplitDraftStore>()(persist(
         // persistent row when the edit is saved.
         persistedWorkoutId: undefined,
         exercises: source.exercises.map((exercise) => ({ ...exercise })),
+        pendingImports: source.pendingImports?.map((item) => ({ ...item })),
         selectedMuscleGroups: [...source.selectedMuscleGroups],
       };
       const workouts = [...state.draft.workouts];

@@ -1,0 +1,17 @@
+{
+  "name": "stack-routine-import",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Stack backend for Paste my routine: pasted text → Stack-ready routine. Parses only; never saves.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node --test test/*.test.mjs",
+    "sync": "node scripts/sync-stack.mjs",
+    "sync:check": "node scripts/sync-stack.mjs --check",
+    "eval": "node eval/run-eval.mjs"
+  }
+}

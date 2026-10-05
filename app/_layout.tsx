@@ -48,7 +48,8 @@ export default function RootLayout() {
   // A received link can be previewed and saved before first-run setup. Keep
   // its payload on this route instead of losing it to the onboarding redirect.
   const inSplitImport = pathname === '/import-split';
-  const inHevyImport = pathname === '/bring-workouts' || pathname === '/hevy-import' || pathname === '/hevy-file-import';
+  const inHevyImport = pathname === '/bring-workouts' || pathname === '/hevy-import' || pathname === '/hevy-file-import' ||
+    pathname === '/paste-routine';
   const inOnboardingPreview = ONBOARDING_PREVIEW_ENABLED &&
     (pathname === '/onboarding-preview' || pathname.startsWith('/onboarding-preview/') ||
       pathname === '/program-setup' || pathname.startsWith('/program-setup/'));

@@ -40,10 +40,10 @@ export default function BringWorkouts() {
           style={({ pressed }) => [ui.card, pressed && ui.pressed]}>
           <Text style={ui.subtitle}>Import from Hevy</Text><Text style={ui.body}>Bring your routines and workout history into Stack.</Text>
         </Pressable>
-        <View accessibilityLabel="Paste my routine. Coming soon." style={[ui.card, { opacity: 0.65 }]}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Paste my routine" onPress={() => router.push('/paste-routine')}
+          style={({ pressed }) => [ui.card, pressed && ui.pressed]}>
           <Text style={ui.subtitle}>Paste my routine</Text><Text style={ui.body}>Paste what you already train.</Text>
-          <Text style={ui.label}>Coming soon</Text>
-        </View>
+        </Pressable>
       </>}
       {error ? <Text accessibilityRole="alert" style={ui.error}>{error}</Text> : null}
     </ScrollView>
