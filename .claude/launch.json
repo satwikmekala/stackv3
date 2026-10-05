@@ -4,8 +4,52 @@
     {
       "name": "expo-web",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["expo", "start", "--web", "--port", "8090"],
+      "runtimeArgs": [
+        "expo",
+        "start",
+        "--web",
+        "--port",
+        "8090"
+      ],
       "port": 8090,
+      "autoPort": false
+    },
+    {
+      "name": "expo-ios-metro",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "expo",
+        "start",
+        "--port",
+        "8081"
+      ],
+      "port": 8081,
+      "autoPort": false
+    },
+    {
+      "name": "stack-film-studio",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "film",
+        "run",
+        "studio",
+        "--",
+        "--port",
+        "3003",
+        "--no-open"
+      ],
+      "port": 3003,
+      "autoPort": false
+    },
+    {
+      "name": "onboarding-preview",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "onboarding:preview"
+      ],
+      "port": 8087,
       "autoPort": false
     }
   ]

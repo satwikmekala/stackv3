@@ -21,7 +21,7 @@ changed.
 | JS | `jsRuntimeLockWait`, `jsRuntimeCold`/`jsRuntimeWarm`, `jsContextCreate`, `jsBundleRead`/`jsBundleCached`, `jsBundleEvaluate`, `jsLayoutFunctionEvaluate`/`jsLayoutFunctionCached`, `jsLayoutAndCallback`, `jsTotal` |
 | Optimistic state and journal | `currentPresentationDecode`, `optimisticMergeAndValidation`, `journalLockWaitEnqueue`, `journalFileRead`, `journalDecode`, `journalAppend`, `journalEncode`, `journalAtomicWrite`, `journalPersisted`, `optimisticStateEncode` |
 | First update and bridge | `activityUpdateOptimistic`, `optimisticUpdateReturned`, `nativeNotificationBegin`, `nativeNotificationPosted`, `nativeEventEmit`, `rnNotificationReceived`, `rnDrainInvoked`, `nativeCommandTake`, `commandRetrieved`, `rnCommandRetrieved` |
-| RN and authoritative update | `rnMutationBegin`, `rnMutationEnd`, `rnReconcileRequested`, `rnPresentationDeriveBegin`/`End`, `rnAuthoritativeNativeCallBegin`/`End`, `reconcileDecodeAndRevision`, `reconcilePendingCheck`, `reconcileAccepted`/`Skipped`, `activityUpdateAuthoritative` |
+| RN and authoritative update | `rnMutationBegin`, `rnMutationEnd`, `rnReconcileRequested`, `rnPresentationDeriveBegin`/`End`, `rnAuthoritativeNativeCallBegin`/`End`, `reconcileDecodeAndRevision`, `reconcilePendingCheck`, `reconcileAccepted`/`Skipped`, `activityUpdateAuthoritative`, `activityUpdateAuthoritativeSkipped` |
 
 `rnMutationBegin` to `rnMutationEnd` includes SQLite and Zustand together. These
 are not separately instrumented because Slice 2 owns the store/database files.
@@ -102,3 +102,148 @@ The first visible number uses `contentTransition('numericText')` with
 update pulse. The code does not set an explicit transition duration. Record
 screen video if perceived motion matters, but report that separately from the
 signpost interval timings.
+
+## Responsiveness optimization — 2026-10-02
+
+**Physical performance acceptance remains incomplete.** Both paired phones
+(Satwik's iPhone 14 Pro and Shashank's iPhone 17 Pro Max) were reported
+`unavailable` by `xcrun devicectl list devices`. No physical before/after traces,
+pixel timings, cold-host measurements, or Lock Screen timeout results exist for
+this change. Test harness runtimes are not substitutes for those measurements.
+
+Baseline: local `0dca599`, containing the existing latency profiler, one commit
+ahead of fetched `origin/main` (`1f6483b`). Existing unrelated working-tree edits
+were preserved. Baseline checks: 357 JS tests and all three native harnesses
+passed.
+
+### Findings and scope
+
+Code inspection confirmed that every accepted authoritative reconciliation
+called `Activity.update`, even if the preceding optimistic update had already
+published identical content. This is proven redundant work, **not a measured
+explanation of the reported delay**. The old revision check also read only
+`_stackRevision`; replacing the cache with an authoritative snapshot erased
+that floor because the snapshot carries `acknowledgedRevision` instead.
+
+The patch now uses the maximum of those revision fields, including when a new
+actor reads ActivityKit content after restart. After checking pending commands
+and revision freshness, it skips the authoritative ActivityKit call only if:
+
+- All payload fields except the two top-level revision fields match. This
+  includes action targets, enabled controls, canonical values, units, increments,
+  and next-set previews, not merely the displayed number.
+- `staleDate` is unchanged.
+- ActivityKit content already carries a revision at least as new as the incoming
+  acknowledgement. A newer watermark still requires a write so it is not left
+  only in the actor's memory.
+
+The host acknowledgement still updates the in-memory snapshot. The optimistic
+content's `_stackRevision` remains the recovery barrier after a skipped write.
+The new `activityUpdateAuthoritativeSkipped` marker records this outcome; all
+existing profiler intervals and markers remain. A completed trace without a
+second update must be interpreted using this marker, not as a missing span.
+
+### Interaction pipeline
+
+Tap → serial executor → cached JavaScriptCore callback/layout evaluation →
+serialization validation → durable atomic command journal → optimistic
+`Activity.update` → host notification → ordered RN command drain → synchronous
+SQLite/Zustand mutation → guarded authoritative reconciliation → either skip
+identical content or update changed presentation/controls/acknowledgement.
+
+The optimistic response still precedes the RN mutation. Journal-before-display
+and one-command-at-a-time consumption are unchanged. The existing narrow
+consume-before-SQLite-commit crash window remains; this change does not claim
+exactly-once delivery. Batched destructive draining would widen that window and
+has not been introduced.
+
+The serial queue preserves accepted tap order. For 5/10 taps, callbacks see the
+latest accumulated value and each accepted command is journaled before its
+optimistic update. Matching final acknowledgements no longer add a second
+ActivityKit call. This does **not** establish press priority over changed
+reconciliations or eliminate waiting behind an in-flight ActivityKit update.
+
+Done still immediately displays its existing next-set/pending feedback. Its
+authoritative update restores controls and the next preview, so it is necessary
+even when the visible number happens to match. Rejected actions still restore
+the authoritative presentation.
+
+Without physical profiling evidence, queue-priority redesign, native arithmetic,
+prewarming, storage redesign, batch draining and numeric animation tuning remain
+deferred as requested. No quantitative speedup or cold/warm difference is claimed.
+
+### Physical before/after worksheet
+
+| Scenario | Before | After |
+| --- | --- | --- |
+| Warm weight + / − | Not measured | Not measured |
+| Cold weight + | Not measured | Not measured |
+| Warm reps/time + | Not measured | Not measured |
+| Five rapid taps, final response | Not measured | Not measured |
+| Ten rapid taps, final response | Not measured | Not measured |
+| Done | Not measured | Not measured |
+
+Use the procedure above on both revisions with the same device, configuration,
+workout and cadence. Capture each tap's queue wait, JS evaluation, journal I/O,
+optimistic update, RN mutation, reconcile, second update or skip marker, and
+intent-to-completion time. Save video separately for perceived response.
+
+### Lock Screen awake test — pending
+
+Run baseline (no taps), then taps every approximately 1, 3 and 5 seconds. Repeat
+with Always-On enabled and disabled. Record separately the time until fully
+illuminated → Always-On dimmed and display off; use “not observed” for a state
+that never occurs. Control brightness, Low Power Mode and phone orientation,
+and do not touch the screen outside the Live Activity controls during a run.
+
+No observation yet establishes whether these taps reset the system's timeout.
+Lock Screen illumination policy belongs to iOS; Stack has no supported Lock
+Screen keep-awake control in this implementation. Apple's
+[idle-timer property](https://developer.apple.com/documentation/uikit/uiapplication/isidletimerdisabled)
+controls the app's idle timer and is not a documented Live Activity keep-awake
+API. Do not interpret it as a solution for the locked system UI. No private API,
+fake audio or background keep-alive workaround was added.
+
+### Changed files and automated validation
+
+- `patches/expo-widgets+57.0.20.patch`: production native revision floor and
+  conservative identical-content skip, plus the new profiling marker. The
+  installed `node_modules/expo-widgets/ios/Widgets/AppIntent.swift` is updated to
+  match. A native rebuild is required.
+- `tests/native/live-activity-ordering/TestSupport.swift`: 28 burst cases with
+  5/10 taps, kg/lb, reps and duration; identical-update counts; warm/restarted
+  revision barriers; newer watermark persistence; stale-date and behavioral
+  changes; stale exercise targets; Done control restoration.
+- `tests/workoutPersistence.test.cjs`: 12 real Expo callback/store/SQLite burst
+  cases comparing the complete optimistic and authoritative payloads, plus two
+  5/10-tap stale-queue cases after dynamic append and focus change.
+- This document: findings, protocol, measurements still needed and device test
+  procedure.
+
+The native runtime and ordering harnesses use the actual Expo/JavaScriptCore
+callbacks and production actor. ActivityKit itself is mocked for ordering tests.
+The durable inbox harness still covers restart recovery, 1,000 concurrent
+enqueues, unique IDs, per-command consumption and corrupt-storage rejection.
+
+Final checks on the current shared workspace:
+
+| Check | Result |
+| --- | --- |
+| `node --test tests/*.test.cjs` | 398 passed, 0 failed |
+| `node tests/runLiveActivityNativeTests.cjs` | 3 harnesses passed, 0 failed; includes 28 new native burst cases |
+| `npm run typecheck` | Passed |
+| `npx eslint tests/workoutPersistence.test.cjs` | Passed |
+| `git apply --reverse --check patches/expo-widgets+57.0.20.patch` | Passed; installed source matches persisted patch |
+| `git diff --check` | Passed |
+| Debug simulator build, Stack workspace/scheme, app and widget extension | BUILD SUCCEEDED |
+| Physical latency and Lock Screen/AOD tests | Not run: devices unavailable |
+
+The JS suite includes other ongoing workspace work; this task adds 14 JS tests.
+Build command: `xcodebuild -workspace ios/Stack.xcworkspace -scheme Stack
+-configuration Debug -destination 'platform=iOS Simulator,id=9854DE6F-4C15-4A60-9494-18649B4BF7DA'
+CODE_SIGNING_ALLOWED=NO build`. This establishes native compilation, not a signed
+device installation or physical rendering performance.
+
+Git: changes are uncommitted on `main` (already one commit ahead of origin at
+start). Only the four listed tracked files were edited for this task. Unrelated
+sharing, configuration and film changes remain in the shared workspace.
