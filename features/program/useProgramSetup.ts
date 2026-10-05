@@ -116,7 +116,7 @@ export function useProgramSetup(step: 'frequency' | 'program-preview') {
       if (focused.current) router.dismissTo({ pathname: '/program-setup', params: { source } });
     } else if (context === 'onboarding') {
       await save({ step: 'starting-point' });
-      if (focused.current) router.dismissTo('/onboarding-preview/starting-point');
+      if (focused.current) router.dismissTo('/(onboarding)/starting-point');
     } else { await clear(); finish(); }
   });
   const useWorkouts = () => {

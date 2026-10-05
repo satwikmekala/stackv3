@@ -184,6 +184,8 @@ export interface UserProfile extends ProgramPreferences {
   programWeeklyGoal?: number;
   experienceLevel: ExperienceLevel;
   trainingDays: number[];
+  remindersEnabled: boolean;
+  reminderTime: string;
   onboardingCompleted: boolean;
   autoIncreaseWeight: boolean;
   weightIncrement: number;
@@ -199,7 +201,7 @@ type UserProfileInput = Omit<UserProfile, keyof ProgramPreferences> & Partial<Pr
 /** Inactive automatic defaults are preferences, never a program acceptance. */
 export const createNoProgramProfile = (): UserProfile => ({
   name: '', weeklyGoal: 0, programWeeklyGoal: 3, experienceLevel: 'intermediate',
-  trainingDays: [], onboardingCompleted: false, autoIncreaseWeight: false,
+  trainingDays: [], remindersEnabled: false, reminderTime: '18:00', onboardingCompleted: false, autoIncreaseWeight: false,
   weightIncrement: 0.5, weightUnit: 'kg', weightIncrementLbs: 5,
   activeSplitId: null, programMode: 'none', threeDayStructure: 'full-body',
   weightUnitConfirmed: false,
@@ -238,6 +240,8 @@ interface WorkoutStore {
   addExerciseNote: (workoutId: string, exerciseId: number, text: string) => void;
   deleteExerciseNote: (exerciseId: number, noteId: number) => void;
   setProfile: (profile: UserProfileInput) => void;
+  prepareTrainingOnboarding: (name: string, frequency: number, experience: ExperienceLevel) => UserProfile;
+  completeTrainingOnboarding: () => UserProfile;
   completeNoProgramOnboarding: (name?: string, weightUnit?: 'kg' | 'lbs') => UserProfile;
   confirmWorkoutWeightUnit: (unit: 'kg' | 'lbs') => UserProfile;
   acceptStackProgram: (frequency: number, structure: ThreeDayStructure, context: 'onboarding' | 'configuration', name?: string) => UserProfile;
@@ -388,6 +392,8 @@ const normalizeProfile = (profile: UserProfileInput): UserProfile => ({
   programWeeklyGoal: getProgramFrequency(profile),
   experienceLevel: profile.experienceLevel,
   trainingDays: profile.trainingDays,
+  remindersEnabled: profile.remindersEnabled ?? false,
+  reminderTime: profile.reminderTime ?? '18:00',
   onboardingCompleted: profile.onboardingCompleted,
   autoIncreaseWeight: profile.autoIncreaseWeight,
   weightIncrement: profile.weightIncrement,
@@ -621,6 +627,31 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
     writeProfile(nextProfile);
     set({ profile: nextProfile });
   }),
+
+  // The original flow previews Stack's plan before choosing Stack or Custom.
+  // Propagate write failures so Continue never navigates with an unsaved profile.
+  prepareTrainingOnboarding: (name, frequency, experience) => {
+    const existing = get().profile;
+    if (existing?.onboardingCompleted) return existing;
+    const structure = experience === 'beginner' ? 'full-body' : 'push-pull-legs';
+    validateProgram(frequency, structure);
+    const profile: UserProfile = { ...createNoProgramProfile(), name: name.trim(),
+      weeklyGoal: frequency, programWeeklyGoal: frequency, experienceLevel: experience,
+      threeDayStructure: structure, programMode: 'stack', weightUnitConfirmed: true };
+    writeProfile(profile);
+    set({ profile });
+    return profile;
+  },
+
+  completeTrainingOnboarding: () => {
+    const existing = get().profile;
+    if (!existing) throw Error('Finish your training setup first.');
+    if (existing.onboardingCompleted) return existing;
+    const profile: UserProfile = { ...existing, programMode: 'stack', activeSplitId: null, onboardingCompleted: true };
+    writeProfile(profile);
+    set({ profile });
+    return profile;
+  },
 
   // This acceptance boundary intentionally propagates failures to the setup
   // screen. Publish completion only after the single profile upsert commits.

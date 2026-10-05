@@ -37,6 +37,8 @@ import Animated, {
 } from 'react-native-reanimated';
 import * as Haptics from '@/services/haptics';
 import { ActiveSetCard } from '@/components/ActiveSetCard';
+import { ExerciseActionPill } from '@/components/ExerciseActionPill';
+import { ExerciseHistory } from '@/components/ExerciseHistory';
 import { ExerciseNotes } from '@/components/ExerciseNotes';
 import { ExerciseInfo } from '@/components/ExerciseInfo';
 import {
@@ -72,7 +74,6 @@ import { formatWeight, getWeightIncrement, type WeightUnit } from '@/store/weigh
 import { WORKOUT_SCREEN_HORIZONTAL_PADDING } from '@/constants/workoutPicker';
 import { getActiveSetIndex, getCurrentWorkoutExerciseIndex } from '@/utils/workoutResume';
 import { getNextIncompleteExerciseIndex, isExerciseComplete } from '@/store/workoutSetActions';
-import { getSetProgressionSuggestion } from '@/store/workoutProgression';
 import {
   getAddSetBase,
   getLastTimeComparison,
@@ -86,9 +87,9 @@ import '@/global.css';
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
 const FEEDBACK_LEVELS = [
-  { value: 0, label: 'TOO EASY' },
-  { value: 0.5, label: 'JUST RIGHT' },
-  { value: 1, label: 'TOO HARD' },
+  { value: 0, label: 'Too easy' },
+  { value: 0.5, label: 'Just right' },
+  { value: 1, label: 'Too hard' },
 ] as const;
 
 // Motion is deliberately short and directional: forward actions arrive from
@@ -128,6 +129,7 @@ function ExerciseInfoButton({ onPress }: { onPress: () => void }) {
       style={{
         width: 44,
         height: 44,
+        flexShrink: 0,
         marginLeft: 8,
         borderRadius: 22,
         overflow: 'hidden',
@@ -410,6 +412,7 @@ export default function Workout() {
   const setExerciseIndex = useWorkoutStore((state) => state.setWorkoutExerciseIndex);
   const exerciseIndex = currentSession ? getCurrentWorkoutExerciseIndex(currentSession, workoutFocus) : 0;
   const [showSwapSheet, setShowSwapSheet] = useState(false);
+  const [addExerciseOnly, setAddExerciseOnly] = useState(false);
   const [showUpNextSheet, setShowUpNextSheet] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const activityFeedbackVisible = Boolean(currentSession && currentSession.origin !== 'adhoc' && finishFromActivity === currentSession.id &&
@@ -709,21 +712,6 @@ export default function Workout() {
     const percentage = Math.round(((activeSet.reps - previousReps) / previousReps) * 100);
     return `${percentage >= 0 ? '+' : ''}${percentage}%`;
   })();
-  // Derived only: the set keeps last time's weight until the user accepts.
-  const progressionSuggestion = inspectingSet
-    ? null
-    : getSetProgressionSuggestion(sessions, exercise, setIndex, profile);
-  const suggestionCard = progressionSuggestion ? {
-    label: `Last ${formatWeight(progressionSuggestion.baselineKg, weightUnit)} · Try ${formatWeight(progressionSuggestion.suggestedKg, weightUnit)}`,
-    accessibilityLabel: `Last time ${formatWeight(progressionSuggestion.baselineKg, weightUnit)} ${weightUnit}. Use suggested ${formatWeight(progressionSuggestion.suggestedKg, weightUnit)} ${weightUnit}`,
-    onAccept: () => {
-      // Same validated absolute edit as typing the value; it becomes a user value.
-      if (editTarget && !editTarget.completed &&
-          useWorkoutStore.getState().currentSession?.exercises[exerciseIndex]?.entryUnit === weightUnit) {
-        applySetValueAction(editTarget, 'setWeight', progressionSuggestion.suggestedKg);
-      }
-    },
-  } : null;
   const stageKey = bonusSelection
     ? 'bonus'
     : exerciseComplete && !inspectingSet
@@ -763,7 +751,7 @@ export default function Workout() {
           flex: 1,
           paddingHorizontal: WORKOUT_SCREEN_HORIZONTAL_PADDING,
           paddingTop: 16,
-          paddingBottom: 20,
+          paddingBottom: 96,
         }}
       >
         <WorkoutLaunchSection>
@@ -784,7 +772,7 @@ export default function Workout() {
 
           <WorkoutHeaderActions
             addMode={currentSession.origin === 'adhoc'}
-            onChange={() => setShowSwapSheet(true)}
+            onChange={() => { setAddExerciseOnly(false); setShowSwapSheet(true); }}
             onMinimize={minimizeWorkout}
             onExit={confirmDiscardWorkout}
           />
@@ -824,12 +812,13 @@ export default function Workout() {
         >
           <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center' }}>
             <Text
-              numberOfLines={1}
+              numberOfLines={2}
               adjustsFontSizeToFit
-              minimumFontScale={0.72}
+              minimumFontScale={0.8}
               allowFontScaling={false}
               style={{
-                flexShrink: 1,
+                flex: 1,
+                minWidth: 0,
                 fontFamily: redesignFonts.display,
                 fontSize: 38,
                 lineHeight: 44,
@@ -839,7 +828,7 @@ export default function Workout() {
             >
               {displayExerciseName(exercise.name)}
             </Text>
-            {availableExerciseInfo ? <ExerciseInfoButton onPress={handleOpenExerciseInfo} /> : null}
+            {availableExerciseInfo && stageKey !== 'finisher' ? <ExerciseInfoButton onPress={handleOpenExerciseInfo} /> : null}
           </View>
           {exerciseComplete && !bonusSelection ? (
             // Status, not an action: no fill or glow that would read as a button.
@@ -873,7 +862,7 @@ export default function Workout() {
           entering={animateExercise ? exerciseEntering : undefined}
           exiting={EXERCISE_EXIT}
           style={{ flex: 1 }}
-          contentContainerStyle={{ paddingBottom: 72 }}
+          contentContainerStyle={{ paddingBottom: 16 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           directionalLockEnabled
@@ -958,7 +947,10 @@ export default function Workout() {
                   weightUnit={weightUnit}
                   loadType={exercise.loadType}
                   metric={exercise.metric}
-                  onAddAnother={currentSession.origin === 'adhoc' && !nextExercise ? () => setShowSwapSheet(true) : undefined}
+                  onAddAnother={!nextExercise ? () => {
+                    setAddExerciseOnly(true);
+                    setShowSwapSheet(true);
+                  } : undefined}
                   canFinish={currentSession.exercises.some((item) => item.sets.some((set) => set.completed && !set.skipped))}
                   onAdvance={handleAdvanceExercise}
                   onEditSet={(completedSetIndex) => {
@@ -1011,7 +1003,6 @@ export default function Workout() {
                       onWeightUnitChange={(unit) => { if (editTarget) setExerciseEntryUnit(editTarget, unit); }}
                       weightDeltaLabel={weightDeltaLabel}
                       repsDeltaLabel={repsDeltaLabel}
-                      suggestion={suggestionCard}
                       accent={accent}
                       onRepsChange={handleRepsChange}
                       onWeightChange={handleWeightChange}
@@ -1119,19 +1110,35 @@ export default function Workout() {
         </WorkoutLaunchSection>
       </View>
 
-      {exercise.exerciseId !== undefined ? (
-        <ExerciseNotes
-          key={`${currentSession.id}:${exercise.exerciseId}`}
+      <ExerciseActionPill>
+        <ExerciseHistory
+          key={`history:${currentSession.id}:${exercise.name}`}
           workoutId={currentSession.id}
-          exerciseId={exercise.exerciseId}
           exerciseName={exercise.name}
+          weightUnit={weightUnit}
+          accent={accent}
         />
-      ) : null}
+        {exercise.exerciseId !== undefined ? (
+          <ExerciseNotes
+            key={`${currentSession.id}:${exercise.exerciseId}`}
+            workoutId={currentSession.id}
+            exerciseId={exercise.exerciseId}
+            exerciseName={exercise.name}
+          />
+        ) : null}
+      </ExerciseActionPill>
 
       <SwapExerciseSheet
-        mode={currentSession.origin === 'adhoc' ? 'add' : 'manage'}
+        mode={addExerciseOnly || currentSession.origin === 'adhoc' ? 'add' : 'manage'}
         sessionId={currentSession.id}
-        onAdded={() => { setShowFeedbackModal(false); router.setParams({ finishFromActivity: '' }); }}
+        onAdded={() => {
+          setShowFeedbackModal(false);
+          router.setParams({ finishFromActivity: '' });
+          const updatedSession = useWorkoutStore.getState().currentSession;
+          if (addExerciseOnly && updatedSession?.id === currentSession.id) {
+            navigateToExercise(updatedSession.exercises.length - 1, 'forward');
+          }
+        }}
         visible={showSwapSheet}
         dayLabel={dayLabel}
         accent={accent}
@@ -1157,9 +1164,10 @@ export default function Workout() {
         workoutLabel={feedbackWorkout.label}
         accent={feedbackWorkout.color}
         levels={FEEDBACK_LEVELS}
-        prompt="How did it feel?"
-        subtext="Saved with this workout."
-        footerText="SLIDE TO FINISH"
+        heading="Good work!"
+        prompt="How did this workout feel?"
+        subtext="Don’t forget to stretch it out."
+        confirmLabel="Save workout"
         onChoose={(value) => {
           const intensity: IntensityLevel =
             value === 0 ? 'easy' : value === 0.5 ? 'medium' : 'hard';

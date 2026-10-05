@@ -6,7 +6,7 @@ const path = require('node:path');
 const ts = require('typescript');
 const root = path.resolve(__dirname, '..');
 function loader(mocks = {}) {
-  mocks = { '@/features/onboarding/config': { ONBOARDING_PREVIEW_ENABLED: true, FIRST_RUN_ROUTE: '/onboarding-preview' }, ...mocks };
+  mocks = { '@/features/onboarding/config': { ONBOARDING_PREVIEW_ENABLED: true, FIRST_RUN_ROUTE: '/(onboarding)' }, ...mocks };
   const cache = new Map();
   const load = (id) => {
     if (Object.hasOwn(mocks, id)) return mocks[id];

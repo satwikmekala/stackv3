@@ -12,6 +12,7 @@ import { useWorkoutStore } from '@/store/workoutStore';
 import { DEFAULT_WEIGHT_UNIT } from '@/store/workoutDatabase';
 import { deriveLiftProgress, formatLiftDate, formatLiftPerformance, liftComparisonCopy } from '@/store/liftProgress';
 import { WorkoutCardSurface } from '@/components/home/WorkoutCardSurface';
+import { LiftPerformanceValue } from '@/components/LiftPerformanceValue';
 
 const RANGES = [4, 8, 12, null] as const;
 type Range = (typeof RANGES)[number];
@@ -49,13 +50,15 @@ export default function LiftDetail() {
     <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false} contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 32 }]}>
       <Text accessibilityRole="header" style={styles.title}>{displayExerciseName(name) || 'Lift history'}</Text>
       {lift ? <>
-        <Text style={styles.explanation}>{lift.latest.bodyweight
+        <Text style={styles.explanation}>{lift.latest.durationS !== undefined
+          ? lift.latest.bodyweight ? 'Longest completed set, by workout.' : 'Your heaviest timed set from each workout.'
+          : lift.latest.bodyweight
           ? 'Most reps in a completed set, by workout.'
           : 'Your heaviest completed set from each workout.'}</Text>
         <View style={styles.summary}>
           <WorkoutCardSurface color={color} radius={24} />
           <Text style={styles.label}>Latest workout · {formatLiftDate(lift.latest.date)}</Text>
-          <Text style={[styles.latest, { color }]}>{formatLiftPerformance(lift.latest, unit)}</Text>
+          <LiftPerformanceValue performance={lift.latest} unit={unit} color={color} />
           {lift.previous && <Text style={styles.copy}>{liftComparisonCopy(lift, unit)}</Text>}
         </View>
         <View style={styles.historyHeading}>
@@ -79,7 +82,7 @@ export default function LiftDetail() {
           </Pressable>
         </View>}
       </> : <View style={styles.empty}>
-        <Text style={styles.copy}>No performed weight or rep sets are available for this exercise yet.</Text>
+        <Text style={styles.copy}>No completed sets are available for this exercise yet.</Text>
       </View>}
     </ScrollView>
     <Modal visible={showRange} transparent animationType="fade" onRequestClose={() => setShowRange(false)}>
@@ -107,7 +110,6 @@ const styles = StyleSheet.create({
   explanation: { marginTop: 10, fontFamily: redesignFonts.ui, lineHeight: 22, fontSize: 15, color: redesignColors.ash },
   summary: { marginTop: 24, padding: 20, gap: 10, borderRadius: 24, borderCurve: 'continuous', overflow: 'hidden', backgroundColor: redesignColors.surface },
   label: { fontFamily: redesignFonts.uiMedium, lineHeight: 20, fontSize: 14, color: redesignColors.bone },
-  latest: { fontFamily: redesignFonts.monoBold, lineHeight: 38, fontSize: 28, fontVariant: ['tabular-nums'], color: redesignColors.bone },
   copy: { fontFamily: redesignFonts.uiMedium, lineHeight: 22, fontSize: 15, color: redesignColors.ash },
   historyHeading: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'space-between', alignItems: 'center', marginTop: 24 },
   sectionTitle: { fontFamily: redesignFonts.uiSemiBold, lineHeight: 25, fontSize: 18, color: redesignColors.bone },

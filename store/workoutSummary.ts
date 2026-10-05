@@ -8,6 +8,7 @@ import type {
   WorkoutSession,
 } from '@/store/workoutStore';
 import { performedSets, formatRepScheme } from '@/store/liftLog';
+import { getExerciseVolumeKg } from '@/store/workoutVolume';
 import { formatDuration, formatDurationScheme, getExerciseMetric, type ExerciseMetric } from '@/store/exerciseMeasurement';
 import { formatWeight, kgToLbs, unitLabel, type WeightUnit } from '@/store/weightUnits';
 import { parseSessionDate } from '@/store/workoutCalendar';
@@ -73,11 +74,8 @@ export function deriveWorkoutSummary(
       repsBySet: timed ? [] : sets.map((set) => set.reps),
       repCount: timed ? 0 : sets.reduce((sum, set) => sum + set.reps, 0),
       durationsBySet: timed ? sets.map((set) => set.durationS ?? 0) : [],
-      weightsBySet: sets.map((set) => set.weight),
-      volumeKg: timed ? 0 : sets.reduce(
-        (sum, set) => sum + set.reps * set.weight,
-        0
-      ),
+      weightsBySet: sets.map((set) => exercise.loadType === 'bodyweight' ? 0 : set.weight),
+      volumeKg: getExerciseVolumeKg(exercise),
     }];
   });
 
@@ -123,10 +121,7 @@ export function deriveWorkoutSummary(
     setCount: allPerformedSets.length,
     exerciseCount: exercises.length,
     repCount: repMetricSets.reduce((sum, set) => sum + set.reps, 0),
-    volumeKg: repMetricSets.reduce(
-      (sum, set) => sum + set.reps * set.weight,
-      0
-    ),
+    volumeKg: exercises.reduce((sum, exercise) => sum + exercise.volumeKg, 0),
     specialSets,
     exercises,
   };

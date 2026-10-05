@@ -7,7 +7,7 @@ import { OnboardingPrimaryAction } from './OnboardingActions';
 import { StackMark } from './StackMark';
 
 /** Presentation only: the route owns persistence and navigation. */
-export function WelcomeScreen({ onContinue, actionStatus }: { onContinue: () => void; actionStatus?: ReactNode }) {
+export function WelcomeScreen({ onContinue, busy, actionStatus }: { onContinue: () => void; busy?: boolean; actionStatus?: ReactNode }) {
   const { width, fontScale } = useWindowDimensions();
   // Native paragraph measurement can reserve the uncapped line height even when
   // maxFontSizeMultiplier caps the painted display font. Scale both explicitly.
@@ -27,7 +27,7 @@ export function WelcomeScreen({ onContinue, actionStatus }: { onContinue: () => 
     </ScrollView>
     <View key={`actions:${fontScale}`} style={styles.footer}>
       {actionStatus}
-      <OnboardingPrimaryAction label="Continue" onPress={onContinue} />
+      <OnboardingPrimaryAction label="Continue" onPress={onContinue} disabled={busy} />
     </View>
   </SafeAreaView>;
 }

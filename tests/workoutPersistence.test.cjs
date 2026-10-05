@@ -1129,8 +1129,7 @@ test('completed-set weight and reps corrections stay completed and do not touch 
   const build = h.load('@/features/build/adapter').adaptBuildHistory([persisted], new Clock());
   assert.equal(build.state.metrics.volumeKg, 960);
   const log = h.load('@/store/liftLog').deriveLiftLog(persisted, [saved], 'kg');
-  assert.equal(log.lines[0].value, '80');
-  assert.equal(log.lines[0].scheme, '1 × 12');
+  assert.equal(log.lines[0].value, '960');
   h.sql.close();
 });
 
@@ -1565,7 +1564,7 @@ for (const displayUnit of ['kg', 'lbs']) {
     const h = actionHarness();
     try {
       const { lbsToKg, formatWeight } = h.load('@/store/weightUnits');
-      const { deriveWorkoutSummary, displayVolume } = h.load('@/store/workoutSummary');
+      const { deriveWorkoutSummary, displayVolume, formatSummaryNumber } = h.load('@/store/workoutSummary');
       const { deriveLiftLog } = h.load('@/store/liftLog');
       const { deriveHistoryGroups } = h.load('@/store/workoutHistory');
       h.store.getState().updateProfile({ autoIncreaseWeight: false });
@@ -1580,7 +1579,7 @@ for (const displayUnit of ['kg', 'lbs']) {
       let unit = h.store.getState().profile.weightUnit;
       let log = deriveLiftLog(completed, [], unit).lines;
       assert.deepEqual(log.map((row) => row.unit), [unit === 'lbs' ? 'lb' : 'kg', unit === 'lbs' ? 'lb' : 'kg']);
-      assert.deepEqual(log.map((row) => row.value), [formatWeight(100, unit), formatWeight(lbsToKg(180), unit)]);
+      assert.deepEqual(log.map((row) => row.value), [formatSummaryNumber(displayVolume(100 * 8, unit)), formatSummaryNumber(displayVolume(lbsToKg(180) * 8, unit))]);
       const summary = deriveWorkoutSummary(completed);
       assert.ok(Math.abs(summary.volumeKg - (100 + lbsToKg(180)) * 8) < 1e-9);
       assert.equal(displayVolume(summary.volumeKg, unit), unit === 'kg' ? summary.volumeKg : summary.volumeKg * 2.20462);
@@ -1592,7 +1591,7 @@ for (const displayUnit of ['kg', 'lbs']) {
       unit = h.store.getState().profile.weightUnit;
       log = deriveLiftLog(history[0], [], unit).lines;
       assert.deepEqual(log.map((row) => row.unit), [unit === 'lbs' ? 'lb' : 'kg', unit === 'lbs' ? 'lb' : 'kg']);
-      assert.equal(log[1].value, formatWeight(lbsToKg(180), unit));
+      assert.equal(log[1].value, formatSummaryNumber(displayVolume(lbsToKg(180) * 8, unit)));
       assert.deepEqual(h.sql.prepare('SELECT * FROM sets ORDER BY id').all(), snapshot);
     } finally { h.sql.close(); }
   });
@@ -1659,7 +1658,7 @@ for (const preference of ['kg', 'lbs']) {
       await h.database.testReopenDatabase();
       assert.equal(h.sql.prepare('PRAGMA user_version').get().user_version, h.database.CURRENT_SCHEMA_VERSION);
       assert.deepEqual(h.sql.prepare(legacySets).all(), values);
-      assert.deepEqual({ ...h.sql.prepare('SELECT * FROM profile').get() }, { ...profile, program_weekly_goal: 3, program_mode: 'stack', three_day_structure: 'push-pull-legs', weight_unit_confirmed: 1 });
+      assert.deepEqual({ ...h.sql.prepare('SELECT * FROM profile').get() }, { ...profile, program_weekly_goal: 3, program_mode: 'stack', three_day_structure: 'push-pull-legs', weight_unit_confirmed: 1, reminders_enabled: 0, reminder_time: '18:00' });
       assert.deepEqual(h.sql.prepare('SELECT id, session_id, exercise_id, position FROM session_exercises ORDER BY id').all(), oldExercises);
       assert.ok(h.sql.prepare('SELECT entry_unit FROM session_exercises').all().every((row) => row.entry_unit === preference));
       assert.equal(h.database.readCompletedSessionsSync()[0].completedAt, null);
@@ -1803,9 +1802,9 @@ test('four-exercise product example retains canonical kg and reformats completed
     const saved = h.database.readCompletedSessionsSync()[0];
     assert.deepEqual(saved.exercises.map((exercise) => exercise.sets[0].weight), weights);
     const { deriveLiftLog } = h.load('@/store/liftLog');
-    assert.deepEqual(deriveLiftLog(completed, [], h.store.getState().profile.weightUnit).lines.map((line) => `${line.value} ${line.unit}`), ['100 kg', '81.6 kg', '25 kg', '18.1 kg']);
+    assert.deepEqual(deriveLiftLog(completed, [], h.store.getState().profile.weightUnit).lines.map((line) => `${line.value} ${line.unit}`), ['800 kg', '653.2 kg', '200 kg', '145.1 kg']);
     h.store.getState().updateProfile({ weightUnit: 'lbs' });
-    assert.deepEqual(deriveLiftLog(saved, [], h.store.getState().profile.weightUnit).lines.map((line) => `${line.value} ${line.unit}`), ["220.5 lb", "180 lb", "55.1 lb", "40 lb"]);
+    assert.deepEqual(deriveLiftLog(saved, [], h.store.getState().profile.weightUnit).lines.map((line) => `${line.value} ${line.unit}`), ["1,763.7 lb", "1,440 lb", "440.9 lb", "320 lb"]);
     assert.deepEqual(h.database.readCompletedSessionsSync()[0].exercises.map((exercise) => exercise.sets[0].weight), weights);
   } finally { h.sql.close(); }
 });

@@ -5,7 +5,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { SafeAreaView as NativeSafeAreaView } from 'react-native-screens/experimental';
 import Animated, { FadeIn, LayoutAnimationConfig } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
-import { ONBOARDING_PREVIEW_ENABLED } from '@/features/onboarding/config';
 import { HelpCircle, ChevronLeft, ChevronRight, Dumbbell, LayoutGrid, Maximize, Minimize, X } from 'lucide-react-native';
 import { redesignColors as c, redesignFonts as f } from '../../constants/theme';
 import { useWorkoutStore } from '../../store/workoutStore';
@@ -153,7 +152,7 @@ export default function Monolith({ isTab = false }: { isTab?: boolean }) {
     <View style={styles.header}>
       {isTab ? <View style={styles.headerSpacer} /> : <Pressable accessibilityRole="button" accessibilityLabel="Back to My Stack" hitSlop={8} onPress={() => router.canGoBack() ? router.back() : router.replace('/')} style={styles.backButton}><ChevronLeft size={23} color={c.bone} /></Pressable>}
       <Text maxFontSizeMultiplier={1.4} style={styles.brand}>MY STACK</Text>
-      {ONBOARDING_PREVIEW_ENABLED ? <Pressable accessibilityRole="button" accessibilityLabel="How My Stack grows" onPress={() => router.push('/stack-help')} style={styles.icon}><HelpCircle size={21} color={c.bone} /></Pressable> : <View style={styles.headerSpacer} />}
+      <Pressable accessibilityRole="button" accessibilityLabel="How My Stack grows" onPress={() => router.push('/stack-help')} style={styles.icon}><HelpCircle size={21} color={c.bone} /></Pressable>
     </View>
     <ScrollView scrollEnabled={accessibility.largeText} contentContainerStyle={{ flexGrow: 1 }}>
     {/* Overview gives everything above the metrics to the tower. */}

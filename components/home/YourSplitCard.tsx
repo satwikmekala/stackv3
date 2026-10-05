@@ -67,7 +67,7 @@ export function YourSplitCard({
         style={styles.copy}
       >
         <View style={styles.eyebrowRow}>
-          <Text style={styles.eyebrow}>Your routine</Text>
+          <Text style={styles.eyebrow}>My routine</Text>
         </View>
         <Text style={styles.name}>
           {name}

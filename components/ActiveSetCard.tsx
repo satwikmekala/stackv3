@@ -312,8 +312,6 @@ interface ActiveSetCardProps {
   timerTarget?: WorkoutSetEditTarget | null;
   weightDeltaLabel?: string | null;
   repsDeltaLabel?: string | null;
-  // Optional derived progression nudge. Never applied unless tapped.
-  suggestion?: { label: string; accessibilityLabel: string; onAccept: () => void } | null;
   // Kept for callers shared with legacy set controls. Wheels use whole numbers and tenths.
   weightIncrement: number;
   // Display/input unit. `weight` is always kg, and so is every onWeightChange delta.
@@ -346,7 +344,6 @@ export function ActiveSetCard({
   timerTarget,
   weightDeltaLabel,
   repsDeltaLabel,
-  suggestion,
   weightUnit = 'kg',
   onWeightUnitChange,
   accent,
@@ -476,12 +473,6 @@ export function ActiveSetCard({
                 {weightLabel}
               </>
             )}
-            {suggestion ? (
-              <WorkoutTouchable accessibilityRole="button" accessibilityLabel={suggestion.accessibilityLabel}
-                activeOpacity={0.7} onPress={suggestion.onAccept} style={styles.suggestion}>
-                <Text style={[styles.suggestionText, { color: accent }]}>{suggestion.label}</Text>
-              </WorkoutTouchable>
-            ) : null}
           </>
         ) : null}
 
@@ -566,17 +557,6 @@ const styles = StyleSheet.create({
   unitIndicator: { position: 'absolute', left: 3, top: 3, bottom: 3, width: UNIT_BUTTON_WIDTH, borderRadius: 999, backgroundColor: redesignColors.hi },
   unitText: { fontFamily: redesignFonts.uiSemiBold, fontSize: 12, color: redesignColors.ash },
   weightTransition: { position: 'absolute', top: 0, left: 0, right: 0 },
-  suggestion: {
-    alignSelf: 'center',
-    minHeight: 36,
-    marginTop: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    justifyContent: 'center',
-    backgroundColor: redesignColors.raised,
-  },
-  suggestionText: { fontFamily: redesignFonts.uiMedium, fontSize: 13 },
   controls: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 16, paddingHorizontal: 4 },
   footerCenter: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   measurements: { flexDirection: 'row', alignItems: 'flex-start' },

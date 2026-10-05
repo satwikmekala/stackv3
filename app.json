@@ -9,6 +9,7 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "bundleIdentifier": "com.liftwithstack.stack",
+      "associatedDomains": ["applinks:liftwithstack.com"],
       "buildNumber": "1",
       "supportsTablet": false,
       "infoPlist": {
@@ -41,6 +42,7 @@
       "expo-sharing",
       "expo-splash-screen",
       "expo-status-bar",
+      "expo-notifications",
       "./plugins/with-local-live-activities",
       [
         "expo-widgets",

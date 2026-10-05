@@ -182,7 +182,7 @@ export default function Progress() {
               onPress={() => tap(() => router.push({ pathname: '/lift-detail', params: { exerciseName: lift.name } }))} />)}
           </View> : <View key={`empty-progress:${fontScale}`} style={styles.emptyState}>
             {lifts.length === 0 && <WorkoutCardSurface color={splitColors.chest} radius={22} showEdge={false} />}
-            {lifts.length === 0 && <View style={styles.emptyBrand} accessible accessibilityRole="image" accessibilityLabel="Your logged sets build your lift history."><StackLogo size={36} /><Text style={styles.emptyEyebrow}>SET BY SET</Text></View>}
+            {lifts.length === 0 && <View style={styles.emptyBrand} accessible accessibilityRole="image" accessibilityLabel="Your logged sets build your lift history."><StackLogo size={28} /><Text style={styles.emptyEyebrow}>SET BY SET</Text></View>}
             <Text accessibilityRole="header" style={styles.emptyTitle}>{lifts.length > 0 ? 'Follow the lifts you care about' : 'No lift history yet.'}</Text>
             <Text style={styles.emptyCopy}>{lifts.length > 0
               ? 'Choose up to two exercises to compare here.'

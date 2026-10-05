@@ -31,7 +31,7 @@ export function OnboardingProgress({ currentStep }: { currentStep: number }) {
   );
 }
 
-export function OnboardingBackButton() {
+export function OnboardingBackButton({ onPress, disabled = false }: { onPress?: () => void; disabled?: boolean } = {}) {
   const router = useRouter();
 
   return (
@@ -39,8 +39,10 @@ export function OnboardingBackButton() {
       accessibilityLabel="Go back"
       accessibilityRole="button"
       activeOpacity={0.72}
+      disabled={disabled}
+      accessibilityState={{ disabled }}
       hitSlop={8}
-      onPress={() => router.back()}
+      onPress={onPress ?? (() => router.back())}
       style={styles.backButton}
     >
       <ChevronLeft color={redesignColors.bone} size={17} strokeWidth={2.4} />
@@ -81,6 +83,7 @@ export function OnboardingNextButton({
       <Pressable
         accessibilityLabel={accessibilityLabel}
         accessibilityRole="button"
+        accessibilityState={{ disabled }}
         disabled={disabled}
         hitSlop={8}
         onPress={onPress}

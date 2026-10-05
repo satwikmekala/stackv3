@@ -159,6 +159,16 @@ export const parseSharedSplit = (token: unknown): SharedSplitResult<PortableSpli
 export const buildSplitImportUrl = (token: string, base = SPLIT_IMPORT_URL_BASE): string =>
   `${base}?${SPLIT_IMPORT_QUERY_PARAM}=${token}`;
 
+/** Short-link transport is independent of the unchanged legacy decoder. */
+export const ROUTINE_SHARE_ID_PATTERN = /^[A-Za-z0-9_-]{21}[AQgw]$/;
+
+export const buildRoutineShareUrl = (id: string, publicOrigin = 'https://liftwithstack.com'): string => {
+  if (!ROUTINE_SHARE_ID_PATTERN.test(id)) throw new Error('Invalid share ID.');
+  // The HTTP client validates and normalizes the configured origin. Keep this
+  // pure builder (and the legacy decoder) independent of native URL support.
+  return `${publicOrigin}/r/${id}`;
+};
+
 /**
  * Pulls the token out of an import URL without relying on the platform URL
  * class (partial on Hermes). Returns null when the parameter is absent.

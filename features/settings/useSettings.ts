@@ -9,14 +9,17 @@ import { useWorkoutStore } from '@/store/workoutStore';
 import { getProgramFrequency, trainingDaysLabel, WEEKDAY_NAMES } from '@/store/trainingPreferences';
 import { loadAppPreferences, saveAppPreference, useAppPreferences, type AppPreferences } from '@/store/appPreferences';
 import { buildPreferences, useBuildAccessibility } from '@/features/build/useBuildAccessibility';
-import { FIRST_RUN_ROUTE, ONBOARDING_PREVIEW_ENABLED } from '@/features/onboarding/config';
+import { FIRST_RUN_ROUTE } from '@/features/onboarding/config';
 import { BUILD_SANDBOX_ENABLED } from '@/features/build/config';
 import { chooseBackup, deleteAllData, exportBackup, exportHistory, restoreBackup } from './data';
 import { SETTINGS_PAGES, type SettingsPage, type SettingsRow, type SettingsSection } from './types';
+import { REMINDER_SETTINGS_COPY } from '@/constants/notifications';
+import { reminderTimeLabel } from '@/services/notifications/time';
 
 export const SETTINGS_TITLES: Record<SettingsPage, string> = {
   name: 'Name', goal: 'Weekly goal', schedule: 'Training schedule', program: 'Stack’s plan',
   unit: 'Weight unit', adjustments: 'Weight adjustments', data: 'Manage data', about: 'Help and about',
+  reminders: REMINDER_SETTINGS_COPY.title,
 };
 
 function liveActivityAvailability() {
@@ -47,7 +50,10 @@ export function useSettings() {
   }, []);
 
   const open = (nextPage: SettingsPage) => {
-    if (!busyRef.current) router.push({ pathname: '/settings', params: { page: nextPage } });
+    if (!busyRef.current) {
+      if (nextPage === 'reminders') router.push('/workout-reminders');
+      else router.push({ pathname: '/settings', params: { page: nextPage } });
+    }
   };
   const back = () => {
     if (busyRef.current) return;
@@ -126,6 +132,10 @@ export function useSettings() {
         { id: 'effects', kind: 'toggle' as const, label: 'Reduce effects', value: effects.reduceEffects,
           disabled: !effects.ready, onChange: (value: boolean) => { void run('effects', async () => { await buildPreferences.setReduceEffects(value); }); } },
       ], footer: 'Use simpler Stack previews and skip celebrations. System Reduce Motion is always respected.' }] : []),
+      { id: 'reminders', title: REMINDER_SETTINGS_COPY.title, rows: [
+        link('reminders', REMINDER_SETTINGS_COPY.title, profile.remindersEnabled
+          ? `${trainingDaysLabel(profile.trainingDays)} · ${reminderTimeLabel(profile.reminderTime)}` : REMINDER_SETTINGS_COPY.off),
+      ] },
       { id: 'dataSupport', rows: [link('data', 'Manage data'), link('about', 'Help and about')] },
       ...(preferences.error ? [{ id: 'preferenceError', footer: 'Your workout preferences couldn’t be read. Retry before making changes.',
         rows: [action('retry', 'Retry loading preferences', () => { void run('retry', loadAppPreferences); })] }] : []),
@@ -183,7 +193,7 @@ export function useSettings() {
     ];
     return [
       { id: 'version', rows: [{ id: 'version', kind: 'info', label: 'Stack', value: build ? `${version} (${build})` : version }] },
-      ...(ONBOARDING_PREVIEW_ENABLED ? [{ id: 'stackHelp', rows: [action('stack-introduction', 'How My Stack grows', () => router.push('/stack-help'))] }] : []),
+      { id: 'stackHelp', rows: [action('stack-introduction', 'How My Stack grows', () => router.push('/stack-help'))] },
       { id: 'logging', title: 'Logging workouts', footer: 'Stack restores previous values when available and keeps edited targets. Tap a “Try” suggestion to choose an increase.', rows: [] },
       { id: 'goalHelp', title: 'Your week', footer: `Your goal measures training days. Your schedule marks preferred days (${trainingDaysLabel(profile.trainingDays)}). Stack’s plan sets your workout order.`, rows: [] },
       { id: 'privacy', title: 'Your data', footer: 'Your workout data stays on this device; Stack has no cloud sync. You choose when to share exports and backups.', rows: [] },

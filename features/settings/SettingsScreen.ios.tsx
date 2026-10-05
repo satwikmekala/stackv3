@@ -4,7 +4,7 @@ import {
 import {
   accessibilityLabel, autocorrectionDisabled, background, disabled, font, foregroundStyle,
   frame, listRowBackground, scrollContentBackground, scrollDismissesKeyboard,
-  onSubmit, submitLabel, textInputAutocapitalization,
+  onSubmit, submitLabel, textInputAutocapitalization, tint,
 } from '@expo/ui/swift-ui/modifiers';
 import { Stack } from 'expo-router';
 import { View } from 'react-native';
@@ -21,12 +21,12 @@ function NameField({ row, active, save }: { row: Extract<SettingsRow, { kind: 'i
     modifiers={[...rowModifiers, textInputAutocapitalization('words'), autocorrectionDisabled(), submitLabel('done'), onSubmit(save), accessibilityLabel(row.label)]} />;
 }
 
-function Row({ row, busy, model }: { row: SettingsRow; busy: boolean; model: Model }) {
+export function Row({ row, busy, model }: { row: SettingsRow; busy: boolean; model: Model }) {
   const modifiers = [...rowModifiers, disabled(Boolean(row.disabled || busy))];
   if (row.kind === 'input') return <NameField row={row} active save={model.saveName} />;
   if (row.kind === 'toggle') return <Toggle label={row.label} isOn={row.value} onIsOnChange={row.onChange} modifiers={modifiers} />;
   if (row.kind === 'link') return <Button onPress={() => model.open(row.page)} modifiers={[
-    ...modifiers, accessibilityLabel(`${row.label}${row.value ? `, ${row.value}` : ''}`),
+    ...modifiers, tint(c.bone), accessibilityLabel(`${row.label}${row.value ? `, ${row.value}` : ''}`),
   ]}>
     <HStack spacing={12}>
       <Text modifiers={[foregroundStyle(c.bone)]}>{row.label}</Text>
@@ -39,7 +39,7 @@ function Row({ row, busy, model }: { row: SettingsRow; busy: boolean; model: Mod
     <Text>{row.label}</Text><Spacer />{row.value && <Text modifiers={[foregroundStyle(c.ash)]}>{row.value}</Text>}
   </HStack>;
   if (row.kind === 'choice') return <Button onPress={row.onPress} modifiers={[
-    ...modifiers, accessibilityLabel(`${row.label}${row.selected ? ', selected' : ''}`),
+    ...modifiers, tint(c.bone), accessibilityLabel(`${row.label}${row.selected ? ', selected' : ''}`),
   ]}>
     <HStack spacing={12}>
       <Text>{row.label}</Text><Spacer />
@@ -47,7 +47,7 @@ function Row({ row, busy, model }: { row: SettingsRow; busy: boolean; model: Mod
     </HStack>
   </Button>;
   return <Button label={row.label} role={row.destructive ? 'destructive' : 'default'} onPress={row.onPress}
-    modifiers={row.destructive ? [listRowBackground(c.surface), disabled(Boolean(row.disabled || busy)), font({ textStyle: 'body' }), frame({ minHeight: 24 })] : modifiers} />;
+    modifiers={row.destructive ? [listRowBackground(c.surface), disabled(Boolean(row.disabled || busy)), font({ textStyle: 'body' }), frame({ minHeight: 24 })] : [...modifiers, tint(c.bone)]} />;
 }
 
 function SettingsPageForm({ model }: { model: Model }) {

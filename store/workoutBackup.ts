@@ -35,15 +35,17 @@ export function prepareWorkoutBackup(value: unknown, db: Database, schemaVersion
   if (!value || typeof value !== 'object') throw Error('Choose a Stack backup file.');
   const backup = withAddedColumns(value as WorkoutBackup);
   const legacy = schemaVersion >= 22 && backup.schemaVersion === 21;
-  const beforeImports = schemaVersion === 23 && [21, 22].includes(backup.schemaVersion);
-  if (backup.format !== 'stack-backup' || backup.version !== 1 || (backup.schemaVersion !== schemaVersion && !legacy && !beforeImports))
+  const beforeImports = schemaVersion >= 23 && [21, 22].includes(backup.schemaVersion);
+  const beforeReminders = schemaVersion >= 24 && [21, 22, 23].includes(backup.schemaVersion);
+  if (backup.format !== 'stack-backup' || backup.version !== 1 || (backup.schemaVersion !== schemaVersion && !legacy && !beforeImports && !beforeReminders))
     throw Error('This backup is not compatible with this version of Stack.');
   if (!backup.tables || typeof backup.tables !== 'object') throw Error('This backup is incomplete.');
   for (const table of BACKUP_TABLES) {
     if (beforeImports && table.startsWith('imported_')) continue;
     const rows = backup.tables[table];
     const columns = db.getAllSync<{ name: string }>(`PRAGMA table_info(${table})`).map(column => column.name)
-      .filter(column => !legacy || table !== 'profile' || !['program_mode', 'three_day_structure', 'weight_unit_confirmed'].includes(column));
+      .filter(column => !legacy || table !== 'profile' || !['program_mode', 'three_day_structure', 'weight_unit_confirmed'].includes(column))
+      .filter(column => !beforeReminders || table !== 'profile' || !['reminders_enabled', 'reminder_time'].includes(column));
     if (!Array.isArray(rows)) throw Error('This backup is incomplete.');
     for (const row of rows) {
       if (!row || typeof row !== 'object' || Array.isArray(row) || Object.keys(row).length !== columns.length ||
@@ -62,6 +64,10 @@ export function prepareWorkoutBackup(value: unknown, db: Database, schemaVersion
       !['beginner', 'intermediate', 'advanced'].includes(String(profile[0].experience_level)))
     throw Error('This backup has an invalid profile.');
   const selected = profile[0];
+  if (schemaVersion >= 24 && !beforeReminders && (typeof selected.reminders_enabled !== 'number' ||
+      ![0, 1].includes(selected.reminders_enabled) || typeof selected.reminder_time !== 'string' ||
+      !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(selected.reminder_time)))
+    throw Error('This backup has invalid reminder preferences.');
   if ((selected.active_split_id !== null &&
        (typeof selected.active_split_id !== 'number' || !Number.isInteger(selected.active_split_id) || selected.active_split_id <= 0)) ||
       ![0, 1].includes(Number(selected.onboarding_completed)) || typeof selected.onboarding_completed !== 'number' ||
@@ -81,11 +87,11 @@ export function prepareWorkoutBackup(value: unknown, db: Database, schemaVersion
   if (backup.tables.sqlite_sequence.some(row => !BACKUP_TABLES.includes(row.name as Table) ||
       typeof row.seq !== 'number' || !Number.isInteger(row.seq) || row.seq < 0))
     throw Error('This backup contains invalid identifiers.');
-  if (!legacy && !beforeImports) return backup;
+  if (!legacy && !beforeImports && !beforeReminders) return backup;
   // Upgrade a copy, after strict schema-21 validation and before any SQL write.
   return { ...backup, schemaVersion, tables: { ...backup.tables,
     ...(beforeImports ? Object.fromEntries(BACKUP_TABLES.filter(table => table.startsWith('imported_')).map(table => [table, []])) : {}),
-    profile: [{ ...selected, ...(legacy ? {
+    profile: [{ ...selected, ...(beforeReminders ? { reminders_enabled: 0, reminder_time: '18:00' } : {}), ...(legacy ? {
     program_mode: selected.active_split_id === null ? 'stack' : 'custom',
     three_day_structure: selected.experience_level === 'beginner' ? 'full-body' : 'push-pull-legs',
     weight_unit_confirmed: 1,

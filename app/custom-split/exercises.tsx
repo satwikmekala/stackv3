@@ -11,6 +11,8 @@ import { Action, ui } from '@/components/custom-split/ui';
 import { redesignColors as c, redesignFonts as f } from '@/constants/theme';
 import { CUSTOM_SPLIT_MUSCLE_GROUPS, getMuscleGroupForExercise, getWorkoutDisplayName, useCustomSplitDraftStore } from '@/store/customSplitDraft';
 import { readExerciseCatalogSync } from '@/store/workoutDatabase';
+import * as Haptics from '@/services/haptics';
+import { exerciseMatchKey } from '@/features/sharing/splitProtocol';
 
 export default function ExercisePicker() {
   const router = useRouter();
@@ -48,7 +50,9 @@ export default function ExercisePicker() {
   const existing = new Set(day.exercises.map(exercise => exercise.id));
   const selected = new Set(picker.selected.map(exercise => exercise.id));
   const query = picker.query.trim().toLocaleLowerCase();
-  const results = selectedOnly ? picker.selected : catalog.filter(exercise => (!picker.group || getMuscleGroupForExercise(exercise) === picker.group) && (exercise.name.toLocaleLowerCase().includes(query) || displayExerciseName(exercise.name).toLocaleLowerCase().includes(query)));
+  const available = state.source === 'shared' ? [...catalog, ...state.draft!.workouts.flatMap(workout => workout.exercises), ...picker.selected]
+    .filter((exercise, index, all) => all.findIndex(item => item.id === exercise.id) === index) : catalog;
+  const results = selectedOnly ? picker.selected : available.filter(exercise => (!picker.group || getMuscleGroupForExercise(exercise) === picker.group) && (exercise.name.toLocaleLowerCase().includes(query) || displayExerciseName(exercise.name).toLocaleLowerCase().includes(query)));
   const create = () => router.push({ pathname: '/custom-split/new-exercise', params: { workoutId: day.id, picker: '1', initialName: picker.query } });
   return <SafeAreaView edges={edges} style={ui.screen}>
     {header}
@@ -70,10 +74,16 @@ export default function ExercisePicker() {
         ListEmptyComponent={<View style={{ gap: 12, paddingVertical: 24 }}><Text style={ui.subtitle}>No matching exercises</Text><Text style={ui.body}>Try another name or muscle group, or create your own exercise.</Text>
           {picker.group ? <Action title="Show all muscles" onPress={() => state.updatePicker({ group: null })} /> : null}<Action title="Create exercise" onPress={create} /></View>}
         renderItem={({ item }) => {
-          const added = existing.has(item.id);
+          const added = existing.has(item.id) || (state.source === 'shared' && day.exercises.some(exercise =>
+            exerciseMatchKey(exercise.name) === exerciseMatchKey(item.name)));
           const checked = selected.has(item.id);
           return <Pressable accessibilityRole="checkbox" accessibilityLabel={`${displayExerciseName(item.name)}${added ? ', already added' : ''}`} accessibilityState={{ checked: added || checked, disabled: added }} disabled={added}
-            onPress={() => { state.updatePicker({ selected: checked ? picker.selected.filter(exercise => exercise.id !== item.id) : [...picker.selected, item] }); if (checked && picker.selected.length === 1) setSelectedOnly(false); }}
+            onPress={() => {
+              if (added) return;
+              state.updatePicker({ selected: checked ? picker.selected.filter(exercise => exercise.id !== item.id) : [...picker.selected, item] });
+              if (checked && picker.selected.length === 1) setSelectedOnly(false);
+              if (Platform.OS !== 'web') void Haptics.selectionAsync();
+            }}
             style={({ pressed }) => [ui.listRow, { backgroundColor: checked ? c.surface : 'transparent', opacity: added ? 0.55 : pressed ? 0.65 : 1 }]}>
             <View style={{ flex: 1, gap: 4 }}><Text style={[ui.actionText, { textAlign: 'left' }]}>{displayExerciseName(item.name)}</Text><Text style={ui.label}>{added ? 'Already added' : `${getMuscleGroupForExercise(item)}${item.equipment ? ` · ${item.equipment}` : ''}`}</Text></View>
             <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: checked ? c.accent : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
@@ -84,7 +94,10 @@ export default function ExercisePicker() {
       <View style={ui.dock}>
         {picker.selected.length ? <View style={[ui.wrap, { justifyContent: 'space-between' }]}>
           <Action title={selectedOnly ? 'Browse all exercises' : `View selected (${picker.selected.length})`} compact onPress={() => setSelectedOnly(value => !value)} />
-          <Action title="Clear" compact icon={<X color={c.ash} size={16} />} onPress={() => { state.updatePicker({ selected: [] }); setSelectedOnly(false); }} />
+          <Action title="Clear" compact icon={<X color={c.ash} size={16} />} onPress={() => {
+            state.updatePicker({ selected: [] }); setSelectedOnly(false);
+            if (Platform.OS !== 'web') void Haptics.selectionAsync();
+          }} />
         </View> : null}
         <Action title={picker.selected.length ? `Add ${picker.selected.length} ${picker.selected.length === 1 ? 'exercise' : 'exercises'}` : 'Select exercises to add'} primary disabled={!picker.selected.length}
         onPress={() => {

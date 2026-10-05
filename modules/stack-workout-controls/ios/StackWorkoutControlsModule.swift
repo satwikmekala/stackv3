@@ -106,10 +106,10 @@ final class StackNotesDoneView: ExpoView {
     toolbar.tintColor = .systemBlue
     isAccessibilityElement = true
     accessibilityLabel = "Done"
-    accessibilityHint = "Save your note and dismiss the keyboard"
+    accessibilityHint = "Finish editing and dismiss the keyboard"
     accessibilityTraits = .button
     let done = UIBarButtonItem(barButtonSystemItem: .done, target: self, action: #selector(donePressed))
-    done.accessibilityHint = "Save your note and dismiss the keyboard"
+    done.accessibilityHint = "Finish editing and dismiss the keyboard"
     toolbar.items = [UIBarButtonItem(systemItem: .flexibleSpace), done]
     addSubview(toolbar)
     configureAppearance()
@@ -158,6 +158,38 @@ final class StackWeightPickerView: ExpoView, UIPickerViewDataSource, UIPickerVie
   private let wholeNumberMaximum = 999
   private let maximumTenths = 9990
   private var selectedTenths = -1
+  private var wholeDigitCount = 1
+  private var laidOutDigitCount = 0
+
+  private var numberFont: UIFont {
+    UIFontMetrics(forTextStyle: .title1).scaledFont(
+      for: .monospacedDigitSystemFont(ofSize: compact ? 34 : 40, weight: .medium),
+      maximumPointSize: compact ? 42 : 48)
+  }
+
+  private var numberColumnWidths: [CGFloat] {
+    let digit = ceil(("0" as NSString).size(withAttributes: [.font: numberFont]).width)
+    let dot = ceil(("." as NSString).size(withAttributes: [.font: numberFont]).width)
+    return [digit * CGFloat(wholeDigitCount), dot, digit]
+  }
+
+  private func resizeForSelection(animated: Bool) {
+    let digits = String(max(0, selectedTenths) / 10).count
+    guard digits != wholeDigitCount else { return }
+    wholeDigitCount = digits
+    setNeedsLayout()
+    let changes = {
+      self.layoutIfNeeded()
+      self.picker.layoutIfNeeded()
+    }
+    if animated && window != nil && !UIAccessibility.isReduceMotionEnabled {
+      UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.9,
+                     initialSpringVelocity: 0, options: [.beginFromCurrentState, .allowUserInteraction],
+                     animations: changes)
+    } else {
+      UIView.performWithoutAnimation(changes)
+    }
+  }
 
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
@@ -184,7 +216,9 @@ final class StackWeightPickerView: ExpoView, UIPickerViewDataSource, UIPickerVie
     let tenths = Int((min(999, max(0, value)) * 10).rounded())
     // Acknowledging a native selection must not interrupt either wheel.
     guard tenths != selectedTenths else { return }
+    let hadSelection = selectedTenths >= 0
     selectedTenths = tenths
+    resizeForSelection(animated: hadSelection)
     let whole = tenths / 10
     picker.selectRow(whole, inComponent: 0, animated: false)
     picker.selectRow(tenths % 10, inComponent: 2, animated: false)
@@ -196,10 +230,17 @@ final class StackWeightPickerView: ExpoView, UIPickerViewDataSource, UIPickerVie
     unitLabel.font = unitFont
     let unitWidth = max(28, ceil((unit as NSString).size(withAttributes: [.font: unitFont]).width))
     unitLabel.isHidden = compact
-    // Three whole digits plus one decimal digit; no space for a fourth digit.
-    let pickerWidth = max(0, compact ? min(160, bounds.width) : min(196, bounds.width - unitWidth - 8))
+    // Equal 12-point outer insets around the digits, plus UIKit's 32-point gutters.
+    // Keep the enclosing weight column fixed while the native pill grows inward/outward.
+    let desiredWidth = numberColumnWidths.reduce(0, +) + 56
+    let pickerWidth = max(0, min(desiredWidth, bounds.width - (compact ? 0 : unitWidth + 8)))
     let left = max(0, (bounds.width - pickerWidth - (compact ? 0 : unitWidth + 8)) / 2)
+    let widthChanged = abs(picker.bounds.width - pickerWidth) > 0.5
     picker.frame = CGRect(x: left, y: 0, width: pickerWidth, height: bounds.height)
+    if widthChanged || laidOutDigitCount != wholeDigitCount {
+      laidOutDigitCount = wholeDigitCount
+      picker.reloadAllComponents()
+    }
     unitLabel.frame = CGRect(x: picker.frame.maxX + 8, y: (bounds.height - 44) / 2, width: unitWidth, height: 44)
   }
 
@@ -210,14 +251,10 @@ final class StackWeightPickerView: ExpoView, UIPickerViewDataSource, UIPickerVie
   }
 
   func pickerView(_ pickerView: UIPickerView, widthForComponent component: Int) -> CGFloat {
-    // UIKit adds spacing between components. Leave room for those gutters
-    // instead of allocating the entire picker width to the row labels.
-    let available = max(0, pickerView.bounds.width - 32)
-    // Shift the compact row content left within the centered selection pill.
-    // The decimal column stays fixed; three-digit values have balanced insets.
-    let wholeShare: CGFloat = compact ? 0.622 : 0.64
-    let decimalShare: CGFloat = compact ? 0.298 : 0.28
-    return component == 0 ? available * wholeShare : component == 1 ? available * 0.08 : available * decimalShare
+    let widths = numberColumnWidths
+    let available = max(0, pickerView.bounds.width - 56)
+    let scale = min(1, available / widths.reduce(0, +))
+    return widths[component] * scale
   }
 
   func pickerView(_ pickerView: UIPickerView, rowHeightForComponent component: Int) -> CGFloat { compact ? 40 : 44 }
@@ -229,9 +266,9 @@ final class StackWeightPickerView: ExpoView, UIPickerViewDataSource, UIPickerVie
     // whole number's digit count or the available width.
     label.textAlignment = component == 0 ? .right : component == 2 ? .left : .center
     label.textColor = UIColor(red: 245/255, green: 240/255, blue: 232/255, alpha: 1)
-    label.font = UIFontMetrics(forTextStyle: .title1).scaledFont(for: .monospacedDigitSystemFont(ofSize: compact ? 34 : 40, weight: .medium), maximumPointSize: compact ? 42 : 48)
+    label.font = numberFont
     label.adjustsFontSizeToFitWidth = true
-    label.minimumScaleFactor = 0.7
+    label.minimumScaleFactor = 0.4
     label.isAccessibilityElement = false
     return label
   }
@@ -245,6 +282,7 @@ final class StackWeightPickerView: ExpoView, UIPickerViewDataSource, UIPickerVie
     }
     guard tenths != selectedTenths else { return }
     selectedTenths = tenths
+    resizeForSelection(animated: true)
     if hapticsEnabled { feedback.selectionChanged() }
     onValueChange(["value": Double(tenths) / 10])
   }

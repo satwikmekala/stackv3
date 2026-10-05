@@ -24,12 +24,22 @@ export default function PersonalizeDay() {
         <View style={ui.section}>
           <View style={{ gap: 8 }}>
             <Text style={ui.label}>Workout name</Text>
-            <TextInput accessibilityLabel="Workout name" autoFocus={focus === 'name'} maxLength={48} autoCapitalize="words" returnKeyType="done"
+            <TextInput accessibilityLabel="Workout name" autoFocus={focus === 'name'} maxLength={state.source === 'shared' ? 64 : 48} autoCapitalize="words" returnKeyType="done"
               style={ui.input} value={day.customName} placeholder={getWorkoutDisplayName(day) || 'Workout name'} placeholderTextColor={c.ash}
               onChangeText={name => state.setWorkoutCustomName(day.id, name)} />
             <Text style={ui.label}>Leave blank to use the muscles you’re training.</Text>
           </View>
         </View>
+        {state.source === 'shared' ? <View style={ui.section}>
+          <Text accessibilityRole="header" style={ui.subtitle}>Workout color</Text>
+          <View accessibilityRole="radiogroup" accessibilityLabel="Workout color" style={[ui.wrap, { gap: 8 }]}>
+            {[null, ...Object.keys(MUSCLE_COLOR_PALETTE) as MuscleColor[]].map(color => <Action key={color ?? 'automatic'}
+              title={color ? MUSCLE_COLOR_PALETTE[color].name : 'Automatic'} secondary
+              label={`Workout color: ${color ? MUSCLE_COLOR_PALETTE[color].name : 'Automatic'}`}
+              icon={(day.color ?? null) === color ? <Check color={c.bone} size={14} /> : undefined}
+              onPress={() => state.setWorkoutColor(day.id, color)} />)}
+          </View>
+        </View> : null}
         <View style={ui.section}>
           <Text accessibilityRole="header" style={ui.subtitle}>Muscle colors</Text>
           <Text style={ui.body}>Each muscle’s color applies across the app, including workout cards and the workout logger. Changes save immediately.</Text>

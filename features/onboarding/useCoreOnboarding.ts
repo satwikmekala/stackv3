@@ -47,24 +47,24 @@ export function useCoreOnboarding(step: 'welcome' | 'name' | 'starting-point') {
   }, [completedOnEntry, perform, router, step]));
   const getStarted = () => perform(async () => {
     await saveOnboardingDraft({ step: 'name' });
-    if (focused.current) router.push('/onboarding-preview/name');
+    if (focused.current) router.push('/(onboarding)/name');
   });
   const submitName = (name: string) => {
     const trimmed = name.trim().slice(0, NICKNAME_MAX_LENGTH);
     if (!trimmed) return;
     perform(async () => {
       await saveOnboardingDraft({ name: trimmed, step: 'starting-point' });
-      if (focused.current) router.push('/onboarding-preview/starting-point');
+      if (focused.current) router.push('/(onboarding)/starting-point');
     });
   };
   const enter = (choice: 'track' | 'explore') => perform(() => entry(choice));
   const backToWelcome = () => perform(async () => {
     await saveOnboardingDraft({ step: 'welcome' });
-    if (focused.current) router.dismissTo('/onboarding-preview/welcome');
+    if (focused.current) router.dismissTo('/(onboarding)/welcome');
   });
   const backToName = () => perform(async () => {
     await saveOnboardingDraft({ step: 'name' });
-    if (focused.current) router.dismissTo('/onboarding-preview/name');
+    if (focused.current) router.dismissTo('/(onboarding)/name');
   });
   const getProgram = () => perform(async () => {
     await saveOnboardingDraft({ choice: 'stack', step: 'frequency' });

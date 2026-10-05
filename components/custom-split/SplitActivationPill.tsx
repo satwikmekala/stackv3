@@ -1,15 +1,19 @@
 import { Text, View, StyleSheet } from 'react-native';
 import { Check } from 'lucide-react-native';
+import Animated, { FadeIn, ReduceMotion } from 'react-native-reanimated';
 import { SplitPressable } from './SplitPressable';
 import { redesignColors, redesignFonts } from '@/constants/theme';
+import { motionDuration } from '@/constants/motion';
+
+const confirmation = FadeIn.duration(motionDuration.feedback).reduceMotion(ReduceMotion.System);
 
 export function SplitActivationPill({ active, name, disabled = false, onPress }: {
   active: boolean; name: string; disabled?: boolean; onPress: () => void;
 }) {
-  const content = <View style={[styles.pill, active && styles.active]}>
+  const content = <Animated.View entering={active ? confirmation : undefined} style={[styles.pill, active && styles.active]}>
     {active && <Check size={14} color="#82DB92" />}
     <Text style={[styles.label, active && styles.activeLabel]}>{active ? 'In use' : 'Activate'}</Text>
-  </View>;
+  </Animated.View>;
   if (active) return <View accessible accessibilityRole="text" accessibilityLabel={`${name} is in use`} style={styles.target}>{content}</View>;
   return <SplitPressable accessibilityRole="button" accessibilityLabel={`Activate ${name}`}
     accessibilityHint={name === 'Stack’s plan' ? 'Use Stack’s plan for your upcoming workouts' : 'Use this routine for your upcoming workouts'} accessibilityState={{ disabled }}

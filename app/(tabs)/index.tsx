@@ -48,7 +48,6 @@ import type { CustomSplitWorkout } from '@/store/customSplits';
 import { resolveNextCustomWorkoutIndex } from '@/store/customSplitRotation';
 import { toLocalCalendarDate, useWorkoutStore } from '@/store/workoutStore';
 import type { WorkoutLaunchOrigin } from '@/utils/workoutLaunch';
-import { ONBOARDING_PREVIEW_ENABLED } from '@/features/onboarding/config';
 import { useWorkoutLaunch, workoutLaunch } from '@/store/workoutLaunch';
 import { navigateWorkoutLaunch } from '@/features/workout-launch/navigation';
 import type { WorkoutIntent } from '@/features/workout-launch/coordinator';
@@ -332,7 +331,7 @@ function HomeContent() {
   // Summary and detail hydrate independently. The summary is enough to keep a
   // real program identity on screen until its workout rows arrive.
   const customSplitName =
-    customSplit?.name ?? activeSplitSummary?.name ?? 'Your routine';
+    customSplit?.name ?? activeSplitSummary?.name ?? 'My routine';
   // A loading program keeps its identity without inventing a workout count.
   // An edited Stack's plan runs like a routine but keeps Stack's identity.
   const isEditedStackPlan = Boolean(customSplit?.isStackPlan ?? activeSplitSummary?.isStackPlan);
@@ -478,7 +477,7 @@ function HomeContent() {
           {isNoProgramMode ? <>
             <TouchableOpacity key={`program-action:${fontScale}`} activeOpacity={0.65} accessibilityRole="button" accessibilityLabel="Get Stack’s plan"
               accessibilityHint="Preview Stack’s plan."
-              onPress={() => router.push(ONBOARDING_PREVIEW_ENABLED && !hasEditedStackPlan
+              onPress={() => router.push(!hasEditedStackPlan
                 ? { pathname: '/program-setup', params: { source: 'train' } }
                 : { pathname: '/your-splits', params: { focus: 'stack' } })} style={styles.discoveryAction}>
               <View style={{ flex: 1, gap: 4 }}><Text style={styles.secondaryTitle}>Get Stack’s plan</Text>

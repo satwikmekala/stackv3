@@ -11,7 +11,7 @@ import { importPortableSplitSync } from '@/store/workoutDatabase';
 import { SplitImportError, type ImportedSplit } from '@/store/splitImport';
 import { useWorkoutStore } from '@/store/workoutStore';
 import { useCustomSplitDraftStore } from '@/store/customSplitDraft';
-import { FIRST_RUN_ROUTE, ONBOARDING_PREVIEW_ENABLED } from '@/features/onboarding/config';
+import { FIRST_RUN_ROUTE } from '@/features/onboarding/config';
 
 import { loadSharedRoutineHandoff, prepareSharedRoutineImport, rememberSharedRoutine, clearSharedRoutineHandoff, useSharedRoutineHandoff } from '@/store/sharedRoutineHandoff';
 
@@ -43,14 +43,14 @@ function SplitPreview({ token }: { token: unknown }) {
   const [error, setError] = useState<string | null>(null);
   const [persist] = useState(() => createSplitImportAction(async () => {
     if (!parsed.ok) throw new SplitImportError(routineLinkErrorCopy(parsed.error));
-    const attemptId = ONBOARDING_PREVIEW_ENABLED && typeof token === 'string'
+    const attemptId = typeof token === 'string'
       ? await prepareSharedRoutineImport(token) : undefined;
     return importPortableSplitSync(parsed.value, attemptId);
   }));
 
   const saved = added ?? (typeof token === 'string' && handoff.pending?.token === token ? handoff.pending.saved : null);
   useEffect(() => {
-    if (!ONBOARDING_PREVIEW_ENABLED || !parsed.ok || typeof token !== 'string') return;
+    if (!parsed.ok || typeof token !== 'string') return;
     void (profile?.onboardingCompleted ? loadSharedRoutineHandoff() : rememberSharedRoutine(token)).catch(() => {
       if (focused.current) setError('Couldn’t keep your shared routine. Try again.');
     });
@@ -59,7 +59,7 @@ function SplitPreview({ token }: { token: unknown }) {
     if (locked.current || leaving.current || !focused.current) return;
     locked.current = true; setSaving(true); setError(null);
     try {
-      if (ONBOARDING_PREVIEW_ENABLED && parsed.ok && typeof token === 'string') {
+      if (parsed.ok && typeof token === 'string') {
         if (!useWorkoutStore.getState().profile?.onboardingCompleted) {
           await rememberSharedRoutine(token, saved);
           if (focused.current) { leaving.current = true; router.replace(FIRST_RUN_ROUTE); }
@@ -89,7 +89,7 @@ function SplitPreview({ token }: { token: unknown }) {
       // library refresh failure must never offer a second persistence attempt.
       if (focused.current) setAdded(result);
       void refreshCustomSplits();
-      if (ONBOARDING_PREVIEW_ENABLED && typeof token === 'string' && focused.current) await rememberSharedRoutine(token, result);
+      if (typeof token === 'string' && focused.current) await rememberSharedRoutine(token, result);
     } catch (failure) {
       if (focused.current) setError(routineImportFailureCopy(failure));
     } finally {
@@ -101,7 +101,7 @@ function SplitPreview({ token }: { token: unknown }) {
     if (!saved || locked.current || !focused.current) return;
     locked.current = true; setSaving(true);
     try {
-      if (ONBOARDING_PREVIEW_ENABLED && typeof token === 'string') await clearSharedRoutineHandoff(token);
+      if (typeof token === 'string') await clearSharedRoutineHandoff(token);
       if (!focused.current) return;
       leaving.current = true; closeDraft();
       router.replace({ pathname: '/custom-split', params: { source: 'library', splitId: String(saved.splitId) } });
@@ -134,9 +134,9 @@ function SplitPreview({ token }: { token: unknown }) {
             ? 'Your editable copy is in Your routines.'
             : 'Routine saved. Finish setup to open Your routines.'}</Text>
           {error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
-          {ONBOARDING_PREVIEW_ENABLED && profile?.onboardingCompleted && <Action label="Use this routine" onPress={() => { void leave(false, true); }} disabled={saving} />}
-          {profile?.onboardingCompleted ? <Action label="View routine" onPress={() => { void viewSplit(); }} disabled={saving} secondary={ONBOARDING_PREVIEW_ENABLED} /> : null}
-          <Action label={profile?.onboardingCompleted ? (ONBOARDING_PREVIEW_ENABLED ? 'Save for later' : 'Done') : 'Continue to Stack'}
+          {profile?.onboardingCompleted && <Action label="Use this routine" onPress={() => { void leave(false, true); }} disabled={saving} />}
+          {profile?.onboardingCompleted ? <Action label="View routine" onPress={() => { void viewSplit(); }} disabled={saving} secondary /> : null}
+          <Action label={profile?.onboardingCompleted ? 'Save for later' : 'Continue to Stack'}
             onPress={done} disabled={saving} secondary={Boolean(profile?.onboardingCompleted)} />
         </ScrollView>
       ) : (

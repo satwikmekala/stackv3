@@ -46,7 +46,7 @@ import {
 } from '@/store/workoutProgression';
 
 const DATABASE_NAME = 'workouts.db';
-export const CURRENT_SCHEMA_VERSION = 23;
+export const CURRENT_SCHEMA_VERSION = 24;
 
 // Kg-native step assigned only when a brand-new profile is created. Legacy
 // profiles that predate this column retain the historical 2.5 kg migration
@@ -553,6 +553,8 @@ CREATE TABLE IF NOT EXISTS profile (
   program_weekly_goal INTEGER NOT NULL DEFAULT 3,
   experience_level TEXT NOT NULL DEFAULT 'intermediate',
   training_days TEXT NOT NULL DEFAULT '[]',
+  reminders_enabled INTEGER NOT NULL DEFAULT 0 CHECK (reminders_enabled IN (0, 1)),
+  reminder_time TEXT NOT NULL DEFAULT '18:00',
   onboarding_completed INTEGER NOT NULL DEFAULT 0,
   auto_increase_weight INTEGER NOT NULL DEFAULT 1,
   weight_increment REAL NOT NULL DEFAULT ${NEW_PROFILE_WEIGHT_INCREMENT},
@@ -591,6 +593,8 @@ interface ProfileRow {
   program_weekly_goal?: number;
   experience_level: ExperienceLevel;
   training_days: string;
+  reminders_enabled?: number;
+  reminder_time?: string;
   onboarding_completed: number;
   auto_increase_weight: number;
   weight_increment: number;
@@ -805,6 +809,8 @@ const profileFromRow = (row: ProfileRow | null): UserProfile | null => {
     programWeeklyGoal: row.program_weekly_goal ?? Math.max(1, Math.min(6, row.weekly_goal || 3)),
     experienceLevel: row.experience_level,
     trainingDays,
+    remindersEnabled: Boolean(row.reminders_enabled ?? 0),
+    reminderTime: row.reminder_time ?? '18:00',
     onboardingCompleted: Boolean(row.onboarding_completed),
     autoIncreaseWeight: Boolean(row.auto_increase_weight),
     weightIncrement: row.weight_increment,
@@ -1777,6 +1783,18 @@ const ensureProgramPreferencesAsync = async (db: SQLiteDatabase): Promise<void> 
   });
 };
 
+/** Schema 24: local reminder preferences share the existing training schedule. */
+const ensureReminderPreferencesAsync = async (db: SQLiteDatabase): Promise<void> => {
+  await db.withTransactionAsync(async () => {
+    if (!(await tableHasColumnAsync(db, 'profile', 'reminders_enabled'))) {
+      await db.execAsync('ALTER TABLE profile ADD COLUMN reminders_enabled INTEGER NOT NULL DEFAULT 0 CHECK (reminders_enabled IN (0, 1));');
+    }
+    if (!(await tableHasColumnAsync(db, 'profile', 'reminder_time'))) {
+      await db.execAsync("ALTER TABLE profile ADD COLUMN reminder_time TEXT NOT NULL DEFAULT '18:00';");
+    }
+  });
+};
+
 export const initializeWorkoutDatabase = async (): Promise<SQLiteDatabase> => {
   if (database) return database;
   if (databasePromise) return databasePromise;
@@ -1828,6 +1846,7 @@ export const initializeWorkoutDatabase = async (): Promise<SQLiteDatabase> => {
     await ensureProgramFrequencyAsync(opened);
     await ensureCustomSplitsSchemaAsync(opened);
     await ensureProgramPreferencesAsync(opened);
+    await ensureReminderPreferencesAsync(opened);
     await ensureSessionCustomSplitColumnsAsync(opened);
     await ensureExerciseUnitsAndCompletionAsync(opened);
     await ensureSessionOriginAsync(opened);
@@ -2135,6 +2154,7 @@ export const writeProfile = (profile: UserProfile): void => {
     name: profile.name, weekly_goal: profile.weeklyGoal,
     program_weekly_goal: profile.programWeeklyGoal ?? Math.max(1, Math.min(6, profile.weeklyGoal || 3)),
     experience_level: profile.experienceLevel, training_days: JSON.stringify(profile.trainingDays),
+    reminders_enabled: profile.remindersEnabled ? 1 : 0, reminder_time: profile.reminderTime ?? '18:00',
     onboarding_completed: profile.onboardingCompleted ? 1 : 0,
     auto_increase_weight: profile.autoIncreaseWeight ? 1 : 0,
     weight_increment: profile.weightIncrement, weight_unit: profile.weightUnit,
@@ -2218,6 +2238,10 @@ export const BUILT_IN_EXERCISE_NAMES: ReadonlySet<string> = new Set(
 /** Save an independent copy without activating it. Database must be hydrated. */
 export const importPortableSplitSync = (split: PortableSplit, attemptId?: string): ImportedSplit =>
   persistPortableSplit(getDatabase(), split, [...EXERCISE_SEEDS, ...ARCHETYPE_EXERCISE_SEEDS], attemptId);
+
+/** Read-only recovery check for a shared draft whose final save already committed. */
+export const hasSharedSplitImportReceiptSync = (attemptId: string): boolean => Boolean(getDatabase().getFirstSync(
+  'SELECT 1 FROM shared_split_import_receipts WHERE attempt_id = ?', attemptId));
 
 export const renameCustomSplitSync = (splitId: number, name: string): void => {
   const normalizedName = name.trim();

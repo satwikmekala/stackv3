@@ -16,7 +16,7 @@ export default function BringWorkouts() {
   const completed = useWorkoutStore(state => state.profile?.onboardingCompleted);
   const [error, setError] = useState<string | null>(null);
   const back = () => { if (choosingHevyPlan) { if (router.canGoBack()) router.back(); else router.replace('/bring-workouts'); return; }
-    void saveOnboardingDraft({ step: 'starting-point' }).then(() => router.dismissTo('/onboarding-preview/starting-point'))
+    void saveOnboardingDraft({ step: 'starting-point' }).then(() => router.dismissTo('/(onboarding)/starting-point'))
     .catch(() => setError('Couldn’t save your setup. Try again.')); };
   if (completed) return <Redirect href="/(tabs)" />;
   return <SafeAreaView edges={['left', 'right', 'bottom']} style={ui.screen}>

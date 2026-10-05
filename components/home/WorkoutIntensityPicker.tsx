@@ -1,336 +1,143 @@
-import { useEffect, useRef, useState } from 'react';
-import {
-  Modal,
-  PanResponder,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { useRef, useState } from 'react';
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { X } from 'lucide-react-native';
+import { useReducedMotion } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from '@/services/haptics';
-import { redesignColors, redesignFonts } from '@/constants/theme';
+import { WorkoutTouchable } from '@/components/WorkoutTouchable';
+import { redesignColors as c, redesignFonts as f } from '@/constants/theme';
 
+type IntensityLevelOption = { value: number; label: string };
 type WorkoutIntensityPickerProps = {
   visible: boolean;
   workoutLabel: string;
   accent: string;
   levels?: readonly IntensityLevelOption[];
+  heading?: string;
   prompt?: string;
   subtext?: string;
-  footerText?: string;
+  confirmLabel?: string;
   onChoose: (value: number) => void;
   onClose: () => void;
 };
 
-type IntensityLevelOption = {
-  value: number;
-  label: string;
-};
-
 const DEFAULT_LEVELS: readonly IntensityLevelOption[] = [
-  { value: 0, label: 'CHILL' },
-  { value: 0.5, label: 'BALANCED' },
-  { value: 1, label: 'ALL OUT' },
+  { value: 0, label: 'Too easy' },
+  { value: 0.5, label: 'Just right' },
+  { value: 1, label: 'Too hard' },
 ];
 
-function rgba(hex: string, opacity: number) {
-  const value = hex.replace('#', '');
-  const red = parseInt(value.slice(0, 2), 16);
-  const green = parseInt(value.slice(2, 4), 16);
-  const blue = parseInt(value.slice(4, 6), 16);
-  return `rgba(${red}, ${green}, ${blue}, ${opacity})`;
+type FeedbackContentProps = Omit<WorkoutIntensityPickerProps, 'visible'>;
+
+// Mount only while the message is open, so each visit starts with a fresh selection.
+function FeedbackContent({ workoutLabel, accent, levels = DEFAULT_LEVELS,
+  heading = 'Good work!', prompt = 'How did this workout feel?', subtext = 'Don’t forget to stretch it out.',
+  confirmLabel = 'Save workout', onChoose, onClose }: FeedbackContentProps) {
+  const insets = useSafeAreaInsets();
+  const { width, height, fontScale } = useWindowDimensions();
+  const stacked = width < 360 || fontScale > 1.2;
+  const [value, setValue] = useState(0.5);
+  const [submitting, setSubmitting] = useState(false);
+  const committed = useRef(false);
+
+  const select = (next: number) => {
+    if (committed.current || next === value) return;
+    setValue(next);
+    if (Platform.OS !== 'web') void Haptics.selectionAsync();
+  };
+  const finish = () => {
+    if (committed.current) return;
+    committed.current = true;
+    setSubmitting(true);
+    if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    onChoose(value);
+  };
+
+  return <View accessibilityViewIsModal style={[styles.card, { maxHeight: height - insets.top - insets.bottom - 48 }]}>
+    <ScrollView bounces={false} showsVerticalScrollIndicator={false} style={styles.scroll} contentContainerStyle={styles.content}>
+      <View style={styles.contextRow}>
+        <View style={styles.context}>
+          <View style={[styles.dot, { backgroundColor: accent }]} />
+          <Text style={styles.workoutLabel}>{workoutLabel}</Text>
+        </View>
+        <WorkoutTouchable accessibilityRole="button" accessibilityLabel="Close workout feedback"
+          disabled={submitting} onPress={onClose} activeOpacity={0.7} style={styles.close}>
+          <X color={c.bone} size={20} strokeWidth={2} />
+        </WorkoutTouchable>
+      </View>
+      <Text accessibilityRole="header" style={styles.title}>{heading}</Text>
+      {subtext ? <Text style={styles.subtext}>{subtext}</Text> : null}
+      <Text style={styles.question}>{prompt}</Text>
+      <View accessibilityRole="radiogroup" accessibilityLabel="Workout effort"
+        style={[styles.choices, stacked && styles.stackedChoices]}>
+        {levels.map(level => {
+          const selected = level.value === value;
+          return <WorkoutTouchable key={level.value} accessibilityRole="radio"
+            accessibilityLabel={level.label} accessibilityState={{ checked: selected, disabled: submitting }}
+            disabled={submitting} activeOpacity={0.75} onPress={() => select(level.value)}
+            style={[styles.choice, stacked && styles.stackedChoice, selected && styles.selectedChoice]}>
+            <Text style={[styles.choiceLabel, selected && styles.selectedLabel]}>{level.label}</Text>
+          </WorkoutTouchable>;
+        })}
+      </View>
+    </ScrollView>
+    <View style={styles.footer}>
+      <WorkoutTouchable accessibilityRole="button" accessibilityLabel={confirmLabel}
+        accessibilityHint="Save this rating and complete your workout"
+        accessibilityState={{ disabled: submitting }} disabled={submitting}
+        activeOpacity={0.8} onPress={finish}
+        style={[styles.finish, { backgroundColor: accent }, submitting && styles.disabled]}>
+        <Text style={styles.finishLabel}>{confirmLabel}</Text>
+      </WorkoutTouchable>
+    </View>
+  </View>;
 }
 
-export function WorkoutIntensityPicker({
-  visible,
-  workoutLabel,
-  accent,
-  levels = DEFAULT_LEVELS,
-  prompt = 'How hard do you want to go?',
-  subtext,
-  footerText = 'SLIDE TO START',
-  onChoose,
-  onClose,
-}: WorkoutIntensityPickerProps) {
-  const trackWidthRef = useRef(0);
-  const onChooseRef = useRef(onChoose);
-  const [value, setValue] = useState(0.5);
-  const valueRef = useRef(0.5);
-  const committedRef = useRef(false);
-  const nearestLevel = levels.reduce((closest, level) =>
-    Math.abs(level.value - value) < Math.abs(closest.value - value) ? level : closest
-  );
-
-  useEffect(() => {
-    onChooseRef.current = onChoose;
-  }, [onChoose]);
-
-  useEffect(() => {
-    if (visible) {
-      setValue(0.5);
-      valueRef.current = 0.5;
-      committedRef.current = false;
-    }
-  }, [visible, workoutLabel]);
-
-  const updateValue = (nextValue: number) => {
-    const clamped = Math.max(0, Math.min(1, nextValue));
-    setValue(clamped);
-    valueRef.current = clamped;
-  };
-
-  const snapToLevel = (nextValue: number) =>
-    levels.reduce((closest, level) =>
-      Math.abs(level.value - nextValue) < Math.abs(closest.value - nextValue) ? level : closest
-    ).value;
-
-  const finishSelection = () => {
-    const snappedValue = snapToLevel(valueRef.current);
-    updateValue(snappedValue);
-
-    if (committedRef.current) {
-      return;
-    }
-    committedRef.current = true;
-    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    onChooseRef.current(snappedValue);
-  };
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (event) => {
-        if (trackWidthRef.current) updateValue(event.nativeEvent.locationX / trackWidthRef.current);
-      },
-      onPanResponderMove: (event) => {
-        if (trackWidthRef.current) updateValue(event.nativeEvent.locationX / trackWidthRef.current);
-      },
-      onPanResponderRelease: finishSelection,
-      onPanResponderTerminate: finishSelection,
-    })
-  ).current;
-
-  const chooseLevel = (level: number) => {
-    if (committedRef.current) return;
-    updateValue(level);
-    committedRef.current = true;
-    void Haptics.selectionAsync();
-    onChooseRef.current(level);
-  };
-
-  return (
-    <Modal transparent visible={visible} animationType="fade" onRequestClose={onClose}>
-      <View style={styles.modal}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Close workout intensity picker"
-          style={styles.backdrop}
-          onPress={onClose}
-        />
-        <View style={[styles.card, { borderColor: rgba(accent, 0.55) }]}>
-          <View style={styles.handle} />
-          <Text style={[styles.eyebrow, { color: accent }]}>{workoutLabel.toUpperCase()}</Text>
-          <Text style={styles.title}>{prompt}</Text>
-          {subtext ? <Text style={styles.subtext}>{subtext}</Text> : null}
-
-          <View style={styles.sliderArea}>
-            <View
-              accessibilityRole="adjustable"
-              accessibilityLabel="Workout intensity"
-              accessibilityValue={{ min: 0, max: 100, now: Math.round(value * 100), text: nearestLevel.label }}
-              onAccessibilityAction={(event) => {
-                const direction = event.nativeEvent.actionName === 'increment' ? 0.5 : -0.5;
-                const snappedValue = snapToLevel(valueRef.current + direction);
-                updateValue(snappedValue);
-                if (!committedRef.current) {
-                  committedRef.current = true;
-                  void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                  onChooseRef.current(snappedValue);
-                }
-              }}
-              onLayout={(event) => {
-                const width = event.nativeEvent.layout.width;
-                trackWidthRef.current = width;
-              }}
-              style={styles.trackTouchArea}
-              {...panResponder.panHandlers}
-            >
-              <View style={styles.track}>
-                <View style={[styles.trackFill, { width: `${value * 100}%`, backgroundColor: accent }]} />
-                {levels.map((level) => (
-                  <View
-                    key={level.label}
-                    pointerEvents="none"
-                    style={[
-                      styles.tick,
-                      { left: `${level.value * 100}%` },
-                      Math.abs(level.value - value) < 0.14 && { backgroundColor: redesignColors.bone },
-                    ]}
-                  />
-                ))}
-                <View
-                  pointerEvents="none"
-                  style={[
-                    styles.thumb,
-                    {
-                      left: `${value * 100}%`,
-                      borderColor: accent,
-                      shadowColor: accent,
-                    },
-                  ]}
-                />
-              </View>
-            </View>
-            <View style={styles.levelLabels}>
-              {levels.map((level, index) => (
-                <Pressable
-                  key={level.label}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Choose ${level.label.toLowerCase()} intensity`}
-                  onPress={() => chooseLevel(level.value)}
-                  style={styles.levelButton}
-                >
-                  <Text
-                    style={[
-                      styles.levelLabel,
-                      index === 1 && styles.levelLabelCenter,
-                      index === 2 && styles.levelLabelEnd,
-                      Math.abs(level.value - value) < 0.14 && { color: accent },
-                    ]}
-                  >
-                    {level.label}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-          </View>
-
-          <Text style={styles.hint}>{footerText}</Text>
-        </View>
-      </View>
-    </Modal>
-  );
+export function WorkoutIntensityPicker({ visible, ...props }: WorkoutIntensityPickerProps) {
+  const reducedMotion = useReducedMotion();
+  const insets = useSafeAreaInsets();
+  return <Modal transparent visible={visible} animationType={reducedMotion ? 'none' : 'fade'}
+    statusBarTranslucent onRequestClose={props.onClose}>
+    {visible ? <View style={[styles.modal, { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }]}>
+      <Pressable accessibilityRole="button" accessibilityLabel="Close workout feedback"
+        onPress={props.onClose} style={styles.backdrop} />
+      <FeedbackContent key={props.workoutLabel} {...props} />
+    </View> : null}
+  </Modal>;
 }
 
 const styles = StyleSheet.create({
-  modal: {
-    flex: 1,
-    justifyContent: 'center',
-    paddingHorizontal: 20,
-  },
-  backdrop: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0, 0, 0, 0.72)',
-  },
+  modal: { flex: 1, justifyContent: 'center', paddingHorizontal: 24 },
+  backdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0, 0, 0, 0.68)' },
   card: {
-    minHeight: 306,
-    overflow: 'hidden',
-    borderRadius: 30,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    paddingHorizontal: 25,
-    paddingTop: 16,
-    paddingBottom: 25,
-    backgroundColor: redesignColors.surface,
+    width: '100%', maxWidth: 440, alignSelf: 'center', overflow: 'hidden',
+    borderRadius: 30, borderCurve: 'continuous',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: c.border,
+    backgroundColor: c.surface,
   },
-  handle: {
-    width: 38,
-    height: 4,
-    alignSelf: 'center',
-    borderRadius: 2,
-    marginBottom: 29,
-    backgroundColor: redesignColors.hi,
-  },
-  eyebrow: {
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 12,
-    letterSpacing: 1.7,
-    marginBottom: 11,
-  },
-  title: {
-    maxWidth: 280,
-    fontFamily: redesignFonts.display,
-    fontSize: 32,
-    lineHeight: 37,
-    letterSpacing: -0.8,
-    color: redesignColors.bone,
-  },
-  subtext: {
-    marginTop: 9,
-    fontFamily: redesignFonts.ui,
-    fontSize: 14,
-    lineHeight: 19,
-    color: redesignColors.ash,
-  },
-  sliderArea: {
-    marginTop: 31,
-  },
-  trackTouchArea: {
-    height: 42,
-    justifyContent: 'center',
-  },
-  track: {
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: redesignColors.hi,
-  },
-  trackFill: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    borderRadius: 4,
-  },
-  tick: {
-    position: 'absolute',
-    top: -3,
-    width: 13,
-    height: 13,
-    marginLeft: -6.5,
-    borderRadius: 6.5,
-    backgroundColor: redesignColors.ashDim,
-  },
-  thumb: {
-    position: 'absolute',
-    top: -10,
-    width: 27,
-    height: 27,
-    marginLeft: -13.5,
-    borderRadius: 13.5,
-    borderWidth: 5,
-    backgroundColor: redesignColors.bone,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.48,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  levelLabels: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 11,
-  },
-  levelButton: {
-    width: '33.333%',
-  },
-  levelLabel: {
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 10,
-    letterSpacing: 0.7,
-    color: redesignColors.ashDim,
-  },
-  levelLabelCenter: {
-    textAlign: 'center',
-  },
-  levelLabelEnd: {
-    textAlign: 'right',
-  },
-  hint: {
-    alignSelf: 'center',
-    marginTop: 29,
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 11,
-    letterSpacing: 1.5,
-    color: redesignColors.ash,
-  },
+  scroll: { flexGrow: 0, flexShrink: 1 },
+  content: { paddingHorizontal: 24, paddingTop: 20, paddingBottom: 24 },
+  contextRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
+  context: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  workoutLabel: { flex: 1, color: c.ash, fontFamily: f.uiMedium, fontSize: 14, lineHeight: 20 },
+  close: { width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center',
+    backgroundColor: c.raised, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
+  title: { color: c.bone, fontFamily: f.display, fontSize: 28, lineHeight: 34, letterSpacing: -0.5 },
+  subtext: { marginTop: 8, color: c.ash, fontFamily: f.ui, fontSize: 14, lineHeight: 20 },
+  question: { marginTop: 24, color: c.bone, fontFamily: f.uiSemiBold, fontSize: 18, lineHeight: 24 },
+  choices: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  stackedChoices: { flexDirection: 'column' },
+  choice: { flex: 1, minHeight: 52, paddingHorizontal: 10, paddingVertical: 14,
+    justifyContent: 'center', alignItems: 'center', borderRadius: 16, borderCurve: 'continuous',
+    backgroundColor: c.raised, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
+  stackedChoice: { flex: 0 },
+  selectedChoice: { backgroundColor: c.bone, borderColor: c.bone },
+  choiceLabel: { color: c.bone, fontFamily: f.uiSemiBold, fontSize: 15, lineHeight: 20, textAlign: 'center' },
+  selectedLabel: { color: c.ink },
+  footer: { paddingHorizontal: 24, paddingBottom: 24 },
+  finish: { minHeight: 54, padding: 16, borderRadius: 16, borderCurve: 'continuous',
+    alignItems: 'center', justifyContent: 'center', backgroundColor: c.accent },
+  finishLabel: { color: c.ink, fontFamily: f.uiBold, fontSize: 16, lineHeight: 22, textAlign: 'center' },
+  disabled: { opacity: 0.55 },
 });

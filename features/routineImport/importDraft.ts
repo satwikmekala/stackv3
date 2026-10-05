@@ -11,6 +11,7 @@
 import { exerciseMatchKey } from '@/features/sharing/splitProtocol';
 import type { RoutineImportResult } from '@/features/routineImport/routineImportProtocol';
 import type { ExerciseCatalogItem } from '@/store/workoutStore';
+import type { DayColor } from '@/features/custom-split/colors';
 
 export interface PendingImportExercise {
   /** RoutineImportExercise.id, unique within the import. */
@@ -26,6 +27,7 @@ export interface PendingImportExercise {
 
 export interface ImportedDraftWorkout {
   name: string;
+  color?: DayColor | null;
   exercises: ExerciseCatalogItem[];
   pending: PendingImportExercise[];
 }

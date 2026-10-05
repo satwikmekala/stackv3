@@ -4,11 +4,10 @@ import {
   ScrollView, StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import { MessageCircle, Trash2, X } from 'lucide-react-native';
-import { GlassView, isGlassEffectAPIAvailable } from 'expo-glass-effect';
-import { SymbolView } from 'expo-symbols';
 import { useReducedMotion } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ExerciseActionButton } from '@/components/ExerciseActionPill';
 import { ExerciseNotesDone } from '@/components/ExerciseNotesDone';
 
 import { redesignColors as c, redesignFonts as f } from '@/constants/theme';
@@ -18,11 +17,10 @@ import { useWorkoutStore } from '@/store/workoutStore';
 
 type Props = { workoutId: string; exerciseId: number; exerciseName: string };
 
-/** Floating control over the logger; the native sheet keeps writing within reach. */
+/** Right-hand action of the logger's floating pill; the native sheet keeps writing within reach. */
 export function ExerciseNotes({ workoutId, exerciseId, exerciseName }: Props) {
   const insets = useSafeAreaInsets();
   const reducedMotion = useReducedMotion();
-  const supportsGlass = Platform.OS === 'ios' && isGlassEffectAPIAvailable();
   const accessoryId = useId();
   const [editing, setEditing] = useState(false);
   const [visible, setVisible] = useState(false);
@@ -107,39 +105,15 @@ export function ExerciseNotes({ workoutId, exerciseId, exerciseName }: Props) {
     ]);
   };
 
-  const icon = (
-    <SymbolView
-      name="bubble.left"
-      size={22}
-      weight="medium"
-      tintColor={c.bone}
-      fallback={<MessageCircle size={22} color={c.bone} strokeWidth={1.8} />}
-    />
-  );
-
   return (
     <>
-      <View style={[styles.floating, { right: insets.right + 24, bottom: insets.bottom + 20 }]}>
-        <TouchableOpacity activeOpacity={0.7}
-          accessible
-          accessibilityRole="button"
-          accessibilityLabel={`${exerciseName} notes${notes.length ? `, ${notes.length} saved` : ''}`}
-          accessibilityHint="Read previous notes or write a note for this exercise"
-          onPress={() => { refresh(); setSaved(false); setVisible(true); }}
-          style={styles.commentButton}
-        >
-          {supportsGlass ? (
-            <GlassView
-              glassEffectStyle="regular"
-              colorScheme="dark" isInteractive
-              pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
-              style={styles.glass}
-            >
-              {icon}
-            </GlassView>
-          ) : <View style={[styles.glass, styles.fallback]}>{icon}</View>}
-        </TouchableOpacity>
-      </View>
+      <ExerciseActionButton
+        symbol="bubble.left"
+        fallback={MessageCircle}
+        accessibilityLabel={`${exerciseName} notes${notes.length ? `, ${notes.length} saved` : ''}`}
+        accessibilityHint="Read previous notes or write a note for this exercise"
+        onPress={() => { refresh(); setSaved(false); setVisible(true); }}
+      />
 
       <Modal
         visible={visible}
@@ -239,10 +213,6 @@ export function ExerciseNotes({ workoutId, exerciseId, exerciseName }: Props) {
 }
 
 const styles = StyleSheet.create({
-  floating: { position: 'absolute', width: 48, height: 48 },
-  commentButton: { width: 48, height: 48, borderRadius: 24, overflow: 'hidden', backgroundColor: '#FFFFFF06', borderWidth: StyleSheet.hairlineWidth, borderColor: '#FFFFFF1F' },
-  glass: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
-  fallback: { backgroundColor: c.raised },
   sheet: { flex: 1, backgroundColor: c.ink },
   header: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingHorizontal: 24, paddingBottom: 20 },
   heading: { flex: 1 },

@@ -4,6 +4,8 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { DayColor } from '@/features/custom-split/colors';
 import type { ImportedDraftWorkout, PendingImportExercise } from '@/features/routineImport/importDraft';
+import { exerciseMatchKey, type PortableExercise } from '@/features/sharing/splitProtocol';
+import { ROUTINE_SHARE_ID_PATTERN } from '@/features/sharing/splitTransport';
 
 import type { Archetype } from '@/constants/archetypes';
 import type { CustomSplit } from '@/store/customSplits';
@@ -23,7 +25,7 @@ export type CustomSplitMuscleGroup = typeof CUSTOM_SPLIT_MUSCLE_GROUPS[number];
 
 /** Where the creation flow began. Lives on the draft so it survives the
  * builder ↔ review round-trip without being threaded through route params. */
-export type CustomSplitSource = 'onboarding' | 'library' | 'stack';
+export type CustomSplitSource = 'onboarding' | 'library' | 'stack' | 'shared';
 
 export const STACK_PLAN_NAME = 'Stack’s plan';
 
@@ -37,7 +39,9 @@ export const MUSCLE_GROUP_COLORS: Record<CustomSplitMuscleGroup, string> = {
   get Legs() { return getMuscleColor('legs'); },
 };
 
-export type DraftExercise = ExerciseCatalogItem;
+export type DraftExercise = ExerciseCatalogItem & { portable?: PortableExercise };
+export interface SharedDraftContext { shareId: string; attemptId?: string; nextExerciseId?: number }
+export interface SharedDraftWorkout extends Omit<ImportedDraftWorkout, 'exercises'> { exercises: DraftExercise[] }
 
 export interface DraftWorkout {
   color?: DayColor | null;
@@ -66,6 +70,7 @@ export interface DraftCustomSplit {
 }
 
 export interface SplitDraftSnapshot {
+  sharedContext?: SharedDraftContext;
   draft: DraftCustomSplit;
   activeWorkoutId: string | null;
   source: CustomSplitSource;
@@ -73,17 +78,18 @@ export interface SplitDraftSnapshot {
   sourceRevision: string | null;
 }
 /** Stack's plan has its own slot until its first save, so it never collides with a new routine. */
-export const splitDraftKey = (id: number | null, source?: CustomSplitSource) =>
-  id !== null ? `edit:${id}` : source === 'stack' ? 'stack' : 'new';
+export const splitDraftKey = (id: number | null, source?: CustomSplitSource, shareId?: string) =>
+  id !== null ? `edit:${id}` : source === 'shared' ? `shared:${shareId}` : source === 'stack' ? 'stack' : 'new';
 export const splitRevision = (split: CustomSplit) => JSON.stringify(split);
 
 interface CustomSplitDraftStore {
+  sharedContext?: SharedDraftContext;
   drafts: Record<string, SplitDraftSnapshot>;
   hydrated: boolean;
   storageError: string | null;
   setHydrated: () => void;
   sourceRevision: string | null;
-  resumeDraft: (id: number | null, source?: CustomSplitSource) => boolean;
+  resumeDraft: (id: number | null, source?: CustomSplitSource, shareId?: string) => boolean;
   closeDraft: () => void;
   recoverAsNew: () => void;
   setWorkoutColor: (id: string, color: DayColor | null) => void;
@@ -110,7 +116,9 @@ interface CustomSplitDraftStore {
   /** A newly generated Stack's plan makes unfinished edits of the old one obsolete. */
   discardStackPlanDrafts: () => void;
   /** Starts a new routine from a pasted routine. Replaces any open new-routine draft: the paste is the newer intent. */
-  initializeImportedDraft: (name: string, workouts: ImportedDraftWorkout[], source: CustomSplitSource) => void;
+  initializeImportedDraft: (name: string, workouts: ImportedDraftWorkout[], source: Exclude<CustomSplitSource, 'shared'>) => void;
+  initializeSharedDraft: (shareId: string, name: string, workouts: SharedDraftWorkout[]) => void;
+  allocateSharedExerciseId: () => number;
   /** Confirms a pending pasted exercise as `exercise`, or removes it when `exercise` is null. */
   resolvePendingImport: (workoutId: string, key: string, exercise: DraftExercise | null) => void;
   discardDraft: () => void;
@@ -292,6 +300,13 @@ export const getDraftPrefillRecommendation = (
 let draftStorageReadable = false;
 let draftWriteQueue: Promise<void> = Promise.resolve();
 
+/** Await the same persistence queue used by recovery before a final import. */
+export async function flushCustomSplitDrafts() {
+  await draftWriteQueue;
+  const state = useCustomSplitDraftStore.getState();
+  if (!state.hydrated || state.storageError) throw new Error('Couldn’t save your draft. Try again.');
+}
+
 /** Clear queued snapshots as well as the live builder when device data is replaced. */
 export async function clearCustomSplitDrafts() {
   await draftWriteQueue;
@@ -299,7 +314,7 @@ export async function clearCustomSplitDrafts() {
   const readable = draftStorageReadable;
   draftStorageReadable = false;
   useCustomSplitDraftStore.setState({ drafts: {}, draft: null, activeWorkoutId: null,
-    editingSplitId: null, sourceRevision: null, picker: null, source: 'library', hydrated: true, storageError: null });
+    editingSplitId: null, sourceRevision: null, sharedContext: undefined, picker: null, source: 'library', hydrated: true, storageError: null });
   draftStorageReadable = readable;
 }
 
@@ -307,9 +322,11 @@ export const useCustomSplitDraftStore = create<CustomSplitDraftStore>()(persist(
   // Every draft mutation updates its resumable snapshot in the same state change.
   const set = (update: Partial<CustomSplitDraftStore> | ((state: CustomSplitDraftStore) => Partial<CustomSplitDraftStore>)) => rawSet((state) => {
     const next = { ...state, ...(typeof update === 'function' ? update(state) : update) };
-    if (next.draft) next.drafts = { ...next.drafts, [splitDraftKey(next.editingSplitId, next.source)]: {
+    if (next.source !== 'shared') next.sharedContext = undefined;
+    if (next.draft) next.drafts = { ...next.drafts, [splitDraftKey(next.editingSplitId, next.source, next.sharedContext?.shareId)]: {
       draft: next.draft, activeWorkoutId: next.activeWorkoutId, source: next.source,
       editingSplitId: next.editingSplitId, sourceRevision: next.sourceRevision,
+      ...(next.sharedContext ? { sharedContext: next.sharedContext } : {}),
     } };
     return next;
   });
@@ -324,17 +341,17 @@ export const useCustomSplitDraftStore = create<CustomSplitDraftStore>()(persist(
     ...(options?.pendingKey ? { pendingKey: options.pendingKey } : {}) } }),
   updatePicker: (update) => set(state => ({ picker: state.picker ? { ...state.picker, ...update } : null })),
   closePicker: () => set({ picker: null }),
-  resumeDraft: (id, source) => {
-    const saved = get().drafts[splitDraftKey(id, source)];
+  resumeDraft: (id, source, shareId) => {
+    const saved = get().drafts[splitDraftKey(id, source, shareId)];
     if (!saved) return false;
     set({ ...saved, picker: null });
     return true;
   },
-  closeDraft: () => set({ draft: null, activeWorkoutId: null, editingSplitId: null, sourceRevision: null, picker: null }),
+  closeDraft: () => set({ draft: null, activeWorkoutId: null, editingSplitId: null, sourceRevision: null, sharedContext: undefined, picker: null }),
   recoverAsNew: () => set(state => {
     if (!state.draft) return {};
     const drafts = { ...state.drafts };
-    delete drafts[splitDraftKey(state.editingSplitId, state.source)];
+    delete drafts[splitDraftKey(state.editingSplitId, state.source, state.sharedContext?.shareId)];
     // Preserve an unrelated new draft rather than silently overwriting it.
     if (drafts.new) return {};
     // A recovered Stack's plan edit becomes the user's own routine.
@@ -399,8 +416,9 @@ export const useCustomSplitDraftStore = create<CustomSplitDraftStore>()(persist(
   initializeImportedDraft: (name, importedWorkouts, source) =>
     set(() => {
       if (!importedWorkouts.length) return {};
-      const workouts = importedWorkouts.map(({ name: workoutName, exercises, pending }): DraftWorkout => ({
+      const workouts = importedWorkouts.map(({ name: workoutName, color, exercises, pending }): DraftWorkout => ({
         ...createEmptyWorkout(),
+        color: color ?? null,
         customName: workoutName,
         exercises: exercises.map((exercise) => ({ ...exercise })),
         selectedMuscleGroups: exercises.map(getMuscleGroupForExercise)
@@ -416,6 +434,27 @@ export const useCustomSplitDraftStore = create<CustomSplitDraftStore>()(persist(
         picker: null,
       };
     }),
+
+  initializeSharedDraft: (shareId, name, importedWorkouts) => {
+    if (!get().hydrated || !ROUTINE_SHARE_ID_PATTERN.test(shareId)) throw new Error('This routine link is broken.');
+    if (get().resumeDraft(null, 'shared', shareId)) return;
+    const workouts: DraftWorkout[] = importedWorkouts.map(day => ({
+      ...createEmptyWorkout(), customName: day.name, color: day.color ?? null,
+      exercises: day.exercises.map(exercise => ({ ...exercise, portable: exercise.portable ? { ...exercise.portable } : undefined })),
+      selectedMuscleGroups: [...new Set(day.exercises.map(getMuscleGroupForExercise))],
+    }));
+    if (!workouts.length) throw new Error('This routine link is broken.');
+    set({ draft: { name, workouts }, activeWorkoutId: workouts[0].id, source: 'shared',
+      sharedContext: { shareId, nextExerciseId: Math.min(0, ...workouts.flatMap(day => day.exercises.map(exercise => exercise.id))) - 1 }, editingSplitId: null, sourceRevision: null, picker: null });
+  },
+
+  allocateSharedExerciseId: () => {
+    const state = get();
+    if (state.source !== 'shared' || !state.sharedContext || !state.draft) throw new Error('Shared draft unavailable.');
+    const id = state.sharedContext.nextExerciseId ?? Math.min(0, ...state.draft.workouts.flatMap(day => day.exercises.map(exercise => exercise.id))) - 1;
+    set({ sharedContext: { ...state.sharedContext, nextExerciseId: id - 1 } });
+    return id;
+  },
 
   resolvePendingImport: (workoutId, key, exercise) =>
     set((state) => ({
@@ -498,7 +537,7 @@ export const useCustomSplitDraftStore = create<CustomSplitDraftStore>()(persist(
 
   discardDraft: () => set(state => {
     const drafts = { ...state.drafts };
-    delete drafts[splitDraftKey(state.editingSplitId, state.source)];
+    delete drafts[splitDraftKey(state.editingSplitId, state.source, state.sharedContext?.shareId)];
     return { drafts, draft: null, activeWorkoutId: null, editingSplitId: null, sourceRevision: null, source: 'library', picker: null };
   }),
 
@@ -599,7 +638,8 @@ export const useCustomSplitDraftStore = create<CustomSplitDraftStore>()(persist(
   addExercise: (workoutId, exercise) =>
     set((state) => ({
       draft: updateWorkout(state.draft, workoutId, (workout) => {
-        if (workout.exercises.some((item) => item.id === exercise.id)) return workout;
+        if (workout.exercises.some((item) => item.id === exercise.id ||
+          (state.source === 'shared' && exerciseMatchKey(item.name) === exerciseMatchKey(exercise.name)))) return workout;
         const group = getMuscleGroupForExercise(exercise);
         return {
           ...workout,
@@ -653,7 +693,8 @@ export const useCustomSplitDraftStore = create<CustomSplitDraftStore>()(persist(
     set((state) => ({
       draft: updateWorkout(state.draft, workoutId, (workout) => {
         const existingIds = new Set(workout.exercises.map((item) => item.id));
-        const additions = exercises.filter((item) => !existingIds.has(item.id));
+        const additions = exercises.filter((item) => !existingIds.has(item.id) && (state.source !== 'shared' ||
+          !workout.exercises.some(existing => exerciseMatchKey(existing.name) === exerciseMatchKey(item.name))));
         const representedGroups = exercises.map(getMuscleGroupForExercise);
         const groupsToAdd = representedGroups.filter(
           (group, index) =>
@@ -695,7 +736,10 @@ export const useCustomSplitDraftStore = create<CustomSplitDraftStore>()(persist(
     const saved = persisted as { drafts?: Record<string, SplitDraftSnapshot> };
     if (!saved || !saved.drafts || typeof saved.drafts !== 'object' || Array.isArray(saved.drafts)) throw new Error('Invalid saved drafts');
     for (const [key, snapshot] of Object.entries(saved.drafts)) {
-      if (!snapshot || key !== splitDraftKey(snapshot.editingSplitId, snapshot.source) ||
+      if (!snapshot || key !== splitDraftKey(snapshot.editingSplitId, snapshot.source, snapshot.sharedContext?.shareId) ||
+        (snapshot.source === 'shared' && (snapshot.editingSplitId !== null || !snapshot.sharedContext ||
+          !ROUTINE_SHARE_ID_PATTERN.test(snapshot.sharedContext.shareId) ||
+          (snapshot.sharedContext.attemptId !== undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(snapshot.sharedContext.attemptId)))) ||
         !snapshot.draft || typeof snapshot.draft.name !== 'string' ||
         !Array.isArray(snapshot.draft.workouts) || !snapshot.draft.workouts.length ||
         snapshot.draft.workouts.some(day => !day || typeof day.id !== 'string' || typeof day.customName !== 'string' || !Array.isArray(day.exercises))) {

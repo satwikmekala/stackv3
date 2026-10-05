@@ -2,7 +2,7 @@ import { displayExerciseName } from '@/constants/exerciseNames';
 import { useMuscleColors } from '@/store/muscleColors';
 import { SplitPressable as Pressable } from '@/components/custom-split/SplitPressable';
 import { useCallback, useEffect, useLayoutEffect } from 'react';
-import { AccessibilityInfo, Text, View } from 'react-native';
+import { AccessibilityInfo, Platform, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { type AnimatedRef, type SharedValue, runOnJS, runOnUI, scrollTo, useAnimatedStyle, useFrameCallback, useSharedValue, withTiming, ReduceMotion } from 'react-native-reanimated';
 import { GripHorizontal, MoreHorizontal } from 'lucide-react-native';
@@ -10,6 +10,7 @@ import { redesignColors as c } from '@/constants/theme';
 import { MUSCLE_GROUP_COLORS, getMuscleGroupForExercise, type DraftExercise } from '@/store/customSplitDraft';
 import { ui } from './ui';
 import { showActions } from './showActions';
+import * as Haptics from '@/services/haptics';
 
 const GAP = 8;
 interface Props {
@@ -24,7 +25,7 @@ interface Props {
 }
 interface Drag {
   dragging: SharedValue<boolean>;
-  active: SharedValue<number>;
+  active: SharedValue<number | null>;
   target: SharedValue<number>;
   translation: SharedValue<number>;
   scrollStart: SharedValue<number>;
@@ -51,7 +52,7 @@ const movedOrder = (order: number[], active: number, target: number) => {
 
 export function SelectedExerciseList({ exercises, scrollRef, scrollOffset, maxScrollOffset, measureViewport, onDragStateChange, onRemove, onReorder }: Props) {
   useMuscleColors(state => state.preferences);
-  const active = useSharedValue(-1);
+  const active = useSharedValue<number | null>(null);
   const dragging = useSharedValue(false);
   const target = useSharedValue(0);
   const translation = useSharedValue(0);
@@ -66,24 +67,26 @@ export function SelectedExerciseList({ exercises, scrollRef, scrollOffset, maxSc
     const nextOrder = exercises.map(exercise => exercise.id);
     runOnUI(() => {
       order.value = nextOrder;
-      active.value = -1;
+      active.value = null;
       dragging.value = false;
       translation.value = 0;
     })();
   }, [exercises, order, active, dragging, translation]);
-  useEffect(() => () => { active.value = -1; onDragStateChange(false); }, [active, onDragStateChange]);
+  useEffect(() => () => { active.value = null; onDragStateChange(false); }, [active, onDragStateChange]);
   const begin = useCallback((id: number) => {
     onDragStateChange(true);
+    if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Soft);
     void measureViewport().then(value => { if (active.value === id) bounds.value = value; });
   }, [active, bounds, measureViewport, onDragStateChange]);
   const finish = useCallback((from: number, to: number) => {
     onReorder(from, to);
     onDragStateChange(false);
+    if (from !== to && Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Soft);
   }, [onReorder, onDragStateChange]);
   const cancel = useCallback(() => onDragStateChange(false), [onDragStateChange]);
 
   useFrameCallback(({ timeSincePreviousFrame }) => {
-    if (active.value < 0 || !dragging.value) return;
+    if (active.value === null || !dragging.value) return;
     if (bounds.value.bottom > bounds.value.top) {
       const direction = pointer.value < bounds.value.top + 70 ? -1 : pointer.value > bounds.value.bottom - 70 ? 1 : 0;
       const next = Math.max(0, Math.min(maxScrollOffset.value, scrollOffset.value + direction * Math.min(timeSincePreviousFrame ?? 16, 32) * 0.55));
@@ -115,7 +118,7 @@ function ExerciseRow({ exercise, index, count, drag, scrollOffset, begin, finish
   const id = exercise.id;
   const pan = Gesture.Pan().activateAfterLongPress(180)
     .onStart(event => {
-      if (drag.active.value >= 0) return;
+      if (drag.active.value !== null) return;
       drag.dragging.set(true);
       drag.active.set(id); drag.target.set(index); drag.translation.set(0);
       drag.scrollStart.set(scrollOffset.value); drag.pointer.set(event.absoluteY);
@@ -128,24 +131,25 @@ function ExerciseRow({ exercise, index, count, drag, scrollOffset, begin, finish
       // Hold the final visual positions until React commits the reordered rows.
       drag.dragging.set(false);
       const to = drag.target.value;
-      if (to === index) drag.active.set(-1);
+      if (to === index) drag.active.set(null);
       runOnJS(finish)(index, to);
     })
     .onFinalize((_event, success) => {
-      if (!success && drag.active.value === id) { drag.dragging.set(false); drag.active.set(-1); drag.translation.set(0); runOnJS(cancel)(); }
+      if (!success && drag.active.value === id) { drag.dragging.set(false); drag.active.set(null); drag.translation.set(0); runOnJS(cancel)(); }
     });
   const animatedStyle = useAnimatedStyle(() => {
     const active = drag.active.value === id;
-    const projected = drag.active.value >= 0 ? movedOrder(drag.order.value, drag.active.value, drag.target.value) : drag.order.value;
+    const projected = drag.active.value !== null ? movedOrder(drag.order.value, drag.active.value, drag.target.value) : drag.order.value;
     const offset = topOf(projected, drag.heights.value, id) - topOf(drag.order.value, drag.heights.value, id);
     return { zIndex: active ? 10 : 0, transform: [{ translateY: active
       ? drag.translation.value + scrollOffset.value - drag.scrollStart.value
-      : drag.active.value < 0 ? 0 : withTiming(offset, { duration: 130, reduceMotion: ReduceMotion.System }) }], backgroundColor: active ? c.raised : c.surface };
+      : drag.active.value === null ? 0 : withTiming(offset, { duration: 130, reduceMotion: ReduceMotion.System }) }], backgroundColor: active ? c.raised : c.surface };
   });
   const move = (direction: number) => {
     const next = index + direction;
     if (next < 0 || next >= count) return;
     onReorder(index, next);
+    if (Platform.OS !== 'web') void Haptics.selectionAsync();
     AccessibilityInfo.announceForAccessibility(`${displayExerciseName(exercise.name)}, position ${next + 1} of ${count}`);
   };
   return <Animated.View onLayout={event => { const height = event.nativeEvent.layout.height; if (drag.heights.value[id] !== height) drag.heights.set({ ...drag.heights.value, [id]: height }); }}

@@ -4,6 +4,7 @@
  * OpenRouter's Authorization header.
  */
 import { ROUTINE_IMPORT_LIMITS } from './stack/routineImportProtocol.mjs';
+import path from 'node:path';
 
 export const DEFAULT_MODEL = 'google/gemini-3.1-flash-lite';
 
@@ -25,6 +26,43 @@ const flag = (env, name, fallback) => {
   throw new Error(`${name} must be true or false.`);
 };
 
+const publicOrigin = (value = 'https://liftwithstack.com') => {
+  const url = new URL(value);
+  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
+    throw new Error('ROUTINE_SHARE_PUBLIC_ORIGIN must be an HTTPS origin with no path, credentials or query.');
+  }
+  return url.origin;
+};
+
+const shareDbPath = (env) => {
+  const value = env.ROUTINE_SHARES_DB_PATH;
+  if (!value) return null;
+  if (!path.isAbsolute(value)) throw new Error('ROUTINE_SHARES_DB_PATH must be an absolute persistent-volume path.');
+  if (env.RAILWAY_PROJECT_ID || env.RAILWAY_ENVIRONMENT_ID) {
+    const mount = env.RAILWAY_VOLUME_MOUNT_PATH;
+    const relative = mount && path.isAbsolute(mount) ? path.relative(mount, value) : null;
+    if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      throw new Error('ROUTINE_SHARES_DB_PATH must be inside the attached RAILWAY_VOLUME_MOUNT_PATH.');
+    }
+  }
+  return value;
+};
+
+// Verified from the local Stack provisioning profile's application-identifier.
+// Reconfirm against the production archive before publishing the association.
+export const STACK_IOS_APP_ID = '4JMBGPRDZG.com.liftwithstack.stack';
+const iosAppId = (value = STACK_IOS_APP_ID) => {
+  if (!/^[A-Z0-9]{10}\.com\.liftwithstack\.stack$/.test(value)) throw new Error('STACK_IOS_APP_ID must match the signed Stack application-identifier.');
+  return value;
+};
+const appStoreUrl = value => {
+  if (!value?.trim()) return null;
+  const url = new URL(value.trim());
+  if (url.protocol !== 'https:' || url.hostname !== 'apps.apple.com' || url.port || url.username || url.password || url.search || url.hash ||
+    !/^\/(?:[a-z]{2}\/)?app\/(?:[^/]+\/)?id[0-9]+$/.test(url.pathname)) throw new Error('STACK_APP_STORE_URL must be the verified production apps.apple.com listing URL.');
+  return url.href;
+};
+
 export const loadConfig = (env = process.env) => ({
   port: integer(env, 'PORT', 8080, 1, 65535),
   openRouterApiKey: env.OPENROUTER_API_KEY?.trim() || null,
@@ -44,6 +82,11 @@ export const loadConfig = (env = process.env) => ({
   maxTextLength: integer(env, 'MAX_TEXT_LENGTH', ROUTINE_IMPORT_LIMITS.maxTextLength, 100, ROUTINE_IMPORT_LIMITS.maxTextLength),
   maxBodyBytes: integer(env, 'MAX_BODY_BYTES', 64 * 1024, 1024, 1024 * 1024),
   rateLimitPerMinute: integer(env, 'RATE_LIMIT_PER_MINUTE', 10, 0, 10_000),
+  routineShareRateLimitPerMinute: integer(env, 'ROUTINE_SHARE_RATE_LIMIT_PER_MINUTE', 10, 0, 10_000),
+  routineSharePublicOrigin: publicOrigin(env.ROUTINE_SHARE_PUBLIC_ORIGIN || undefined),
+  routineSharesDbPath: shareDbPath(env),
+  stackIosAppId: iosAppId(env.STACK_IOS_APP_ID || undefined),
+  stackAppStoreUrl: appStoreUrl(env.STACK_APP_STORE_URL),
   /** If set, requests must send it as `x-stack-client-key`. */
   clientKey: env.STACK_CLIENT_KEY?.trim() || null,
   /** Trust the first X-Forwarded-For hop (Railway's proxy) for rate limiting. */

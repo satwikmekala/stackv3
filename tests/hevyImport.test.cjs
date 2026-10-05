@@ -186,7 +186,7 @@ test('valid working history informs Progress, chronological PRs and previous val
     const lift = h.load('@/store/liftProgress').deriveLiftProgress(sessions)[0]; assert.equal(lift.latest.weight, 70); assert.equal(lift.previous.weight, 60);
     const records = h.load('@/store/personalRecords'); assert.equal(records.derivePersonalRecords(sessions)[0].best.weight, 70);
     const sets = h.database.readExerciseRecordSetsSync(sessions[0].exercises[0].name, sessions); assert.equal(sets.length, 2);
-    assert.equal(records.deriveRecentLifts(sets).flatMap(g => g.sets).filter(s => s.isPR).length, 2);
+    assert.equal(records.deriveRecordProgression(sets).milestones.length, 2);
     const previous = h.database.readLastExerciseHistorySync(sessions[0].exercises[0].name); assert.equal(previous.sets[1].weight, 70);
     assert.equal(h.load('@/store/verifiedSessions').getBuildSessions(sessions).length, 0);
     assert.deepEqual(h.load('@/features/build/buildCounts').buildCounts(sessions, '2026-10-05'), { weeksBuilt: 0, piecesThisWeek: 0, hasHistory: false, sealedWeekStarts: [] });
@@ -269,7 +269,7 @@ test('flow cancellation does not publish late scans or persist data and scan err
 test('onboarding routing connects own workouts to import choices; placeholder has no parser and keys have no persistent connection', () => {
   const root = path.resolve(__dirname, '..');
   const read = file => fs.readFileSync(path.join(root, file), 'utf8');
-  assert.match(read('app/onboarding-preview/starting-point.tsx'), /onTrack=\{flow.bringWorkouts\}/);
+  assert.match(read('app/(onboarding)/starting-point.tsx'), /onTrack=\{flow.bringWorkouts\}/);
   assert.match(read('features/onboarding/useCoreOnboarding.ts'), /router.push\('\/bring-workouts'\)/);
   assert.match(read('app/bring-workouts.tsx'), /router.push\('\/hevy-import'\)/);
   // Paste my routine is live: it routes to its own screen, which only calls the backend parser.
@@ -280,7 +280,7 @@ test('onboarding routing connects own workouts to import choices; placeholder ha
   assert.match(read('app/hevy-import.tsx'), /setKey\(''\)/); assert.match(read('app/hevy-import.tsx'), /secureTextEntry/);
   const source = read('features/import/hevy/client.ts') + read('features/import/hevy/flow.ts');
   assert.doesNotMatch(source, /console\.|AsyncStorage|analytics|captureException/);
-  assert.match(read('app/onboarding-preview/index.tsx'), /draft.step === 'bring-workouts'/);
+  assert.match(read('app/(onboarding)/index.tsx'), /draft.step === 'bring-workouts'/);
 });
 test('normalization validation rejects bad references and changed snapshots before preview and inside persistence', () => {
   const h = harness(); try {

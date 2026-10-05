@@ -9,9 +9,16 @@ const root = path.resolve(__dirname, '..');
 
 // Execute production SQL and store code with real SQLite, independent sender
 // and recipient databases, and only the native SQLite/share bridges replaced.
-function harness({ profile = true } = {}) {
+function harness({ profile = true, fetchShare, nativeShare } = {}) {
   const sql = new DatabaseSync(':memory:');
   const shares = [];
+  const requests = [];
+  const shareId = 'AAAAAAAAAAAAAAAAAAAAAA';
+  const fakeFetch = async (url, init) => {
+    requests.push({ url, init });
+    if (fetchShare) return fetchShare(url, init);
+    return { ok: true, json: async () => ({ id: shareId, url: `https://liftwithstack.com/r/${shareId}` }) };
+  };
   const adapter = {
     getAllSync: (query, ...args) => sql.prepare(query).all(...args),
     getFirstSync: (query, ...args) => sql.prepare(query).get(...args) ?? null,
@@ -28,9 +35,10 @@ function harness({ profile = true } = {}) {
   adapter.getFirstAsync = async (...args) => adapter.getFirstSync(...args);
   const cache = new Map();
   function load(id) {
+    if (id === 'react-native-url-polyfill') return { URL };
     if (id === 'expo-sqlite') return { openDatabaseAsync: async () => adapter };
     if (id === 'react-native') return { Alert: { alert: () => {} }, Share: {
-      share: async (content) => { shares.push(content); return { action: 'sharedAction' }; },
+      share: async (content) => { shares.push(content); return nativeShare ? nativeShare(content) : { action: 'sharedAction' }; },
     } };
     if (!id.startsWith('@/')) return require(id);
     if (cache.has(id)) return cache.get(id);
@@ -41,8 +49,10 @@ function harness({ profile = true } = {}) {
     const js = ts.transpileModule(source, { compilerOptions: {
       module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022,
     } }).outputText;
-    new Function('exports', 'require', 'testDatabase', '__DEV__', js)(exports,
-      (name) => load(name.startsWith('.') ? path.posix.normalize(path.posix.join(path.posix.dirname(id), name)) : name), adapter, false);
+    new Function('exports', 'require', 'testDatabase', '__DEV__', 'fetch', 'process', js)(exports,
+      (name) => load(name.startsWith('.') ? path.posix.normalize(path.posix.join(path.posix.dirname(id), name)) : name), adapter, false,
+      fakeFetch, { ...process, env: { ...process.env, EXPO_PUBLIC_ROUTINE_SHARE_API_URL: 'https://internal.up.railway.app',
+        EXPO_PUBLIC_ROUTINE_SHARE_PUBLIC_ORIGIN: 'https://liftwithstack.com' } });
     return exports;
   }
   const db = load('@/store/workoutDatabase');
@@ -55,7 +65,7 @@ function harness({ profile = true } = {}) {
   if (profile) store.getState().setProfile({ name: 'Recipient', weeklyGoal: 3, experienceLevel: 'intermediate',
     trainingDays: [0, 2, 4], onboardingCompleted: true, autoIncreaseWeight: true,
     weightIncrement: 0.5, weightUnit: 'kg', weightIncrementLbs: 5, activeSplitId: null });
-  return { sql, adapter, db, store, load, shares };
+  return { sql, adapter, db, store, load, shares, requests };
 }
 const b = (name) => ({ kind: 'builtin', name });
 const c = (name, extra = {}) => ({ kind: 'custom', name, workoutType: 'shoulders', primaryMuscle: 'Shoulders',
@@ -71,7 +81,7 @@ const tables = ['exercises', 'custom_splits', 'custom_split_workouts', 'custom_s
 const snapshot = (h) => Object.fromEntries(tables.map((table) => [table, h.sql.prepare(`SELECT * FROM ${table} ORDER BY id`).all()]));
 const ok = (result) => { assert.equal(result.ok, true, JSON.stringify(result)); return result.value; };
 
-test('saved split → native share sheet → URL has human copy, both catalogs, no IDs or performance', async () => {
+test('saved split → canonical upload → native sheet has branded short URL, human copy and no internal host', async () => {
   const h = harness();
   try {
     const imported = h.db.importPortableSplitSync(program());
@@ -79,10 +89,16 @@ test('saved split → native share sheet → URL has human copy, both catalogs, 
     await h.load('@/features/sharing/shareSavedSplit').shareSavedSplit(imported.splitId);
     assert.equal(h.shares.length, 1);
     assert.equal(h.shares[0].title, program().name);
-    assert.match(h.shares[0].message, /^Push Pull Legs\n\nShared from Stack\n\nstack:\/\/import-split\?d=/);
-    const transport = h.load('@/features/sharing/splitTransport');
-    const url = h.shares[0].message.split('\n').at(-1);
-    const parsed = ok(transport.parseSharedSplit(transport.readSplitImportToken(url)));
+    assert.equal(h.shares[0].message, 'Push Pull Legs\n\nShared from Stack\n\nhttps://liftwithstack.com/r/AAAAAAAAAAAAAAAAAAAAAA');
+    assert.deepEqual(Object.keys(h.shares[0]), ['title', 'message']);
+    assert.doesNotMatch(h.shares[0].message, /railway|internal|stack:\/\/|\?d=/);
+    assert.equal(h.requests.length, 1);
+    const { url, init } = h.requests[0];
+    assert.equal(url, 'https://internal.up.railway.app/v1/routine-shares');
+    assert.equal(init.method, 'POST'); assert.equal(init.headers['Content-Type'], 'application/json');
+    const protocol = h.load('@/features/sharing/splitProtocol');
+    const parsed = ok(protocol.parseSharedSplitJson(init.body));
+    assert.equal(init.body, ok(protocol.serializeSharedSplit(parsed)));
     assert.deepEqual(parsed, program());
     assert.doesNotMatch(JSON.stringify(parsed), /"(?:id|exerciseId|position|sets|weight|history|weightUnit|intensity|build|liveActivity)"/);
     assert.deepEqual(snapshot(h), before);
@@ -97,7 +113,7 @@ test('share deleted split fails without opening native sheet', async () => {
   } finally { h.sql.close(); }
 });
 
-test('transport budget blocks valid but oversized links before native sharing', async () => {
+test('short transport permits valid snapshots that exceeded the old 8192-character direct-link budget', async () => {
   const h = harness();
   try {
     const large = program(Array.from({ length: 30 }, (_, n) => c(`Custom ${n} ${'x'.repeat(60)}`)));
@@ -105,12 +121,13 @@ test('transport budget blocks valid but oversized links before native sharing', 
     const split = await h.db.getCustomSplitDetailAsync(saved.splitId);
     const t = h.load('@/features/sharing/splitTransport');
     const p = h.load('@/features/sharing/customSplitAdapter').portableSplitFromCustomSplit(split, h.db.BUILT_IN_EXERCISE_NAMES);
-    const { prepareSplitShare, MAX_SPLIT_SHARE_URL_LENGTH } = h.load('@/features/sharing/shareSplit');
-    assert.ok(t.buildSplitImportUrl(ok(t.encodeSharedSplit(p))).length > MAX_SPLIT_SHARE_URL_LENGTH);
+    const { prepareSplitShare } = h.load('@/features/sharing/shareSplit');
+    assert.ok(t.buildSplitImportUrl(ok(t.encodeSharedSplit(p))).length > 8192);
     const content = prepareSplitShare(split, h.db.BUILT_IN_EXERCISE_NAMES);
-    assert.equal(content.error.code, 'payload_too_large');
-    await assert.rejects(h.load('@/features/sharing/shareSavedSplit').shareSavedSplit(saved.splitId), /too big to share/);
-    assert.equal(h.shares.length, 0);
+    assert.equal(content.ok, true);
+    await h.load('@/features/sharing/shareSavedSplit').shareSavedSplit(saved.splitId);
+    assert.equal(h.shares.length, 1);
+    assert.ok(h.shares[0].message.split('\n').at(-1).length < 100);
   } finally { h.sql.close(); }
 });
 
@@ -130,6 +147,92 @@ test('opening/parsing links performs no writes; invalid tokens, duplicates and v
       assert.equal(t.parseSharedSplit(changed).error.code, code);
     }
     assert.deepEqual(snapshot(h), before);
+  } finally { h.sql.close(); }
+});
+
+test('repeated sender calls coalesce upload and native sheet until dismissal; subsequent sharing is allowed', async () => {
+  let releaseUpload, releaseSheet;
+  const upload = new Promise(resolve => { releaseUpload = resolve; });
+  const sheet = new Promise(resolve => { releaseSheet = resolve; });
+  const h = harness({ fetchShare: () => upload, nativeShare: () => sheet });
+  try {
+    const saved = h.db.importPortableSplitSync(program());
+    const share = h.load('@/features/sharing/shareSavedSplit').shareSavedSplit;
+    const first = share(saved.splitId), second = share(saved.splitId);
+    assert.equal(first, second);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(h.requests.length, 1); assert.equal(h.shares.length, 0);
+    releaseUpload({ ok: true, json: async () => ({ id: 'AAAAAAAAAAAAAAAAAAAAAA', url: 'https://liftwithstack.com/r/AAAAAAAAAAAAAAAAAAAAAA' }) });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(h.shares.length, 1); assert.equal(share(saved.splitId), first);
+    releaseSheet({ action: 'dismissedAction' }); await first;
+    await share(saved.splitId);
+    assert.equal(h.requests.length, 2); assert.equal(h.shares.length, 2);
+    const button = fs.readFileSync(path.join(root, 'components/SplitShareButton.tsx'), 'utf8');
+    assert.match(button, /if \(locked.current\) return/); assert.match(button, /finally/);
+    assert.match(button, /locked.current = false/); assert.match(button, /disabled=\{sharing\}/);
+  } finally { h.sql.close(); }
+});
+
+test('server failure prevents sharing, preserves saved graph, and releases the lock for retry', async () => {
+  let fail = true;
+  const h = harness({ fetchShare: async () => fail ? { ok: false, status: 503 } :
+    { ok: true, json: async () => ({ id: 'AAAAAAAAAAAAAAAAAAAAAA', url: 'https://liftwithstack.com/r/AAAAAAAAAAAAAAAAAAAAAA' }) } });
+  try {
+    const saved = h.db.importPortableSplitSync(program());
+    const before = snapshot(h);
+    const share = h.load('@/features/sharing/shareSavedSplit').shareSavedSplit;
+    await assert.rejects(share(saved.splitId), /Couldn’t create a share link. Try again./);
+    assert.equal(h.shares.length, 0); assert.deepEqual(snapshot(h), before);
+    fail = false; await share(saved.splitId);
+    assert.equal(h.requests.length, 2); assert.equal(h.shares.length, 1);
+    assert.deepEqual(snapshot(h), before);
+  } finally { h.sql.close(); }
+});
+
+test('a native share failure also permits retry without mutating the saved routine', async () => {
+  let fail = true;
+  const h = harness({ nativeShare: async () => { if (fail) throw new Error('Native sheet unavailable'); return { action: 'sharedAction' }; } });
+  try {
+    const saved = h.db.importPortableSplitSync(program()); const before = snapshot(h);
+    const share = h.load('@/features/sharing/shareSavedSplit').shareSavedSplit;
+    await assert.rejects(share(saved.splitId), /Native sheet unavailable/);
+    fail = false; await share(saved.splitId);
+    assert.equal(h.shares.length, 2); assert.deepEqual(snapshot(h), before);
+  } finally { h.sql.close(); }
+});
+
+test('client rejects invalid IDs, malformed responses, wrong public origin, network failures and timeouts', async () => {
+  const h = harness();
+  try {
+    const create = h.load('@/features/sharing/routineShareClient').createRoutineShare;
+    const payload = JSON.stringify({ type: 'stack.split', v: 1, name: 'Test', workouts: [{ name: '', exercises: ['Bench Press'] }] });
+    const id = 'AAAAAAAAAAAAAAAAAAAAAA';
+    for (const body of [null, {}, { id: 'short', url: 'https://liftwithstack.com/r/short' },
+      { id, url: `https://internal.up.railway.app/r/${id}` }, { id, url: `http://liftwithstack.com/r/${id}` },
+      { id, url: `https://evil.example/r/${id}` }, { id, url: `https://liftwithstack.com/r/${id}?extra=x` }]) {
+      await assert.rejects(create(payload, { fetch: async () => ({ ok: true, json: async () => body }) }), /Couldn’t create a share link/);
+    }
+    await assert.rejects(create(payload, { fetch: async () => { throw new Error('https://internal.up.railway.app secret'); } }),
+      error => error.message === 'Couldn’t create a share link. Try again.');
+    await assert.rejects(create(payload, { fetch: async () => ({ ok: true, json: async () => { throw new Error('Bad JSON'); } }) }), /Couldn’t create/);
+    await assert.rejects(create(payload, { baseUrl: null }), /Couldn’t create/);
+    await assert.rejects(create(payload, { timeoutMs: 5, fetch: (_, init) => new Promise((_, reject) =>
+      init.signal.addEventListener('abort', () => reject(new Error('aborted')))) }), /took too long/);
+    assert.equal(await create(payload, { publicOrigin: 'https://sharing.example/', fetch: async () => ({ ok: true,
+      json: async () => ({ id, url: `https://sharing.example/r/${id}` }) }) }), `https://sharing.example/r/${id}`);
+  } finally { h.sql.close(); }
+});
+
+test('protocol limits still prevent upload and native sharing', async () => {
+  const h = harness();
+  try {
+    const saved = h.db.importPortableSplitSync(program());
+    const split = await h.db.getCustomSplitDetailAsync(saved.splitId);
+    split.workouts = Array.from({ length: 15 }, () => split.workouts[0]);
+    h.db.getCustomSplitDetailAsync = async () => split;
+    await assert.rejects(h.load('@/features/sharing/shareSavedSplit').shareSavedSplit(saved.splitId), /too big to share/);
+    assert.equal(h.requests.length, 0); assert.equal(h.shares.length, 0);
   } finally { h.sql.close(); }
 });
 
@@ -417,9 +520,9 @@ test('sender → share → parse → clean recipient: all measurement combinatio
     sender.store.getState().toggleSetCompleted(0, 0);
     sender.store.getState().completeWorkout('hard');
     const detail = await sender.db.getCustomSplitDetailAsync(source.splitId);
-    const content = ok(sender.load('@/features/sharing/shareSplit').prepareSplitShare(detail, sender.db.BUILT_IN_EXERCISE_NAMES));
-    const t = recipient.load('@/features/sharing/splitTransport');
-    const split = ok(t.parseSharedSplit(t.readSplitImportToken(content.url)));
+    await sender.load('@/features/sharing/shareSavedSplit').shareSavedSplit(source.splitId);
+    // GET returns these exact uploaded canonical bytes after server validation.
+    const split = ok(recipient.load('@/features/sharing/splitProtocol').parseSharedSplitJson(sender.requests[0].init.body));
     assert.deepEqual(split, program(matrix));
     // Shift recipient catalog IDs to demonstrate they are independently resolved.
     recipient.sql.exec('UPDATE exercises SET id = id + 1000');

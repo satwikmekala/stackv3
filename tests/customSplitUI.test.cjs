@@ -9,49 +9,54 @@ const ts = require('typescript');
 const root = path.resolve(__dirname, '..');
 const lift = (id, name = `Lift ${id}`, group = 'Chest') => ({ id, name, workoutType: group === 'Chest' ? 'chest' : 'back', primaryMuscle: group, equipment: null, loadType: 'external_weight', metric: 'reps', isCustom: false });
 const day = (id, exercises = []) => ({ id, customName: '', color: null, exercises, selectedMuscleGroups: [], prefillEnabled: false });
-function harness(entry, state, { catalog = [], workoutState = {}, params = {}, db = {}, preview = false } = {}) {
+function harness(entry, state, { catalog = [], workoutState = {}, params = {}, db = {}, sharedSave = async () => ({ splitId: 1 }), preview = false, mocks = {}, platform = 'ios', canGoBack = true, reducedMotion = false } = {}) {
   let cursor = 0;
-  const hooks = [], effects = [], events = [], cache = new Map();
+  const hooks = [], effects = [], cleanups = [], events = [], cache = new Map();
   const chain = new Proxy(() => chain, { get: () => chain });
   const element = (type, props, ...children) => ({ type, props: { ...props, children } });
   const react = { __esModule: true, createElement: element, Fragment: 'Fragment',
     useState(initial) { const i = cursor++; if (!(i in hooks)) hooks[i] = typeof initial === 'function' ? initial() : initial; return [hooks[i], value => { hooks[i] = typeof value === 'function' ? value(hooks[i]) : value; }]; },
     useRef(initial) { const i = cursor++; return hooks[i] ?? (hooks[i] = { current: initial }); },
-    useEffect(fn, deps) { const i = cursor++; if (!hooks[i] || deps?.some((value, j) => value !== hooks[i][j])) { hooks[i] = deps; effects.push(fn); } },
+    useEffect(fn, deps) { const i = cursor++; if (!hooks[i] || deps?.some((value, j) => value !== hooks[i][j])) { hooks[i] = deps; effects.push(() => { cleanups[i]?.(); cleanups[i] = fn(); }); } },
     useMemo(fn) { return fn(); }, useCallback(fn, deps) { const i = cursor++; if (!hooks[i] || deps.some((value, j) => value !== hooks[i].deps[j])) hooks[i] = { fn, deps }; return hooks[i].fn; },
   };
   react.default = react;
   const hook = selector => selector ? selector(state) : state; hook.getState = () => state;
   const workoutHook = selector => selector ? selector(workoutState) : workoutState;
+  workoutHook.getState = () => workoutState;
   function load(id) {
+    if (id in mocks) return mocks[id];
+    if (id === '@/features/sharing/saveSharedRoutineDraft') return { saveSharedRoutineDraft: sharedSave };
     if (id.endsWith('.css')) return {};
     if (id === 'react') return react;
-    if (id === 'react-native') return new Proxy({ Platform: { OS: 'ios' }, useWindowDimensions: () => ({ width: 390, height: 844, fontScale: 1 }), StyleSheet: { create: x => x }, Alert: { alert: (...args) => events.push(['alert', ...args]) } }, { get: (o, k) => o[k] ?? String(k) });
+    if (id === 'react-native-url-polyfill') return { URL };
+    if (id === 'react-native') return new Proxy({ Platform: { OS: platform }, useWindowDimensions: () => ({ width: 390, height: 844, fontScale: 1 }), StyleSheet: { create: x => x }, Alert: { alert: (...args) => events.push(['alert', ...args]) } }, { get: (o, k) => o[k] ?? String(k) });
     if (id === 'expo-router') return { Stack: { Screen: 'Stack.Screen' }, useNavigation: () => ({ setOptions(options) { events.push(['options', options]); }, addListener: () => () => {} }), useFocusEffect: fn => react.useEffect(fn, [fn]), useLocalSearchParams: () => params, useRouter: () => ({
-      back: () => events.push(['back']), push: route => events.push(['push', route]), replace: route => events.push(['replace', route]), dismissTo: route => events.push(['dismissTo', route]), canGoBack: () => true,
+      back: () => events.push(['back']), push: route => events.push(['push', route]), replace: route => events.push(['replace', route]), dismissTo: route => events.push(['dismissTo', route]), canGoBack: () => canGoBack,
     }) };
     if (id === 'react-native-safe-area-context') return { SafeAreaView: 'SafeAreaView', useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) };
-    if (id === 'react-native-reanimated') return new Proxy({ __esModule: true, default: { ScrollView: 'Animated.ScrollView' }, useSharedValue: value => ({ value }), useAnimatedRef: () => react.useRef(null), useAnimatedScrollHandler: () => () => {} }, { get: (o, k) => o[k] ?? chain });
+    if (id === 'react-native-reanimated') return new Proxy({ __esModule: true, default: { View: 'Animated.View', ScrollView: 'Animated.ScrollView' }, useReducedMotion: () => reducedMotion, useSharedValue: value => ({ value }), useAnimatedRef: () => react.useRef(null), useAnimatedScrollHandler: () => () => {} }, { get: (o, k) => o[k] ?? chain });
     if ((id === 'expo-haptics' || id === '@/services/haptics')) return new Proxy({ ImpactFeedbackStyle: {}, NotificationFeedbackType: {} }, { get: (o, k) => o[k] ?? (() => Promise.resolve()) });
     if (id === '@/store/muscleColors') return { useMuscleColors: selector => selector ? selector({ preferences: {}, hydrated: true, saving: false, error: null }) : { preferences: {}, hydrated: true, saving: false, error: null } };
     if (id === '@/store/workoutStore') return { useWorkoutStore: workoutHook };
     if (id === '@/store/workoutDatabase') return { readExerciseCatalogSync: () => catalog, ...db };
-    if (id === '@/features/onboarding/config') return { ONBOARDING_PREVIEW_ENABLED: preview };
+    if (id === '@/features/onboarding/config') return { ONBOARDING_PREVIEW_ENABLED: preview, FIRST_RUN_ROUTE: '/(onboarding)' };
     if (id === '@/store/onboardingDraft') return { loadOnboardingDraft: async () => {}, clearOnboardingDraft: async () => {}, useOnboardingDraft: { getState: () => ({ draft: { name: 'Sam' } }) } };
-    if (id === '@/store/sharedRoutineHandoff') return { loadSharedRoutineHandoff: async () => {}, onboardingDestination: () => '/(tabs)' };
-    if (id === '@/store/customSplitDraft') return { countPendingImports: draft => draft?.workouts.reduce((n, day) => n + (day.pendingImports?.length ?? 0), 0) ?? 0, useCustomSplitDraftStore: hook, getWorkoutDisplayName: day => day.customName || day.exercises.map(e => e.primaryMuscle).filter((v, i, a) => a.indexOf(v) === i).join(', '),
-      getDraftPrefillRecommendation: () => null, getMuscleGroupForExercise: exercise => exercise.primaryMuscle, getWorkoutTypeForMuscleGroup: () => 'chest', splitRevision: split => JSON.stringify(split), splitDraftKey: id => `edit:${id}`, CUSTOM_SPLIT_MUSCLE_GROUPS: ['Chest', 'Back'], MUSCLE_GROUP_COLORS: { Chest: '#ff7a3d', Back: '#4f8bff' } };
+    if (id === '@/store/sharedRoutineHandoff') return { loadSharedRoutineHandoff: async () => {}, onboardingDestination: () => '/(tabs)',
+      rememberSharedRoutineId: async () => {}, clearSharedRoutineHandoff: async () => {} };
+    if (id === '@/store/customSplitDraft') return { flushCustomSplitDrafts: async () => {}, countPendingImports: draft => draft?.workouts.reduce((n, day) => n + (day.pendingImports?.length ?? 0), 0) ?? 0, useCustomSplitDraftStore: hook, getWorkoutDisplayName: day => day.customName || day.exercises.map(e => e.primaryMuscle).filter((v, i, a) => a.indexOf(v) === i).join(', '),
+      getDraftPrefillRecommendation: () => null, getMuscleGroupForExercise: exercise => exercise.primaryMuscle, getWorkoutTypeForMuscleGroup: () => 'chest', splitRevision: split => JSON.stringify(split), splitDraftKey: (id, source, shareId) => id !== null ? `edit:${id}` : source === 'shared' ? `shared:${shareId}` : source === 'stack' ? 'stack' : 'new', CUSTOM_SPLIT_MUSCLE_GROUPS: ['Chest', 'Back'], MUSCLE_GROUP_COLORS: { Chest: '#ff7a3d', Back: '#4f8bff' } };
     if (id.startsWith('@/components/')) return new Proxy({ ui: {} }, { get: (o, k) => o[k] ?? String(k) });
     if (id === 'lucide-react-native') return new Proxy({}, { get: (_, k) => String(k) });
     if (!id.startsWith('@/')) throw Error(id);
     if (cache.has(id)) return cache.get(id);
     const file = ['.tsx', '.ts'].map(ext => path.join(root, id.slice(2) + ext)).find(fs.existsSync);
     const exports = {}; cache.set(id, exports);
-    const code = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText;
+    const code = ts.transpileModule(fs.readFileSync(file, 'utf8'), { fileName: file, compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText;
     new Function('exports', 'require', 'React', code)(exports, child => load(child.startsWith('.') ? '@/'+path.relative(root,path.resolve(path.dirname(file),child)) : child), react); return exports;
   }
   const component = load(entry).default;
-  return { events, render() { cursor = 0; const tree = component(); while (effects.length) effects.shift()(); return [tree, { type: 'Stack.Screen', props: { options: events.filter(event => event[0] === 'options').at(-1)?.[1] } }]; } };
+  return { events, unmount() { cleanups.forEach(cleanup => cleanup?.()); }, render() { cursor = 0; const tree = component(); while (effects.length) effects.shift()(); return [tree, { type: 'Stack.Screen', props: { options: events.filter(event => event[0] === 'options').at(-1)?.[1] } }]; } };
 }
 function nodes(tree) {
   if (!tree || typeof tree !== 'object') return [];
@@ -63,6 +68,205 @@ function nodes(tree) {
 const action = (tree, title) => nodes(tree).find(node => node.type === 'Action' && node.props.title === title);
 const nativeHeader = tree => nodes(tree).find(node => node.type === 'Stack.Screen' && node.props.options?.headerShown).props.options;
 const flush = () => new Promise(setImmediate);
+
+test('shared review saves once with Save routine, preserves named empty days, and returns to the library without activation', async () => {
+  let saveCalls = 0, finish;
+  const state = { draft: { name: 'Shared', workouts: [{ ...day('a'), customName: 'Named empty', color: 'purple' }] },
+    source: 'shared', editingSplitId: null, sharedContext: { shareId: 'AAAAAAAAAAAAAAAAAAAAAA' }, drafts: {},
+    discardDraft() { throw Error('service owns cleanup'); } };
+  const h = harness('@/app/custom-split/review', state, { sharedSave: () => { saveCalls++; return new Promise(resolve => { finish = resolve; }); },
+    workoutState: { refreshCustomSplits: async () => {}, setActiveSplit() { throw Error('must not activate'); },
+      saveCustomSplitDraft() { throw Error('must use importer'); } } });
+  let tree = h.render();
+  assert.equal(action(tree, 'Save and use'), undefined); assert.equal(action(tree, 'Save for later'), undefined);
+  const save = action(tree, 'Save routine'); assert.equal(save.props.disabled, false);
+  save.props.onPress(); save.props.onPress(); await flush(); assert.equal(saveCalls, 1);
+  finish({ splitId: 7 }); await flush();
+  assert.deepEqual(h.events.at(-1), ['dismissTo', { pathname: '/your-splits', params: { source: 'shared' } }]);
+});
+
+test('shared save failure displays concise retry copy and keeps the editor draft', async () => {
+  const draft = { name: 'Shared', workouts: [day('a', [lift(-1)])] };
+  const state = { draft, source: 'shared', editingSplitId: null, discardDraft() { throw Error('must retain'); } };
+  let fail = true;
+  const h = harness('@/app/custom-split/review', state, { sharedSave: async () => { if (fail) throw Error('SQL private routine'); },
+    workoutState: { refreshCustomSplits: async () => {} } });
+  action(h.render(), 'Save routine').props.onPress(); await flush();
+  let tree = h.render(); assert.equal(state.draft, draft);
+  assert.ok(nodes(tree).some(node => node.type === 'Text' && node.props.children?.includes('Couldn’t save your routine. Your draft is still here. Try again.')));
+  assert.doesNotMatch(JSON.stringify(tree), /SQL private/);
+  fail = false; action(tree, 'Save routine').props.onPress(); await flush();
+  assert.equal(h.events.at(-1)[0], 'dismissTo');
+});
+
+test('shared builder resumes its own slot and recovers an already committed receipt without saving again', async () => {
+  const id = 'AAAAAAAAAAAAAAAAAAAAAA'; let resumed = 0, cleared = 0;
+  const state = { hydrated: true, source: 'library', draft: null, editingSplitId: null, drafts: {},
+    closeDraft() {}, resumeDraft(_splitId, source, shareId) { assert.equal(source, 'shared'); assert.equal(shareId, id);
+      resumed++; Object.assign(this, { source: 'shared', sharedContext: { shareId: id, attemptId: 'receipt' },
+        draft: { name: 'Shared', workouts: [day('a', [lift(-1)])] }, activeWorkoutId: 'a' }); return true; },
+    discardDraft() { cleared++; this.draft = null; } };
+  const h = harness('@/app/custom-split/index', state, { params: { source: 'shared', shareId: id },
+    db: { hasSharedSplitImportReceiptSync: attempt => { assert.equal(attempt, 'receipt'); return true; } } });
+  h.render(); await flush(); assert.equal(resumed, 1); assert.equal(cleared, 1);
+  assert.deepEqual(h.events.at(-1), ['replace', { pathname: '/your-splits', params: { source: 'shared' } }]);
+});
+
+test('older builder cleanup cannot close a different shared context', async () => {
+  let closed = 0;
+  const state = { hydrated: true, source: 'shared', sharedContext: { shareId: 'AAAAAAAAAAAAAAAAAAAAAA' },
+    draft: { name: 'Shared', workouts: [day('a', [lift(-1)])] }, activeWorkoutId: 'a', editingSplitId: null,
+    closeDraft() { closed++; } };
+  const h = harness('@/app/custom-split/index', state, { params: { source: 'shared', shareId: 'AAAAAAAAAAAAAAAAAAAAAA' } });
+  h.render(); await flush(); state.sharedContext = { shareId: 'BBBBBBBBBBBBBBBBBBBBBQ' }; h.unmount();
+  assert.equal(closed, 0);
+});
+
+test('shared custom exercise creation stages a temporary definition instead of writing the catalog', () => {
+  const selected = [];
+  const state = { source: 'shared', draft: { name: 'Shared', workouts: [day('a')] },
+    picker: { workoutId: 'a', selected }, allocateSharedExerciseId: () => -5,
+    updatePicker(update) { Object.assign(this.picker, update); }, addExercise() { throw Error('picker stages first'); } };
+  const h = harness('@/app/custom-split/new-exercise', state, { params: { workoutId: 'a', picker: '1', initialName: 'Staged curl' },
+    workoutState: { createCustomExercise() { throw Error('must not write'); } } });
+  let tree = h.render();
+  nodes(tree).find(node => node.props.accessibilityLabel === 'Chest').props.onPress();
+  nodes(tree).find(node => node.props.accessibilityLabel === 'No equipment').props.onPress();
+  tree = h.render();
+  nodes(tree).find(node => node.props.accessibilityLabel === 'Create exercise').props.onPress();
+  assert.equal(state.picker.selected[0].id, -5); assert.equal(state.picker.selected[0].portable.kind, 'custom');
+  assert.equal(state.draft.workouts[0].exercises.length, 0); assert.equal(h.events.at(-1)[0], 'back');
+});
+
+test('library offers recovery of shared drafts alongside an unfinished normal draft', async () => {
+  const id = 'AAAAAAAAAAAAAAAAAAAAAA'; let closed = 0;
+  const state = { hydrated: true, drafts: { new: { draft: { name: 'Local' } }, [`shared:${id}`]: {
+    source: 'shared', editingSplitId: null, draft: { name: 'Shared' }, sharedContext: { shareId: id } } }, closeDraft() { closed++; } };
+  const h = harness('@/app/your-splits', state, { workoutState: { customSplits: [], profile: { programMode: 'none' }, refreshCustomSplits: async () => {} } });
+  h.render(); await flush(); const tree = h.render();
+  const resume = nodes(tree).find(node => node.type === 'Action' && node.props.label === 'Continue Shared');
+  resume.props.onPress(); assert.equal(closed, 1);
+  assert.deepEqual(h.events.at(-1), ['push', { pathname: '/custom-split', params: { source: 'shared', shareId: id } }]);
+  assert.ok(state.drafts.new);
+});
+
+test('shared entry displays loading, opens the existing editor with its context, and cancels on exit', async () => {
+  const id = 'AAAAAAAAAAAAAAAAAAAAAA'; let release, cancelled = 0;
+  const h = harness('@/app/shared-routine', { hydrated: true }, { params: { id },
+    workoutState: { isHydrated: true, profile: { onboardingCompleted: true } },
+    db: { EXERCISE_SEEDS: [], ARCHETYPE_EXERCISE_SEEDS: [] }, mocks: {
+      '@/features/sharing/routineShareClient': { SharedRoutineLoadFailure: class extends Error {} },
+      '@/features/sharing/sharedRoutineEntry': { createSharedRoutineEntry(deps) { return {
+        load(value) { assert.equal(value, id); return new Promise(resolve => { release = () => { deps.openEditor(id); resolve(); }; }); },
+        cancel() { cancelled++; },
+      }; } },
+    } });
+  const tree = h.render(); assert.ok(nodes(tree).find(node => node.props.accessibilityLabel === 'Loading routine'));
+  release(); await flush();
+  assert.deepEqual(h.events.at(-1), ['replace', { pathname: '/custom-split', params: { source: 'shared', shareId: id } }]);
+  h.unmount(); assert.equal(cancelled, 1);
+});
+
+test('first-run shared entry persists only the ID before setup and never fetches or opens the editor', async () => {
+  const id = 'AAAAAAAAAAAAAAAAAAAAAA', ids = []; let release;
+  const h = harness('@/app/shared-routine', { hydrated: false }, { params: { id },
+    workoutState: { isHydrated: true, profile: null }, db: { EXERCISE_SEEDS: [], ARCHETYPE_EXERCISE_SEEDS: [] }, mocks: {
+      '@/store/sharedRoutineHandoff': { rememberSharedRoutineId(value) { ids.push(value); return new Promise(resolve => { release = resolve; }); } },
+      '@/features/sharing/sharedRoutineEntry': { createSharedRoutineEntry() { return { load() { throw Error('must not load during setup'); }, cancel() {} }; } },
+    } });
+  h.render(); assert.deepEqual(ids, [id]); assert.deepEqual(h.events, []);
+  release(); await flush(); assert.deepEqual(h.events.at(-1), ['replace', '/(onboarding)']);
+});
+test('a first-run handoff completing after the entry loses focus cannot take navigation back', async () => {
+  const id = 'AAAAAAAAAAAAAAAAAAAAAA'; let release;
+  const h = harness('@/app/shared-routine', { hydrated: false }, { params: { id },
+    workoutState: { isHydrated: true, profile: null }, db: { EXERCISE_SEEDS: [], ARCHETYPE_EXERCISE_SEEDS: [] }, mocks: {
+      '@/store/sharedRoutineHandoff': { rememberSharedRoutineId: () => new Promise(resolve => { release = resolve; }) },
+      '@/features/sharing/sharedRoutineEntry': { createSharedRoutineEntry: () => ({ load() { throw Error('must not fetch'); }, cancel() {} }) },
+    } });
+  h.render(); h.unmount(); release(); await flush(); assert.deepEqual(h.events, []);
+});
+
+for (const platform of ['ios', 'android']) {
+  test(`library: ${platform} top-right menu opens Paste my routine without changing drafts`, () => {
+    let actions;
+    const drafts = { new: { draft: { name: 'Unfinished' } } };
+    const state = { drafts, hydrated: true, closeDraft() { throw Error('opening paste must preserve drafts'); } };
+    const workoutState = { profile: { onboardingCompleted: true, programMode: 'none' }, customSplits: [], refreshCustomSplits: async () => {} };
+    const h = harness('@/app/your-splits', state, { platform, workoutState,
+      mocks: { '@/components/custom-split/showActions': { showActions(_title, items) { actions = items; } } } });
+    const header = nativeHeader(h.render());
+    if (platform === 'ios') {
+      const menu = header.unstable_headerRightItems()[0];
+      assert.equal(menu.type, 'menu');
+      assert.equal(menu.icon.name, 'ellipsis');
+      actions = menu.menu.items;
+      assert.equal(actions[0].label, 'Paste my routine');
+    } else {
+      header.headerRight().props.onPress();
+      assert.equal(actions[0].title, 'Paste my routine');
+    }
+    actions[0].onPress();
+    assert.deepEqual(h.events.at(-1), ['push', '/paste-routine']);
+    assert.equal(state.drafts, drafts);
+  });
+}
+
+for (const completed of [false, true]) {
+  test(`paste screen: ${completed ? 'returning user' : 'onboarding'} parses into the correct review flow`, async () => {
+    const imports = [], requests = [];
+    const result = { routine: { name: null, workouts: [{ id: 'w1', name: 'Push', exercises: [
+      { id: 'e1', rawName: 'bench', status: 'matched', matchedName: 'Bench Press', suggestedMatch: null, alternatives: [] },
+      { id: 'e2', rawName: 'shoulder press', status: 'uncertain', matchedName: null, suggestedMatch: null, alternatives: [] },
+    ] }] } };
+    const state = { initializeImportedDraft(...args) { imports.push(args); } };
+    const h = harness('@/app/paste-routine', state, {
+      workoutState: { profile: completed ? { onboardingCompleted: true } : null }, catalog: [lift(1, 'Bench Press')],
+      db: { initializeWorkoutDatabase: async () => {}, getNextCustomSplitNameAsync: async () => 'My routine' },
+      mocks: { '@/features/routineImport/client': { PASTE_PARSE_MESSAGES: {}, checkPastedText: () => null,
+        parsePastedRoutine: async (text, options) => { requests.push([text, options]); return result; } } },
+    });
+    let tree = h.render();
+    assert.ok(nodes(tree).some(node => node.type === 'TextInput'), 'completed users can access the paste screen');
+    nodes(tree).find(node => node.type === 'TextInput').props.onChangeText('Push\nbench 3x8\nshoulder press');
+    tree = h.render(); action(tree, 'Continue').props.onPress(); await flush();
+    assert.equal(requests[0][0], 'Push\nbench 3x8\nshoulder press');
+    assert.ok(requests[0][1].signal instanceof AbortSignal);
+    const source = completed ? 'library' : 'onboarding';
+    assert.equal(imports.length, 1);
+    assert.equal(imports[0][0], 'My routine');
+    assert.equal(imports[0][2], source);
+    assert.equal(imports[0][1][0].exercises[0].name, 'Bench Press');
+    assert.equal(imports[0][1][0].pending[0].rawName, 'shoulder press');
+    assert.deepEqual(h.events.at(-1), ['push', { pathname: '/custom-split', params: { source } }]);
+    const back = nativeHeader(h.render()).unstable_headerLeftItems()[0];
+    assert.equal(back.accessibilityLabel, completed ? 'Back to Your routines' : 'Back to import choices');
+    back.onPress(); assert.deepEqual(h.events.at(-1), ['back']);
+    const cold = harness('@/app/paste-routine', state, { canGoBack: false,
+      workoutState: { profile: completed ? { onboardingCompleted: true } : null } });
+    action(cold.render(), 'Back').props.onPress();
+    assert.deepEqual(cold.events.at(-1), ['replace', completed ? '/your-splits' : '/bring-workouts']);
+  });
+}
+
+for (const activate of [false, true]) {
+  test(`library pasted routine: ${activate ? 'save and use' : 'save for later'} returns to routines without onboarding changes`, async () => {
+    const calls = [];
+    const profile = { onboardingCompleted: true, programMode: 'stack' };
+    const state = { draft: { name: 'Pasted', workouts: [day('a', [lift(1)])] }, source: 'library', editingSplitId: null,
+      discardDraft() { this.draft = null; } };
+    const h = harness('@/app/custom-split/review', state, { workoutState: { profile,
+      saveCustomSplitDraft: async (...args) => { calls.push(args); return 41; },
+      completeNoProgramOnboarding() { throw Error('must not restart onboarding'); },
+    } });
+    action(h.render(), activate ? 'Save and use' : 'Save for later').props.onPress(); await flush();
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0][2], { activate, completeOnboarding: false });
+    assert.equal(state.draft, null);
+    assert.deepEqual(h.events.at(-1), ['dismissTo', '/your-splits']);
+    assert.equal(profile.onboardingCompleted, true);
+  });
+}
 
 test('empty day leads directly to picker without a muscle selection, naming field or prefill toggle', async () => {
   const workout = day('a');
@@ -286,8 +490,65 @@ test('library activates the chosen split, refreshes its detail, and shows its ac
   const stack = nodes(tree).find(node => node.type === 'SplitActivationPill' && node.props.name === 'Stack’s plan');
   assert.equal(stack.props.active, false);
   stack.props.onPress(); tree = h.render(); await flush();
-  assert.equal(workoutState.profile.activeSplitId, null);
-  assert.equal(nodes(tree).find(node => node.type === 'SplitActivationPill' && node.props.name === 'Stack’s plan').props.active, true);
+  assert.deepEqual(h.events.at(-1), ['push', { pathname: '/program-setup', params: { source: 'splits' } }]);
+  assert.equal(workoutState.profile.activeSplitId, 7, 'Browsing the program does not activate it');
+  assert.equal(nodes(tree).find(node => node.type === 'SplitActivationPill' && node.props.name === 'Stack’s plan').props.active, false);
+});
+
+test('library confirms activation in place, then reorders; rapid taps and failed writes preserve the latest selection', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let fail = false;
+  const workoutState = {
+    profile: { programMode: 'custom', activeSplitId: 1 },
+    customSplits: [1, 2, 3].map(id => ({ id, name: `Routine ${id}`, workoutCount: 1, exerciseCount: 2 })),
+    refreshCustomSplits: async () => {},
+    setActiveSplit(id) { if (!fail) this.profile = { programMode: 'custom', activeSplitId: id }; },
+  };
+  const h = harness('@/app/your-splits', { drafts: {}, hydrated: true, closeDraft() {} }, { workoutState });
+  const pills = tree => nodes(tree).filter(n => n.type === 'SplitActivationPill' && n.props.name.startsWith('Routine'));
+  const order = tree => pills(tree).map(n => n.props.name);
+  const activate = id => {
+    pills(h.render()).find(n => n.props.name === `Routine ${id}`).props.onPress();
+    return h.render();
+  };
+  let tree = activate(2);
+  assert.deepEqual(order(tree), ['Routine 1', 'Routine 2', 'Routine 3']);
+  assert.equal(pills(tree).find(n => n.props.name === 'Routine 2').props.active, true);
+  t.mock.timers.tick(119);
+  assert.equal(order(h.render())[0], 'Routine 1');
+  t.mock.timers.tick(1);
+  assert.equal(order(h.render())[0], 'Routine 2');
+  activate(3);
+  t.mock.timers.tick(60);
+  activate(1);
+  t.mock.timers.tick(60);
+  assert.equal(order(h.render())[0], 'Routine 2', 'the superseded activation must not reorder the cards');
+  t.mock.timers.tick(60);
+  assert.equal(order(h.render())[0], 'Routine 1');
+  fail = true;
+  tree = activate(3);
+  t.mock.timers.tick(120);
+  assert.equal(order(h.render())[0], 'Routine 1');
+  assert.equal(pills(tree).find(n => n.props.name === 'Routine 3').props.active, false);
+  activate(2);
+  h.unmount();
+});
+
+test('library respects Reduce Motion by reordering without a confirmation delay', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const workoutState = {
+    profile: { programMode: 'custom', activeSplitId: 1 },
+    customSplits: [1, 2].map(id => ({ id, name: `Routine ${id}`, workoutCount: 1, exerciseCount: 2 })),
+    refreshCustomSplits: async () => {},
+    setActiveSplit(id) { this.profile = { programMode: 'custom', activeSplitId: id }; },
+  };
+  const h = harness('@/app/your-splits', { drafts: {}, hydrated: true, closeDraft() {} }, { workoutState, reducedMotion: true });
+  nodes(h.render()).find(n => n.type === 'SplitActivationPill' && n.props.name === 'Routine 2').props.onPress();
+  h.render();
+  const pills = nodes(h.render()).filter(n => n.type === 'SplitActivationPill');
+  assert.equal(pills[0].props.name, 'Routine 2');
+  assert.equal(pills[0].props.active, true);
+  h.unmount();
 });
 
 for (const mode of ['stack', 'custom']) {

@@ -2,10 +2,10 @@
   "name": "stack-routine-import",
   "version": "1.0.0",
   "private": true,
-  "description": "Stack backend for Paste my routine: pasted text → Stack-ready routine. Parses only; never saves.",
+  "description": "Stack backend for routine parsing and immutable routine sharing.",
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13"
   },
   "scripts": {
     "start": "node src/server.mjs",

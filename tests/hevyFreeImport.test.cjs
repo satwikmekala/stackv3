@@ -111,7 +111,7 @@ test('CSV facts produce chronological records, Progress and previous values; war
     const lift = h.load('@/store/liftProgress').deriveLiftProgress(sessions)[0]; assert.equal(lift.latest.weight, 70); assert.equal(lift.previous.weight, 60);
     const records = h.load('@/store/personalRecords'); assert.equal(records.derivePersonalRecords(sessions)[0].best.weight, 70);
     const sets = h.database.readExerciseRecordSetsSync('Bench Press', sessions); assert.equal(sets.length, 3);
-    assert.equal(records.deriveRecentLifts(sets).flatMap(g => g.sets).filter(s => s.isPR).length, 2);
+    assert.equal(records.deriveRecordProgression(sets).milestones.length, 2);
     const previous = h.database.readLastExerciseHistorySync('Bench Press');
     assert.deepEqual(h.load('@/store/workoutProgression').getRegularSets(previous).map(set => set.weight), [70]);
     assert.equal(h.load('@/store/verifiedSessions').getBuildSessions(sessions).length, 0);

@@ -1,7 +1,6 @@
 import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import { Redirect, Stack, useRouter } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { redesignColors as c, redesignFonts as f } from '@/constants/theme';
-import { ONBOARDING_PREVIEW_ENABLED } from '@/features/onboarding/config';
 import { BuildPreview } from '@/features/build/BuildPreview';
 import { WELCOME_SLABS } from '@/features/onboarding/welcomeExample';
 import { SplitPressable as Pressable } from '@/components/custom-split/SplitPressable';
@@ -11,7 +10,6 @@ import { SplitPressable as Pressable } from '@/components/custom-split/SplitPres
 export default function StackExample() {
   const router = useRouter();
   const { fontScale } = useWindowDimensions();
-  if (!ONBOARDING_PREVIEW_ENABLED) return <Redirect href="/(tabs)" />;
   return <>
     <Stack.Screen options={{ headerShown: true, title: 'Example of My Stack', headerBackButtonDisplayMode: 'minimal', headerStyle: { backgroundColor: c.ink }, headerTintColor: c.bone, headerShadowVisible: false }} />
     <ScrollView key={`example:${fontScale}`} style={s.screen} contentContainerStyle={s.content}>

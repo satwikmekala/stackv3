@@ -90,7 +90,7 @@ test('skipped and unfinished values never enter recap, volume or totals', () => 
   const result = deriveWorkoutSummary(source);
   assert.deepEqual([result.setCount, result.repCount, result.exerciseCount, result.volumeKg], [1, 12, 1, 600]);
   assert.deepEqual(formatExerciseRecap(result.exercises[0], 'kg'), { scheme: '1 × 12', volume: '600 kg' });
-  assert.equal(deriveLiftLog(source, [], 'kg').lines[0].scheme, '1 × 12');
+  assert.equal(deriveLiftLog(source, [], 'kg').lines[0].value, '600');
 });
 
 test('all performed bonus types remain counted, skipped bonus excluded, using Lift Log membership', () => {
@@ -103,7 +103,7 @@ test('all performed bonus types remain counted, skipped bonus excluded, using Li
   assert.deepEqual(result.specialSets, { pr: 1, dropset: 1, extra: 1 });
   assert.equal(specialSetSummaryLabel(result.specialSets), '3 bonus sets logged');
   assert.equal(formatExerciseRecap(result.exercises[0], 'kg').scheme, '12 · 12 · 12 · 5 · 10 · 8 reps');
-  assert.equal(deriveLiftLog(source, [], 'kg').lines[0].scheme, '6 × 5–12');
+  assert.equal(deriveLiftLog(source, [], 'kg').lines[0].value, '2,950');
 });
 
 // ---------------------------------------------------------------------------
@@ -160,12 +160,23 @@ test('timed sets add nothing to total reps or volume; the sets still count', () 
   assert.deepEqual(result.exercises.map((exercise) => [exercise.repCount, exercise.volumeKg]), [[20, 1000], [0, 0], [0, 0]]);
 });
 
-test('Lift Log: holds show time (or load held), a duration range, and are never PRs', () => {
+test('Lift Log: holds show total performed time and are never volume or PRs', () => {
   const earlier = { ...session([hold('Plank', [30]), hold('Farmer Carry', [20], [20])]), id: '0', date: '2026-09-01' };
   const today = session([hold('Plank', [45, 60]), hold('Farmer Carry', [45, 30], [30, 32.5]), lift('Bench press', [set(10)])]);
   const log = deriveLiftLog(today, [earlier, today], 'kg');
   assert.deepEqual(log.lines.slice(0, 2), [
-    { name: 'Plank', value: '1:00', unit: '', scheme: '2 × 0:45–1:00', record: false },
-    { name: 'Farmer Carry', value: '32.5', unit: 'kg', scheme: '2 × 0:30–0:45', record: false },
+    { name: 'Plank', value: '1:45', unit: '', record: false },
+    { name: 'Farmer Carry', value: '1:15', unit: '', record: false },
   ]);
+});
+
+test('share footer and exercise totals ignore stale weights on bodyweight exercises', () => {
+  const source = session([lift('Bench Press', [set(9, { weight: 42 }), set(9, { weight: 42.6 }), set(9, { weight: 42.6 })]),
+    { ...lift('Pull-up', [set(12, { weight: 100 }), set(10, { weight: 80 })]), loadType: 'bodyweight' }]);
+  const result = deriveWorkoutSummary(source);
+  assert.equal(result.volumeKg, 42 * 9 + 42.6 * 9 * 2);
+  assert.equal(result.volumeKg, result.exercises.reduce((sum, exercise) => sum + exercise.volumeKg, 0));
+  assert.equal(result.exercises[1].volumeKg, 0);
+  assert.deepEqual(result.exercises[1].weightsBySet, [0, 0]);
+  assert.equal(result.repCount, 49);
 });

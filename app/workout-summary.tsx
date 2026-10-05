@@ -29,7 +29,7 @@ import { parseSessionDate } from '@/store/workoutCalendar';
 import { SaveAdhocRoutine } from '@/components/SaveAdhocRoutine';
 import { buildWorkoutReport, type ReportExercise } from '@/features/report/workoutReport';
 import { ShareSheet } from '@/components/ShareSheet';
-import type { StackPosterLayer } from '@/components/StackPosterCard';
+import type { StackFrameExercise } from '@/components/StackFrameCard';
 import { deriveLiftLog } from '@/store/liftLog';
 import { shareWorkoutReportPdf } from '@/features/report/shareWorkoutReport';
 import { BUILD_DEMO_ENABLED } from '@/features/build/config';
@@ -359,7 +359,8 @@ export default function WorkoutSummaryScreen() {
     ));
     return new Map(deriveLiftProgress(earlier).flatMap(lift => {
       const exercise = session.exercises.find(item => item.name === lift.name);
-      const previous = lift.history.find(item => item.bodyweight === (exercise?.loadType === 'bodyweight'));
+      const previous = lift.history.find(item => item.bodyweight === (exercise?.loadType === 'bodyweight')
+        && (item.durationS !== undefined) === (exercise?.metric === 'duration'));
       return previous ? [[lift.name, previous] as const] : [];
     }));
   }, [history, session]);
@@ -373,30 +374,21 @@ export default function WorkoutSummaryScreen() {
   );
   const [shareVisible, setShareVisible] = useState(false);
   const getExerciseWorkoutType = useWorkoutStore((state) => state.getExerciseWorkoutType);
-  // "The Stack" poster: each performed exercise as a slab in its muscle colour, as thick as
-  // its share of the session's sets and volume (so bodyweight work still shows).
-  const posterLayers = useMemo<StackPosterLayer[]>(() => {
+  // The Frame story overlay lists each performed exercise in its muscle colour.
+  const frameExercises = useMemo<StackFrameExercise[]>(() => {
     if (!summary) return [];
-    const performed = summary.exercises.filter((exercise) => exercise.setCount > 0);
-    const totalSets = performed.reduce((sum, exercise) => sum + exercise.setCount, 0) || 1;
-    const totalVolume = performed.reduce((sum, exercise) => sum + exercise.volumeKg, 0);
-    return performed.map((exercise) => {
+    return summary.exercises.filter((exercise) => exercise.setCount > 0).map((exercise) => {
       const type = getExerciseWorkoutType(exercise.name);
-      const sets = `${exercise.setCount} ${exercise.setCount === 1 ? 'SET' : 'SETS'}`;
-      const amount = exercise.volumeKg > 0
-        ? `${formatSummaryNumber(Math.round(displayVolume(exercise.volumeKg, weightUnit)))} ${unitLabel(weightUnit)}`
-        : exercise.repCount > 0 ? `${exercise.repCount} REPS` : null;
       return {
         name: exercise.name,
         color: type ? getMuscleColor(type) : summary.accent,
-        weight: exercise.setCount / totalSets + (totalVolume > 0 ? exercise.volumeKg / totalVolume : 0),
-        detail: amount ? `${sets} · ${amount}` : sets,
+        setCount: exercise.setCount,
         record: report?.exercises.some((item) => item.name === exercise.name && item.hasRecord) ?? false,
       };
     });
     // Muscle colour getters read user preferences without taking them as an argument.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [getExerciseWorkoutType, muscleColors, report, summary, weightUnit]);
+  }, [getExerciseWorkoutType, muscleColors, report, summary]);
 
   if (!summary) {
     return (
@@ -556,8 +548,8 @@ export default function WorkoutSummaryScreen() {
               <Text style={styles.shareButtonText}>Share</Text>
             </Pressable>
             <Pressable cssInterop={false} accessibilityRole="button" accessibilityLabel="Done"
-              accessibilityHint={openedFromHistory ? 'Return to workout history' : 'Return to Train'}
-              onPress={() => openedFromHistory ? router.back() : finish('/(tabs)')}
+              accessibilityHint={openedFromHistory ? 'Return to workout history' : 'Open Progress'}
+              onPress={() => openedFromHistory ? router.back() : finish('/(tabs)/profile')}
               style={({ pressed }) => [styles.actionButton, styles.doneButton,
                 stackActions && styles.stackedButton, pressed && styles.buttonPressed]}>
               <Text style={styles.doneButtonText}>Done</Text>
@@ -567,6 +559,7 @@ export default function WorkoutSummaryScreen() {
       </View>
 
       <ShareSheet
+        workoutId={summary.id}
         visible={shareVisible}
         onClose={() => setShareVisible(false)}
         accent={summary.accent}
@@ -581,7 +574,7 @@ export default function WorkoutSummaryScreen() {
         {...(report?.durationLabel ? { durationLabel: report.durationLabel } : {})}
         recordCount={report?.exercises.filter(exercise => exercise.hasRecord).length ?? 0}
         {...(liftLog ? { liftLog } : {})}
-        posterLayers={posterLayers}
+        frameExercises={frameExercises}
         {...(report ? { onSharePdf: sharePdf } : {})}
       />
     </View>

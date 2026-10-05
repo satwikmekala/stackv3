@@ -1,8 +1,8 @@
 import { loadMuscleColors } from '@/store/muscleColors';
 import { loadAppPreferences } from '@/store/appPreferences';
 import { useEffect, useRef, useState } from 'react';
-import { Linking, Platform } from 'react-native';
-import { Stack, usePathname, useRouter, useSegments } from 'expo-router';
+import { AppState, Linking, Platform } from 'react-native';
+import { DarkTheme, Stack, ThemeProvider, useGlobalSearchParams, usePathname, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as SplashScreen from 'expo-splash-screen';
@@ -24,10 +24,24 @@ import { startWorkoutLiveActivitySync } from '@/services/liveActivity/sync';
 import { startWorkoutLiveActivityInteractions } from '@/services/liveActivity/interaction';
 import '@/global.css';
 import { BUILD_DEMO_ENABLED } from '@/features/build/config';
-import { splitImportRouteFromUrl } from '@/features/sharing/splitLinkRouting';
+import { routineLinkRouteFromUrl } from '@/features/sharing/splitLinkRouting';
 import { redesignColors } from '@/constants/theme';
-import { FIRST_RUN_ROUTE, ONBOARDING_PREVIEW_ENABLED } from '@/features/onboarding/config';
+import { FIRST_RUN_ROUTE } from '@/features/onboarding/config';
 import { clearOnboardingDraft } from '@/store/onboardingDraft';
+import { rescheduleNotifications, subscribeToNotificationInputs } from '@/services/notifications/scheduling';
+import { useNotificationRouting } from '@/services/notifications/useNotificationRouting';
+
+// Native stacks expose their container while an interactive back swipe is in flight.
+const navigationTheme = {
+  ...DarkTheme,
+  colors: {
+    ...DarkTheme.colors,
+    background: redesignColors.ink,
+    card: redesignColors.ink,
+    text: redesignColors.bone,
+    border: redesignColors.border,
+  },
+};
 
 SplashScreen.preventAutoHideAsync();
 
@@ -35,10 +49,11 @@ export default function RootLayout() {
   useFrameworkReady();
   const hasHiddenSplashRef = useRef(false);
   const lastRedirectRef = useRef<string | null>(null);
-  const [initialImport, setInitialImport] = useState<ReturnType<typeof splitImportRouteFromUrl>>(null);
+  const [initialImport, setInitialImport] = useState<ReturnType<typeof routineLinkRouteFromUrl>>(null);
   const [initialLinkRead, setInitialLinkRead] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
+  const { source: routeSource, id: routeId, d: routeToken } = useGlobalSearchParams<{ source?: string; id?: string; d?: string }>();
   const segments = useSegments();
   const profile = useWorkoutStore((state) => state.profile);
   const isHydrated = useWorkoutStore((state) => state.isHydrated);
@@ -48,9 +63,10 @@ export default function RootLayout() {
   // A received link can be previewed and saved before first-run setup. Keep
   // its payload on this route instead of losing it to the onboarding redirect.
   const inSplitImport = pathname === '/import-split';
+  const inSharedRoutineEntry = pathname === '/shared-routine';
   const inHevyImport = pathname === '/bring-workouts' || pathname === '/hevy-import' || pathname === '/hevy-file-import' ||
     pathname === '/paste-routine';
-  const inOnboardingPreview = ONBOARDING_PREVIEW_ENABLED &&
+  const inSetupFlow =
     (pathname === '/onboarding-preview' || pathname.startsWith('/onboarding-preview/') ||
       pathname === '/program-setup' || pathname.startsWith('/program-setup/'));
   const onSplash = pathname === '/' && segments[0] !== '(tabs)';
@@ -63,17 +79,33 @@ export default function RootLayout() {
     !inOnboarding &&
     !inCustomSplitFlow &&
     !inSplitImport &&
+    !inSharedRoutineEntry &&
+    !(pathname === '/your-splits' && routeSource === 'shared') &&
     !inHevyImport &&
     !inBuildSandbox &&
-    !inOnboardingPreview &&
+    !inSetupFlow &&
     !onSplash;
   const needsAppRedirect =
     initialLinkRead && !initialImport &&
     isHydrated &&
     Boolean(profile?.onboardingCompleted) &&
-    (inOnboarding || onSplash && !ONBOARDING_PREVIEW_ENABLED);
-  const redirectPending = !initialLinkRead || Boolean(initialImport && !inSplitImport && !hydrationError) ||
+    inOnboarding;
+  const inInitialImport = initialImport?.pathname === '/shared-routine'
+    ? inSharedRoutineEntry && routeId === initialImport.params.id
+    : inSplitImport && routeToken === initialImport?.params.d;
+  const redirectPending = !initialLinkRead || Boolean(initialImport && !inInitialImport && !hydrationError) ||
     needsOnboardingRedirect || needsAppRedirect;
+
+  useEffect(() => {
+    const refresh = () => {
+      const state = useWorkoutStore.getState();
+      if (state.isHydrated && !state.hydrationError && state.profile?.onboardingCompleted) void rescheduleNotifications();
+    };
+    const unsubscribe = subscribeToNotificationInputs();
+    const subscription = AppState.addEventListener('change', state => { if (state === 'active') refresh(); });
+    refresh();
+    return () => { unsubscribe(); subscription.remove(); };
+  }, []);
 
   const [fontsLoaded, fontError] = useFonts({
     'Switzer-Regular': require('@/assets/fonts/Switzer-Regular.otf'),
@@ -92,6 +124,10 @@ export default function RootLayout() {
     JetBrainsMono_700Bold,
   });
 
+  useNotificationRouting({ isHydrated, hydrationError, onboardingCompleted: Boolean(profile?.onboardingCompleted),
+    entryReady: Boolean(fontsLoaded || fontError) && !redirectPending, sharingLinkPending: Boolean(initialImport),
+    navigate: () => router.navigate('/(tabs)') });
+
   useEffect(() => {
     void loadMuscleColors();
     void loadAppPreferences();
@@ -108,14 +144,16 @@ export default function RootLayout() {
 
   useEffect(() => {
     let cancelled = false;
+    // A newer warm intent wins if the launch URL promise resolves late.
+    const subscription = Linking.addEventListener('url', () => { cancelled = true; setInitialImport(null); setInitialLinkRead(true); });
     void Linking.getInitialURL().then((url) => {
-      if (!cancelled) setInitialImport(splitImportRouteFromUrl(url));
+      if (!cancelled) setInitialImport(routineLinkRouteFromUrl(url));
     }).catch(() => {
       // Router still handles its ordinary links if the native lookup fails.
     }).finally(() => {
       if (!cancelled) setInitialLinkRead(true);
     });
-    return () => { cancelled = true; };
+    return () => { cancelled = true; subscription.remove(); };
   }, []);
 
   useEffect(() => startWorkoutLiveActivitySync(), []);
@@ -147,7 +185,7 @@ export default function RootLayout() {
   useEffect(() => {
     if (!initialLinkRead) return;
     if (initialImport && !hydrationError) {
-      if (inSplitImport) {
+      if (inInitialImport) {
         // eslint-disable-next-line react-hooks/set-state-in-effect -- Consume the native launch intent only after Router confirms arrival.
         setInitialImport(null);
         lastRedirectRef.current = null;
@@ -163,7 +201,8 @@ export default function RootLayout() {
     } else if (needsOnboardingRedirect) {
       target = FIRST_RUN_ROUTE;
     } else if (needsAppRedirect) {
-      target = '/(tabs)';
+      // AppEntry reads the durable pending handoff before selecting a destination.
+      target = '/';
     }
 
     if (target !== null) {
@@ -176,7 +215,7 @@ export default function RootLayout() {
       // change (e.g. real logout/re-onboard) is never blocked by a stale ref.
       lastRedirectRef.current = null;
     }
-  }, [fontError, fontsLoaded, hydrationError, initialImport, initialLinkRead, inSplitImport, isHydrated,
+  }, [fontError, fontsLoaded, hydrationError, initialImport, initialLinkRead, inInitialImport, isHydrated,
     needsAppRedirect, needsOnboardingRedirect, onSplash, router]);
 
   if (
@@ -187,106 +226,129 @@ export default function RootLayout() {
   }
 
   return (
-    <GestureHandlerRootView>
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="(onboarding)" options={{ headerShown: false }} />
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen
-          name="custom-split"
-          options={{ headerShown: false, animation: 'slide_from_right' }}
-        />
-        <Stack.Screen
-          name="workout"
-          options={({ route }) => ({
-            headerShown: false,
-            gestureEnabled: false,
-            presentation: 'transparentModal',
-            contentStyle: { backgroundColor: 'transparent' },
-            // These surfaces own their transitions, including the first frame.
-            animation: route.params && (
-              ('fromActivityCard' in route.params && route.params.fromActivityCard === '1') ||
-              'launchOrigin' in route.params
-            ) ? 'none' : 'fade',
-            animationTypeForReplace: 'pop',
-          })}
-        />
-        <Stack.Screen name="workout-unit" options={{ headerShown: false, presentation: 'formSheet',
-          sheetAllowedDetents: 'fitToContents', sheetGrabberVisible: true, contentStyle: { backgroundColor: redesignColors.ink } }} />
-        <Stack.Screen name="build-casting" options={{ headerShown: false, gestureEnabled: false, animation: 'fade' }} />
-        <Stack.Screen
-          name="workout-summary"
-          options={({ route }) => {
-            const fromHistory = !!(route.params && 'source' in route.params && route.params.source === 'history');
-            return {
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: redesignColors.ink }}>
+      <ThemeProvider value={navigationTheme}>
+        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: redesignColors.ink } }}>
+          <Stack.Screen name="(onboarding)" options={{ headerShown: false }} />
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen
+            name="custom-split"
+            options={{ headerShown: false, animation: 'slide_from_right' }}
+          />
+          <Stack.Screen
+            name="workout"
+            options={({ route }) => ({
+              headerShown: false,
+              gestureEnabled: false,
+              presentation: 'transparentModal',
+              contentStyle: { backgroundColor: 'transparent' },
+              // These surfaces own their transitions, including the first frame.
+              animation: route.params && (
+                ('fromActivityCard' in route.params && route.params.fromActivityCard === '1') ||
+                'launchOrigin' in route.params
+              ) ? 'none' : 'fade',
+              animationTypeForReplace: 'pop',
+            })}
+          />
+          <Stack.Screen name="workout-unit" options={{ headerShown: false, presentation: 'formSheet',
+            sheetAllowedDetents: 'fitToContents', sheetGrabberVisible: true, contentStyle: { backgroundColor: redesignColors.ink } }} />
+          <Stack.Screen name="build-casting" options={{ headerShown: false, gestureEnabled: false, animation: 'fade' }} />
+          <Stack.Screen
+            name="workout-summary"
+            options={({ route }) => {
+              const fromHistory = !!(route.params && 'source' in route.params && route.params.source === 'history');
+              return {
+                headerShown: true,
+                title: 'Workout summary',
+                // iOS: content scrolls under a transparent bar that softens it away (Apple's
+                // soft scroll edge on iOS 26, a thin material before) instead of a hard cut.
+                ...(Platform.OS === 'ios' ? {
+                  headerTransparent: true,
+                  headerStyle: { backgroundColor: 'transparent' },
+                  ...(Number.parseInt(String(Platform.Version), 10) >= 26
+                    ? { scrollEdgeEffects: { top: 'soft', bottom: 'hidden', left: 'hidden', right: 'hidden' } as const }
+                    : { headerBlurEffect: 'systemThinMaterialDark' as const }),
+                } : { headerStyle: { backgroundColor: redesignColors.ink } }),
+                headerTintColor: redesignColors.bone,
+                headerShadowVisible: false,
+                headerBackButtonDisplayMode: 'minimal',
+                headerBackVisible: fromHistory,
+                gestureEnabled: fromHistory,
+                animation: fromHistory ? 'slide_from_right' : 'fade',
+                animationTypeForReplace: 'push',
+              };
+            }}
+          />
+          <Stack.Screen
+            name="records"
+            options={{
               headerShown: true,
-              title: 'Workout summary',
-              // iOS: content scrolls under a transparent bar that softens it away (Apple's
-              // soft scroll edge on iOS 26, a thin material before) instead of a hard cut.
-              ...(Platform.OS === 'ios' ? {
-                headerTransparent: true,
-                headerStyle: { backgroundColor: 'transparent' },
-                ...(Number.parseInt(String(Platform.Version), 10) >= 26
-                  ? { scrollEdgeEffects: { top: 'soft', bottom: 'hidden', left: 'hidden', right: 'hidden' } as const }
-                  : { headerBlurEffect: 'systemThinMaterialDark' as const }),
-              } : { headerStyle: { backgroundColor: redesignColors.ink } }),
+              title: 'Personal records',
+              headerBackTitle: 'Progress',
+              unstable_nativeProps: { headerConfig: { experimental_userInterfaceStyle: 'dark' } },
+              headerStyle: { backgroundColor: redesignColors.ink },
               headerTintColor: redesignColors.bone,
               headerShadowVisible: false,
               headerBackButtonDisplayMode: 'minimal',
-              headerBackVisible: fromHistory,
-              gestureEnabled: fromHistory,
-              animation: fromHistory ? 'slide_from_right' : 'fade',
-              animationTypeForReplace: 'push',
-            };
-          }}
-        />
-        <Stack.Screen
-          name="records"
-          options={{ headerShown: false, animation: 'slide_from_right' }}
-        />
-        <Stack.Screen
-          name="record-detail"
-          options={{ headerShown: false, animation: 'slide_from_right' }}
-        />
-        <Stack.Screen
-          name="history"
-          options={{
-            headerShown: true,
-            title: 'History',
-            headerBackTitle: 'Progress',
-            // Keep the system glass/back glyph legible on Stack's dark surface.
-            unstable_nativeProps: { headerConfig: { experimental_userInterfaceStyle: 'dark' } },
-            headerStyle: { backgroundColor: redesignColors.ink },
-            headerTintColor: redesignColors.bone,
-            headerShadowVisible: false,
-            headerBackButtonDisplayMode: 'minimal',
-            animation: 'slide_from_right',
-          }}
-        />
-        <Stack.Screen
-          name="history-week"
-          options={{
-            headerShown: true,
-            title: 'Weekly history',
-            headerBackTitle: 'History',
-            unstable_nativeProps: { headerConfig: { experimental_userInterfaceStyle: 'dark' } },
-            headerStyle: { backgroundColor: redesignColors.ink },
-            headerTintColor: redesignColors.bone,
-            headerShadowVisible: false,
-            headerBackButtonDisplayMode: 'minimal',
-            animation: 'slide_from_right',
-          }}
-        />
-        <Stack.Screen
-          name="your-splits"
-          options={{ headerShown: false, animation: 'slide_from_right' }}
-        />
-        <Stack.Screen name="import-split" options={{ headerShown: false, animation: 'slide_from_right' }} />
-        <Stack.Screen name="settings" options={{ headerShown: true, presentation: 'card', animation: 'slide_from_right' }} />
-        <Stack.Screen name="+not-found" />
-      </Stack>
-      {/* Keep import and recap actions unobstructed while a workout stays active. */}
-      {!inSplitImport && pathname !== '/workout-summary' && pathname !== '/settings' && pathname !== '/workout-unit' && <ActiveWorkoutBar />}
-      <StatusBar style="light" />
+              animation: 'slide_from_right',
+            }}
+          />
+          <Stack.Screen
+            name="record-detail"
+            options={{
+              headerShown: true,
+              title: 'Personal record',
+              headerBackTitle: 'Records',
+              unstable_nativeProps: { headerConfig: { experimental_userInterfaceStyle: 'dark' } },
+              headerStyle: { backgroundColor: redesignColors.ink },
+              headerTintColor: redesignColors.bone,
+              headerShadowVisible: false,
+              headerBackButtonDisplayMode: 'minimal',
+              animation: 'slide_from_right',
+            }}
+          />
+          <Stack.Screen
+            name="history"
+            options={{
+              headerShown: true,
+              title: 'History',
+              headerBackTitle: 'Progress',
+              // Keep the system glass/back glyph legible on Stack's dark surface.
+              unstable_nativeProps: { headerConfig: { experimental_userInterfaceStyle: 'dark' } },
+              headerStyle: { backgroundColor: redesignColors.ink },
+              headerTintColor: redesignColors.bone,
+              headerShadowVisible: false,
+              headerBackButtonDisplayMode: 'minimal',
+              animation: 'slide_from_right',
+            }}
+          />
+          <Stack.Screen
+            name="history-week"
+            options={{
+              headerShown: true,
+              title: 'Weekly history',
+              headerBackTitle: 'History',
+              unstable_nativeProps: { headerConfig: { experimental_userInterfaceStyle: 'dark' } },
+              headerStyle: { backgroundColor: redesignColors.ink },
+              headerTintColor: redesignColors.bone,
+              headerShadowVisible: false,
+              headerBackButtonDisplayMode: 'minimal',
+              animation: 'slide_from_right',
+            }}
+          />
+          <Stack.Screen
+            name="your-splits"
+            options={{ headerShown: false, animation: 'slide_from_right' }}
+          />
+          <Stack.Screen name="import-split" options={{ headerShown: false, animation: 'slide_from_right' }} />
+          <Stack.Screen name="shared-routine" options={{ headerShown: true, animation: 'slide_from_right' }} />
+          <Stack.Screen name="settings" options={{ headerShown: true, presentation: 'card', animation: 'slide_from_right' }} />
+          <Stack.Screen name="+not-found" />
+        </Stack>
+        {/* Keep import and recap actions unobstructed while a workout stays active. */}
+        {!inSplitImport && !inSharedRoutineEntry && pathname !== '/workout-summary' && pathname !== '/settings' && pathname !== '/workout-unit' && <ActiveWorkoutBar />}
+        <StatusBar style="light" />
+      </ThemeProvider>
     </GestureHandlerRootView>
   );
 }

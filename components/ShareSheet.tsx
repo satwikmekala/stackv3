@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -32,7 +32,7 @@ import {
 import { withMotionTiming } from '@/constants/motion';
 import { redesignColors, redesignFonts } from '@/constants/theme';
 import type { LiftLog } from '@/store/liftLog';
-import { StackPosterCard, type StackPosterLayer } from '@/components/StackPosterCard';
+import { StackFrameCard, type StackFrameExercise } from '@/components/StackFrameCard';
 
 const CAPTURE_OPTIONS = {
   width: 1080,
@@ -45,20 +45,29 @@ const CAPTURE_OPTIONS = {
 type Feedback = 'idle' | 'copied' | 'copyError';
 
 interface ShareSheetProps extends StatStripCardProps {
+  workoutId?: string;
   visible: boolean;
   onClose: () => void;
-  /** Every lift's top set; the Lift Log design is offered when it has a line. */
+  /** Every lift's total weight moved; the Lift Log design is offered when it has a line. */
   liftLog?: LiftLog;
-  /** Exercises as slabs; "The Stack" poster is offered when there is at least one. */
-  posterLayers?: StackPosterLayer[];
+  /** Every performed lift; the Frame story overlay is offered when there is at least one. */
+  frameExercises?: StackFrameExercise[];
   /** Sends the full set-by-set report as a PDF through the system share sheet. */
   onSharePdf?: () => Promise<void>;
 }
 
-type Design = 'strip' | 'liftLog' | 'poster';
-const DESIGN_NAMES: Record<Design, string> = { strip: 'Stat Strip', liftLog: 'Lift Log', poster: 'My Stack' };
+type Design = 'strip' | 'liftLog' | 'frame';
+const DESIGN_NAMES: Record<Design, string> = { strip: 'Stat Strip', liftLog: 'Lift Log', frame: 'Frame' };
 
-export function ShareSheet({
+export function ShareSheet(props: ShareSheetProps) {
+  // A new workout, unit or rendered value gets a fresh sheet and capture lifecycle.
+  // Function props are intentionally excluded from this render identity.
+  const { visible, onClose, onSharePdf, ...content } = props;
+  return <ShareSheetContent key={JSON.stringify(content)} {...content}
+    visible={visible} onClose={onClose} onSharePdf={onSharePdf} />;
+}
+
+function ShareSheetContent({
   visible,
   onClose,
   accent,
@@ -73,7 +82,7 @@ export function ShareSheet({
   durationLabel,
   recordCount,
   liftLog,
-  posterLayers,
+  frameExercises,
   onSharePdf,
 }: ShareSheetProps) {
   const { height: screenHeight, width: screenWidth } = useWindowDimensions();
@@ -87,19 +96,32 @@ export function ShareSheet({
   const progress = useSharedValue(visible ? 1 : 0);
   const stripRef = useRef<View>(null);
   const liftLogRef = useRef<View>(null);
-  const posterRef = useRef<View>(null);
-  // One capture per design, each warmed once and reused for every copy.
-  const capturedUrisRef = useRef<(string | null)[]>([null, null, null]);
-  const capturePromisesRef = useRef<(Promise<string> | null)[]>([null, null, null]);
+  const frameRef = useRef<View>(null);
+  const pagerRef = useRef<ScrollView>(null);
+  const captureEpochRef = useRef(0);
+  const activeCopyRef = useRef<object | null>(null);
+  const [isPaging, setIsPaging] = useState(false);
   const [page, setPage] = useState(0);
   const designs: Design[] = [
     'strip',
     ...(liftLog && liftLog.lines.length > 0 ? ['liftLog' as const] : []),
-    ...(posterLayers && posterLayers.length > 0 ? ['poster' as const] : []),
+    ...(frameExercises && frameExercises.length > 0 ? ['frame' as const] : []),
   ];
   const designCount = designs.length;
-  const designsKey = designs.join(',');
+  const selectedDesign = designs[page];
   const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useLayoutEffect(() => {
+    // Invalidates work still awaiting a native capture or file read when closed/reopened.
+    captureEpochRef.current += 1;
+    activeCopyRef.current = null;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Reset a copy operation when its sheet lifetime changes.
+    setIsCopying(false);
+    return () => {
+      captureEpochRef.current += 1;
+      activeCopyRef.current = null;
+    };
+  }, [visible]);
 
   useEffect(() => {
     if (visible) {
@@ -107,8 +129,8 @@ export function ShareSheet({
       setIsMounted(true);
       setFeedback('idle');
       setPage(0);
-      // Re-capture on every opening, so a copy always matches what the sheet shows.
-      capturedUrisRef.current = [null, null, null];
+      setIsPaging(false);
+      pagerRef.current?.scrollTo({ x: 0, animated: false });
       setCaptureReady(false);
       progress.value = withMotionTiming(
         1,
@@ -155,49 +177,28 @@ export function ShareSheet({
     }, 1800);
   }, []);
 
-  const getCapturedUri = useCallback(async (index: number) => {
-    const cached = capturedUrisRef.current[index];
-    if (cached) return cached;
-    const pending = capturePromisesRef.current[index];
-    if (pending) return pending;
-    const design = designsKey.split(',')[index] as Design | undefined;
-    const target = design === 'liftLog' ? liftLogRef.current : design === 'poster' ? posterRef.current : stripRef.current;
-    if (!target) throw new Error('The share card is not ready to capture.');
-
-    const capturePromise = captureRef(target, CAPTURE_OPTIONS);
-    capturePromisesRef.current[index] = capturePromise;
-
-    try {
-      const uri = await capturePromise;
-      capturedUrisRef.current[index] = uri;
-      return uri;
-    } finally {
-      capturePromisesRef.current[index] = null;
-    }
-  }, [designsKey]);
-
-  useEffect(() => {
-    if (!visible || !captureReady) return;
-
-    // Warm the captures after the sheet settles, so the first user tap only has
-    // to write the finished PNG to the clipboard.
-    for (let index = 0; index < designCount; index += 1) {
-      if (capturedUrisRef.current[index]) continue;
-      void getCapturedUri(index).catch(() => {
-        capturedUrisRef.current[index] = null;
-      });
-    }
-  }, [captureReady, designCount, getCapturedUri, visible]);
-
   const handleCopy = useCallback(async () => {
-    if (isCopying) return;
+    if (activeCopyRef.current || !visible || !captureReady || isPaging) return;
 
+    const operation = {};
+    const epoch = captureEpochRef.current;
+    const isCurrent = () => captureEpochRef.current === epoch && activeCopyRef.current === operation;
+    activeCopyRef.current = operation;
     setIsCopying(true);
     try {
-      const uri = await getCapturedUri(page);
+      const design = selectedDesign;
+      const target = design === 'liftLog' ? liftLogRef.current
+        : design === 'frame' ? frameRef.current : design === 'strip' ? stripRef.current : null;
+      if (!target) throw new Error('The share card is not ready to capture.');
+      // Capture only the selected, visible card on this tap. No stale/offscreen PNG reuse.
+      const uri = await captureRef(target, CAPTURE_OPTIONS);
+      if (!isCurrent()) return;
       const base64Image = await new File(uri).base64();
+      if (!isCurrent()) return;
       await Clipboard.setImageAsync(base64Image);
+      if (!isCurrent()) return;
       if (Platform.OS !== 'web' && !(await Clipboard.hasImageAsync())) {
+        if (!isCurrent()) return;
         // Some devices occasionally do not commit a large image on the first
         // write. Retry once inside the same tap and verify the result.
         await Clipboard.setImageAsync(base64Image);
@@ -205,19 +206,24 @@ export function ShareSheet({
           throw new Error('The clipboard did not accept the image.');
         }
       }
+      if (!isCurrent()) return;
       if (Platform.OS !== 'web') {
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
       showFeedback('copied');
     } catch {
+      if (!isCurrent()) return;
       if (Platform.OS !== 'web') {
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       }
       showFeedback('copyError');
     } finally {
-      setIsCopying(false);
+      if (isCurrent()) {
+        activeCopyRef.current = null;
+        setIsCopying(false);
+      }
     }
-  }, [getCapturedUri, isCopying, page, showFeedback]);
+  }, [captureReady, isPaging, selectedDesign, showFeedback, visible]);
 
   const handleSharePdf = useCallback(async () => {
     if (!onSharePdf || isSharingPdf) return;
@@ -278,12 +284,20 @@ export function ShareSheet({
           <Text allowFontScaling={false} style={styles.eyebrow}>SHARE WORKOUT</Text>
 
           <ScrollView
+            ref={pagerRef}
             horizontal
             pagingEnabled
-            scrollEnabled={designCount > 1}
+            scrollEnabled={designCount > 1 && !isCopying}
+            removeClippedSubviews={false}
             showsHorizontalScrollIndicator={false}
             style={{ width: pageWidth, alignSelf: 'center' }}
+            onScrollBeginDrag={() => setIsPaging(true)}
+            onScrollEndDrag={(event) => {
+              const offset = event.nativeEvent.contentOffset.x;
+              if (Math.abs(offset - Math.round(offset / pageWidth) * pageWidth) < 1) setIsPaging(false);
+            }}
             onMomentumScrollEnd={(event) => {
+              setIsPaging(false);
               const next = Math.round(event.nativeEvent.contentOffset.x / pageWidth);
               if (next !== page && next >= 0 && next < designCount) {
                 setPage(next);
@@ -344,28 +358,31 @@ export function ShareSheet({
                 </View>
               </View>
             ) : null}
-            {designs.includes('poster') && posterLayers ? (
+            {designs.includes('frame') && frameExercises ? (
               <View
                 accessible
-                accessibilityLabel="My Stack design"
+                accessibilityLabel="Frame design"
                 style={[styles.page, { width: pageWidth }]}
               >
                 <View style={[styles.previewFrame, { width: previewWidth, height: previewHeight }]}>
+                  {/* Preview only, outside the capture target: where the story photo will sit. */}
+                  <View pointerEvents="none" style={styles.photoHint}>
+                    <Text allowFontScaling={false} style={styles.photoHintText}>YOUR PHOTO</Text>
+                  </View>
                   <View
                     pointerEvents="none"
                     style={[styles.previewScale, { transform: [{ scale: previewScale }] }]}
                   >
-                    <StackPosterCard
-                      ref={posterRef}
-                      accent={accent}
+                    <StackFrameCard
+                      ref={frameRef}
                       title={title}
                       date={date}
                       volumeValue={volumeValue}
                       volumeUnit={volumeUnit}
                       setCount={setCount}
                       repCount={repCount}
-                      layers={posterLayers}
-                      {...(durationLabel ? { durationLabel } : {})}
+                      exercises={frameExercises}
+                      {...(recordCount ? { recordCount } : {})}
                     />
                   </View>
                 </View>
@@ -400,8 +417,8 @@ export function ShareSheet({
                 accessibilityLabel={feedback === 'copied'
                   ? `${designName} copied to clipboard`
                   : `Copy ${designName} image to clipboard`}
-                accessibilityState={{ disabled: isCopying || !captureReady }}
-                disabled={isCopying || !captureReady}
+                accessibilityState={{ disabled: isCopying || !captureReady || isPaging || !visible }}
+                disabled={isCopying || !captureReady || isPaging || !visible}
                 onPress={() => void handleCopy()}
                 style={({ pressed }) => [
                   styles.copyButton,
@@ -409,7 +426,7 @@ export function ShareSheet({
                     borderColor: accent,
                   },
                   pressed && styles.buttonPressed,
-                  (isCopying || !captureReady) && styles.buttonDisabled,
+                  (isCopying || !captureReady || isPaging) && styles.buttonDisabled,
                 ]}
               >
                 {isCopying ? (
@@ -531,6 +548,19 @@ const styles = StyleSheet.create({
     width: STAT_STRIP_WIDTH,
     height: STAT_STRIP_HEIGHT,
     transformOrigin: 'top left',
+  },
+  photoHint: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1C1916',
+  },
+  photoHintText: {
+    fontFamily: redesignFonts.mono,
+    fontSize: 9,
+    lineHeight: 12,
+    letterSpacing: 1.8,
+    color: redesignColors.ashDim,
   },
   actions: {
     marginTop: 16,

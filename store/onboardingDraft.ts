@@ -3,7 +3,7 @@ import { create } from 'zustand';
 import type { ThreeDayStructure } from './programPreferences';
 
 export const ONBOARDING_DRAFT_KEY = 'stack-onboarding-draft-v1';
-export type OnboardingStep = 'welcome' | 'name' | 'starting-point' | 'bring-workouts' | 'frequency' | 'program-preview';
+export type OnboardingStep = 'welcome' | 'name' | 'experience' | 'starting-point' | 'bring-workouts' | 'frequency' | 'split-choice' | 'program-preview';
 export type StartingChoice = 'track' | 'explore' | 'stack';
 export const NICKNAME_MAX_LENGTH = 40;
 export type OnboardingDraft = {
@@ -12,6 +12,8 @@ export type OnboardingDraft = {
   choice: StartingChoice | null;
   frequency: number | null;
   structure: ThreeDayStructure;
+  /** Only the original onboarding uses experience to choose its three-day structure. */
+  experienceLevel?: 'beginner' | 'intermediate' | 'advanced';
 };
 export const emptyOnboardingDraft = (): OnboardingDraft => ({
   step: 'welcome', name: '', choice: null, frequency: null, structure: 'full-body',
@@ -24,12 +26,14 @@ export function parseOnboardingDraft(raw: string | null): OnboardingDraft {
   // Drafts written before the name step have no name; they resume with an empty one.
   const name = d?.name ?? '';
   if (value?.version !== 1 || !d ||
-      !['welcome', 'name', 'starting-point', 'bring-workouts', 'frequency', 'program-preview'].includes(d.step) ||
+      !['welcome', 'name', 'experience', 'starting-point', 'bring-workouts', 'frequency', 'split-choice', 'program-preview'].includes(d.step) ||
       typeof name !== 'string' || name.length > NICKNAME_MAX_LENGTH ||
       ![null, 'track', 'explore', 'stack'].includes(d.choice) ||
       !(d.frequency === null || Number.isInteger(d.frequency) && d.frequency >= 1 && d.frequency <= 6) ||
-      !['full-body', 'push-pull-legs'].includes(d.structure)) throw Error('Could not read your setup. Try again.');
-  return { step: d.step, name, choice: d.choice, frequency: d.frequency, structure: d.structure };
+      !['full-body', 'push-pull-legs'].includes(d.structure) ||
+      !(d.experienceLevel === undefined || ['beginner', 'intermediate', 'advanced'].includes(d.experienceLevel))) throw Error('Could not read your setup. Try again.');
+  return { step: d.step, name, choice: d.choice, frequency: d.frequency, structure: d.structure,
+    ...(d.experienceLevel === undefined ? {} : { experienceLevel: d.experienceLevel }) };
 }
 
 /** Independent serialized storage per setup context. */

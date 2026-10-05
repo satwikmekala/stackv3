@@ -1,9 +1,9 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import * as Haptics from '@/services/haptics';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ChevronRight, Share, X } from 'lucide-react-native';
+import { ChevronRight, Share } from 'lucide-react-native';
 import { redesignColors as c, redesignFonts as f } from '../../constants/theme';
 import { useWorkoutStore } from '../../store/workoutStore';
 import { unpackWeek } from './caseModel';
@@ -49,8 +49,19 @@ export default function UnpackedWeek() {
       setSharing(false);
     }
   }, [sessions, unit, week]);
-  return <SafeAreaView style={s.screen}>
-    <View style={s.header}><Text accessibilityRole="header" maxFontSizeMultiplier={2} style={s.title}>{unpacked?.title}</Text>{week && <Pressable accessibilityRole="button" accessibilityLabel="Share week as PDF" accessibilityState={{ busy: sharing }} disabled={sharing} onPress={shareWeek} style={s.close}>{sharing ? <ActivityIndicator size="small" color={c.bone} /> : <Share size={18} color={c.bone} />}</Pressable>}<Pressable accessibilityRole="button" accessibilityLabel="Close week" onPress={() => performBuildIntent(router, buildIntents.closeWeek(), '/build-case')} style={s.close}><X size={20} color={c.bone} /></Pressable></View>
+  return <SafeAreaView edges={['left', 'right', 'bottom']} style={s.screen}>
+    <Stack.Screen options={{
+      headerShown: true,
+      title: unpacked?.title ?? 'Week',
+      headerBackTitle: 'Past weeks',
+      headerBackButtonDisplayMode: 'minimal',
+      unstable_nativeProps: { headerConfig: { experimental_userInterfaceStyle: 'dark' } },
+      headerStyle: { backgroundColor: c.ink },
+      headerTintColor: c.bone,
+      headerShadowVisible: false,
+      animation: 'slide_from_right',
+      headerRight: week ? () => <Pressable accessibilityRole="button" accessibilityLabel="Share week as PDF" accessibilityState={{ busy: sharing }} disabled={sharing} onPress={shareWeek} style={s.share}>{sharing ? <ActivityIndicator size="small" color={c.bone} /> : <Share size={18} color={c.bone} />}</Pressable> : undefined,
+    }} />
     {week && <FlatList data={week.pieces} keyExtractor={(piece) => piece.id} contentContainerStyle={s.details} initialNumToRender={5}
       ListHeaderComponent={<><View style={s.scene} accessible accessibilityLabel={`${week.pieces.length} workout blocks, ordered from earliest to latest.`}>{active && focused && accessibility.ready && !failed && !accessibility.reduceEffects && <BuildScene slabs={slabs} pieceGap={0.22} tuning={DEFAULT_TUNING} lamination="strata" overview reducedMotion={reduced} benchmark={0} onStats={ignoreStats} onSelectSlab={setPieceId} onError={() => setFailed(true)} />}{accessibility.reduceEffects && <View style={{ alignItems: 'center' }}><BuildPreview slabs={slabs} width={230} height={230} /></View>}{failed && <Text style={s.note}>Couldn’t open My Stack. Your workouts are listed below.</Text>}</View>{unpacked && <MetricTiles tiles={unpacked.tiles} />}</>}
       renderItem={({ item: piece }) => {
@@ -64,10 +75,8 @@ export default function UnpackedWeek() {
   </SafeAreaView>;
 }
 const s = StyleSheet.create({
-  // Same heading-and-close row as My Stack's sheets.
-  screen: { flex: 1, backgroundColor: c.ink }, header: { paddingHorizontal: 22, paddingTop: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
-  title: { flex: 1, color: c.bone, fontFamily: f.display, fontSize: 28 }, close: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22, backgroundColor: '#241E18' },
-  button: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 }, link: { color: c.bone, fontFamily: f.uiSemiBold, fontSize: 14 },
+  screen: { flex: 1, backgroundColor: c.ink },
+  share: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   gold: { height: 2, backgroundColor: GOLD }, note: { color: c.ash, fontFamily: f.ui, fontSize: 12, lineHeight: 19, marginTop: 5 },
   details: { padding: 22, paddingTop: 10, gap: 14 }, scene: { height: 240, marginBottom: 12, backgroundColor: '#1B1611', borderRadius: 16, overflow: 'hidden' }, row: { padding: 16, borderRadius: 12, borderWidth: 1, borderColor: c.border }, selected: { borderColor: c.bone }, rowTitle: { color: c.bone, fontFamily: f.uiSemiBold, fontSize: 17 }, rowTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12 }, pigment: { width: 76, borderTopRightRadius: 6, overflow: 'hidden' },
 });

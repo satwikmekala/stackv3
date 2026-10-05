@@ -1,4 +1,4 @@
-export const SETTINGS_PAGES = ['name', 'goal', 'schedule', 'program', 'unit', 'adjustments', 'data', 'about'] as const;
+export const SETTINGS_PAGES = ['name', 'goal', 'schedule', 'program', 'unit', 'adjustments', 'data', 'about', 'reminders'] as const;
 export type SettingsPage = typeof SETTINGS_PAGES[number];
 type BaseRow = { id: string; label: string; disabled?: boolean };
 export type SettingsRow = BaseRow & (

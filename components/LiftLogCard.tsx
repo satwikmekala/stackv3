@@ -25,7 +25,7 @@ export interface LiftLogCardProps {
 }
 
 /**
- * A transparent 1080 x 1920 sticker that lists every lift's top set, for pasting over a
+ * A transparent 1080 x 1920 sticker that lists every lift's total weight moved, for pasting over a
  * photo. Same canvas and capture rules as the Stat Strip: preview surfaces scale the parent.
  */
 export const LiftLogCard = forwardRef<View, LiftLogCardProps>(function LiftLogCard(
@@ -47,7 +47,8 @@ export const LiftLogCard = forwardRef<View, LiftLogCardProps>(function LiftLogCa
             {lines.map((line, index) => (
               <View key={`${line.name}-${index}`} style={styles.line}>
                 <View style={styles.valueRow}>
-                  <Text allowFontScaling={false} style={styles.value}>{line.value}</Text>
+                  <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65}
+                    style={[styles.value, styles.fittedValue]}>{line.value}</Text>
                   <Text allowFontScaling={false} style={styles.unit}>{line.unit}</Text>
                   {line.record ? (
                     <View style={[styles.record, { backgroundColor: accent }]}>
@@ -55,8 +56,8 @@ export const LiftLogCard = forwardRef<View, LiftLogCardProps>(function LiftLogCa
                     </View>
                   ) : null}
                 </View>
-                <Text allowFontScaling={false} numberOfLines={1} style={styles.label}>
-                  {line.name} · {line.scheme}
+                <Text allowFontScaling={false} numberOfLines={2} style={styles.label}>
+                  {line.name}
                 </Text>
               </View>
             ))}
@@ -163,6 +164,7 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
     color: redesignColors.bone,
   },
+  fittedValue: { flexShrink: 1 },
   unit: {
     ...shadow,
     marginLeft: scaled(4),

@@ -142,7 +142,7 @@ test('Welcome Continue persists the name step, does not complete setup, and dupl
   const h = hookHarness(); await h.d.loadOnboardingDraft(); const flow = h.render('welcome');
   h.focus(); await settle(); flow.getStarted(); flow.getStarted(); await settle();
   assert.equal(h.d.useOnboardingDraft.getState().draft.step, 'name');
-  assert.deepEqual(h.navigation, [['push', '/onboarding-preview/name']]); assert.equal(h.writes(), 0);
+  assert.deepEqual(h.navigation, [['push', '/(onboarding)/name']]); assert.equal(h.writes(), 0);
 });
 test('Name Continue trims and persists the nickname, ignores a blank one and navigates once', async () => {
   const h = hookHarness(); await h.d.loadOnboardingDraft(); const flow = h.render('name');
@@ -150,7 +150,7 @@ test('Name Continue trims and persists the nickname, ignores a blank one and nav
   assert.equal(h.navigation.length, 0); assert.equal(h.d.useOnboardingDraft.getState().draft.step, 'name');
   flow.submitName('  Sam  '); flow.submitName('  Sam  '); await settle();
   assert.deepEqual(h.d.useOnboardingDraft.getState().draft, { ...h.d.emptyOnboardingDraft(), step: 'starting-point', name: 'Sam' });
-  assert.deepEqual(h.navigation, [['push', '/onboarding-preview/starting-point']]); assert.equal(h.writes(), 0);
+  assert.deepEqual(h.navigation, [['push', '/(onboarding)/starting-point']]); assert.equal(h.writes(), 0);
   assert.equal(h.render('starting-point').name, 'Sam');
 });
 for (const choice of ['track', 'explore']) test(`${choice} completes setup with the saved nickname`, async () => {
@@ -257,10 +257,10 @@ test('Back after a cold draft restore persists each previous step without cleari
   const h = hookHarness(); await h.d.loadOnboardingDraft();
   await h.d.saveOnboardingDraft({ step: 'starting-point', name: 'Sam', choice: 'stack', frequency: 3, structure: 'push-pull-legs' });
   const flow = h.render('starting-point'); flow.backToName(); flow.backToName(); await settle();
-  assert.deepEqual(h.navigation, [['dismissTo', '/onboarding-preview/name']]);
+  assert.deepEqual(h.navigation, [['dismissTo', '/(onboarding)/name']]);
   assert.deepEqual(h.d.useOnboardingDraft.getState().draft, { step: 'name', name: 'Sam', choice: 'stack', frequency: 3, structure: 'push-pull-legs' });
   h.render('name').backToWelcome(); await settle();
-  assert.deepEqual(h.navigation.at(-1), ['dismissTo', '/onboarding-preview/welcome']);
+  assert.deepEqual(h.navigation.at(-1), ['dismissTo', '/(onboarding)/welcome']);
   assert.deepEqual(h.d.useOnboardingDraft.getState().draft, { step: 'welcome', name: 'Sam', choice: 'stack', frequency: 3, structure: 'push-pull-legs' });
 });
 test('Reset All Data clears the onboarding draft after successful database reset, preserving it on failed reset', async () => {
@@ -292,7 +292,7 @@ test('Welcome Continue draft-write failure stays on Welcome and Retry performs e
   assert.equal(h.navigation.length, 0); assert.equal(h.d.useOnboardingDraft.getState().draft.step, 'welcome');
   const failed = h.render('welcome'); assert.match(failed.error, /Try again/);
   h.draftFail.write = false; failed.retry(); failed.retry(); await settle();
-  assert.deepEqual(h.navigation, [['push', '/onboarding-preview/name']]); assert.equal(h.writes(), 0);
+  assert.deepEqual(h.navigation, [['push', '/(onboarding)/name']]); assert.equal(h.writes(), 0);
 });
 
 test('a shared-routine route arriving during a save keeps navigation ownership', async () => {
@@ -329,6 +329,7 @@ function programHarness(profile = null, source = 'onboarding') {
   const load = loader({ react,
     'expo-router': { useRouter: () => router, useLocalSearchParams: () => ({ source }), useFocusEffect: cb => { current.focus = cb; } },
     '@/store/workoutStore': { useWorkoutStore: store }, '@/store/workoutDatabase': db,
+    '@/store/customSplitDraft': { useCustomSplitDraftStore: { getState: () => ({ discardStackPlanDrafts() {} }) } },
     '@/store/muscleColors': { useMuscleColors: selector => selector({ preferences: colors }) },
     '@/store/onboardingDraft': { ...h.d, useOnboardingDraft: Object.assign(() => h.d.useOnboardingDraft.getState(), { getState: h.d.useOnboardingDraft.getState }) },
     '@/store/programConfigurationDraft': { ...cfg, useProgramConfigurationDraft: Object.assign(() => cfg.useProgramConfigurationDraft.getState(), { getState: cfg.useProgramConfigurationDraft.getState }) },

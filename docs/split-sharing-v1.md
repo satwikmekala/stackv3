@@ -1,5 +1,138 @@
 # Split Sharing V1
 
+## Public URLs and Universal Links — Block 3, October 5, 2026
+
+The backend now serves `/r/:shareId` as minimal server-rendered HTML with escaped
+routine name, counts, OG/Twitter metadata, generic preview and an explicit ID-only
+`stack://shared-routine?id=...` CTA. Its AASA claims only `/r/*`. Native Expo and
+tracked iOS configuration carry `applinks:liftwithstack.com`; cold/warm mapping
+uses the existing Block 2 entry. First-run pending IDs survive setup through the
+existing durable handoff store, then open an unsaved edit draft.
+
+See the [release guide and signed iPhone checklist](routine-sharing-universal-links.md)
+for identity evidence, exact deployment/proxy requirements and remaining blockers.
+The branded domain is currently parked; deployment and signed physical-device
+validation remain required. Universal Links are not yet production-verified.
+
+## Recipient editing — Block 2, October 5, 2026
+
+`/shared-routine?id=<shareId>` is the internal recipient entry for a short share.
+It uses the same backend host configuration as the sender, fetches the canonical
+V1 snapshot, validates it through `parseSharedSplitJson`, checks built-in names
+against both bundled seed catalogs, then replaces the loading route with
+`/custom-split?source=shared&shareId=<shareId>`. Block 3 now supplies the HTTPS
+link routing, AASA and browser page described above. The legacy
+`stack://import-split?d=…` preview/import path remains supported.
+
+The normal editor now supports source `shared`. Each share owns a
+`shared:<shareId>` slot within the existing `stack-split-drafts` store, alongside
+`new`, `stack` and `edit:<id>`. Other unfinished drafts stay intact. Reopening
+the same share resumes its edited draft; a different share gets another slot.
+Back closes the live context and retains the slot. The library exposes
+Continue building for each shared draft, so restart recovery works offline.
+Discard removes only the current slot. Builder cleanup checks ownership so an
+older screen cannot close a newer incoming draft.
+
+Received exercises use negative temporary IDs and retain validated portable
+definitions. Built-in seed metadata supports rendering even if the local row
+was renamed or removed; the importer restores/resolves it only on Save.
+Custom exercises created from the shared editor also remain staged, including
+picker selections. IDs are allocated monotonically within the context so Undo
+cannot restore another exercise. Drag callbacks now use a null idle marker,
+supporting both staged and ordinary positive catalog IDs. No routine, workout,
+relationship or exercise rows are written before the final Save.
+
+Routine/workout names, colors, workout/exercise order, timed custom definitions,
+and named empty workouts survive staging and editing. Shared name inputs accept
+the existing V1 64-character limit. Workout colors can be edited in Settings.
+An empty workout without a name still fails the existing V1 rules. Normal
+new-routine, pasted, onboarding, Stack-plan and edit-existing modes retain their
+save paths and validation.
+
+Review shows only **Save routine** for this source. The final draft projects
+ordinary catalog picks through the existing portable adapter and retains staged
+definitions, then validates again. `saveSharedRoutineDraft` persists an attempt
+UUID through the existing draft queue before invoking `importPortableSplitSync`.
+That importer performs the single catalog/graph transaction, including custom
+equivalence, conflict disambiguation, name collisions, ordering and rollback.
+Its existing receipt prevents duplicate saves after repeated taps or a cleanup
+failure. A committed receipt detected on cold editor recovery clears the stale
+shared draft and returns to the library. No profile, activation, history or
+sender connection is written. Successful saves clear only their shared slot
+and return to `/your-splits?source=shared`; this destination also works before
+onboarding without creating a profile.
+
+Loading requests are cancelled on blur/unmount. An ownership check also ignores
+late results from requests that disregard cancellation. IDs/payloads that fail
+validation, missing shares, network/server failures and newer protocols use
+concise fixed copy. Save failure keeps the draft and permits retry; a draft
+storage failure prevents committing until the attempt can be persisted.
+
+Block 2 files: `app/shared-routine.tsx`, `app/_layout.tsx`, `app/your-splits.tsx`,
+`app/custom-split/{index,review,exercises,new-exercise,personalize}.tsx`,
+`components/custom-split/SelectedExerciseList.tsx`,
+`store/{customSplitDraft,workoutDatabase}.ts`,
+`features/routineImport/importDraft.ts`, `features/sharing/routineShareClient.ts`,
+new `features/sharing/{sharedRoutineDraft,sharedRoutineEntry,saveSharedRoutineDraft}.ts`,
+`tests/customSplitUI.test.cjs`, new `tests/sharedRoutine{Draft,Drag}.test.cjs`,
+and this document. Unrelated concurrent working-tree edits were preserved.
+
+Device validation still needed: cold resume and swipe-back between editor and
+review, negative-ID drag/autoscroll and VoiceOver ordering, staged custom
+creation/picker cancellation, long Unicode names and colors, first-run save
+without activation, offline library recovery, and storage failure/retry after
+a committed save. Automated tests replace native controls/gestures; no physical
+iPhone validation was performed for Block 2.
+
+Block 2 automated verification: **791 app tests passed, zero failures/skips**
+in the full `tests/*.test.cjs` run, including editor, shared drafts, pasted
+routine, onboarding, importer and legacy sharing compatibility; **21 backend
+tests passed**. Focused shared/import/draft tests also passed independently.
+Type checking, focused lint, the generated-server-code sync check,
+`git diff --check` and a production iOS Hermes export passed. Full-suite checks
+include unrelated concurrent changes in this shared workspace.
+
+## Current sender transport — Block 1, October 5, 2026
+
+Saved routines now use the existing portable adapter and canonical V1 serializer
+to upload a detached snapshot to `POST /v1/routine-shares`, then share the returned
+`https://liftwithstack.com/r/<shareId>` link through the same native sheet. The
+8,192-character sender URL budget has been removed; the unchanged 32 KiB V1
+payload limit still applies. Native copy, button loading/error behavior and the
+legacy custom-scheme decoder/import routes are preserved. Upload and share-sheet
+calls for the same routine coalesce, and failure releases the lock for retry.
+
+The server stores immutable canonical snapshots in SQLite on a configured
+Railway volume and exposes unauthenticated `GET /v1/routine-shares/:id`. See
+[server setup and API contract](../server/README.md#routine-shares--block-1) for
+the required volume, environment variables, errors and deployment checks.
+
+This block does not add the `/r/:id` browser page, HTTPS recipient routing or
+Universal Links. Old `stack://import-split?d=…` links still use the importer
+described below. The following local-transport architecture, limits and device
+QA document the earlier implementation; they do not verify the new server flow.
+
+Block 1 verification: **117 passed** across `splitSharing`,
+`splitSharingExperience`, `routineImport`, `onboardingDiscovery` and
+`pasteRoutine`; **21 passed** across the backend HTTP suites. Type checking,
+focused lint on all touched source/tests, generated-server-code sync,
+`git diff --check` and a production iOS Hermes export passed. Native sharing
+and HTTP responses are mocked in app tests; backend tests use real HTTP and
+file-backed SQLite. No Railway deployment or physical-iPhone test was performed.
+
+Block 1 files:
+
+- Sender: `features/sharing/shareSavedSplit.ts`, `shareSplit.ts`,
+  `splitTransport.ts`, and new `routineShareClient.ts` in that directory.
+- Server: `server/src/app.mjs`, `config.mjs`, `server.mjs`, and new
+  `routineShareStore.mjs` in that directory; `server/package.json`,
+  `server/.env.example`, `server/.gitignore`, `server/README.md`.
+- Tests: `tests/splitSharingExperience.test.cjs` and new
+  `server/test/routineShares.test.mjs`.
+- Documentation: this file. Existing unrelated working-tree edits were preserved.
+
+## Original V1 implementation and verification
+
 Implemented from `0dca599` (`feat: integrate Stack workout system update`). The
 portable V1 schema and validation rules are unchanged. This feature adds the
 saved-program sharing UI, local transport, preview and transactional importer.

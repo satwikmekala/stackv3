@@ -37,6 +37,13 @@
       "autoPort": false
     },
     {
+      "name": "website",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "liftwithstack", "run", "dev", "--", "--port", "3010"],
+      "port": 3010,
+      "autoPort": false
+    },
+    {
       "name": "paste-preview-metro",
       "runtimeExecutable": "npx",
       "runtimeArgs": ["expo", "start", "--port", "8095", "--localhost"],

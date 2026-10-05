@@ -34,15 +34,14 @@ const { createSlabGeometry } = (() => {
   return exports;
 })();
 
-test('release builds cannot enable the preview, even with the preview environment flag', () => {
+test('every build uses the shorter onboarding regardless of the retired preview flag', () => {
   const js = ts.transpileModule(fs.readFileSync(path.join(root, 'features/onboarding/config.ts'), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS },
   }).outputText;
   for (const dev of [false, true]) for (const flag of [undefined, '0', '1']) {
     const exports = {};
     new Function('exports', '__DEV__', 'process', js)(exports, dev, { env: { EXPO_PUBLIC_ONBOARDING_PREVIEW: flag } });
-    assert.equal(exports.ONBOARDING_PREVIEW_ENABLED, dev && flag === '1');
-    assert.equal(exports.FIRST_RUN_ROUTE, dev && flag === '1' ? '/onboarding-preview' : '/(onboarding)/welcome');
+    assert.equal(exports.FIRST_RUN_ROUTE, '/(onboarding)');
   }
   assert.equal(welcomeComposition(undefined), 'object');
   assert.equal(welcomeComposition('unknown'), 'object');

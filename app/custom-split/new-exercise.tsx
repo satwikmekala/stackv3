@@ -28,6 +28,7 @@ import {
 } from '@/store/workoutDatabase';
 import { useWorkoutStore, type ExerciseLoadType, type ExerciseMetric } from '@/store/workoutStore';
 import '@/global.css';
+import { stageSharedCustomExercise } from '@/features/sharing/sharedRoutineDraft';
 
 const GROUP_COLORS: Record<CustomSplitMuscleGroup, string> = {
   get Chest() { return getMuscleColor('chest'); },
@@ -102,6 +103,7 @@ export default function NewCustomExerciseScreen() {
   const router = useRouter();
   const { workoutId, picker, initialName } = useLocalSearchParams<{ workoutId?: string; picker?: string; initialName?: string }>();
   const draft = useCustomSplitDraftStore((state) => state.draft);
+  const shared = useCustomSplitDraftStore((state) => state.source === 'shared');
   const addExercise = useCustomSplitDraftStore((state) => state.addExercise);
   const createCustomExercise = useWorkoutStore((state) => state.createCustomExercise);
   const [name, setName] = useState(initialName ?? '');
@@ -132,7 +134,8 @@ export default function NewCustomExerciseScreen() {
     setSubmitting(true);
     setError(null);
     try {
-      const existing = readExerciseCatalogSync().some(
+      const store = useCustomSplitDraftStore.getState();
+      const existing = [...readExerciseCatalogSync(), ...(shared ? draft!.workouts.flatMap(day => day.exercises) : []), ...(store.picker?.selected ?? [])].some(
         (exercise) => exercise.name.trim().toLocaleLowerCase() === normalizedName.toLocaleLowerCase()
       );
       if (existing) {
@@ -141,6 +144,15 @@ export default function NewCustomExerciseScreen() {
       }
 
       const workoutType = getWorkoutTypeForMuscleGroup(primaryMuscle);
+      if (shared) {
+        const created = stageSharedCustomExercise(draft!, store.picker?.selected ?? [], { name: normalizedName,
+          workoutType, primaryMuscle, equipment: equipment === 'None' ? null : equipment, loadType, metric, isCustom: true }, store.allocateSharedExerciseId());
+        if (picker === '1' && store.picker?.workoutId === workoutId) {
+          store.updatePicker({ selected: [...store.picker.selected, created] });
+        } else addExercise(workoutId, created);
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        close(); return;
+      }
       const exerciseId = createCustomExercise(
         normalizedName,
         workoutType,
@@ -158,7 +170,6 @@ export default function NewCustomExerciseScreen() {
       );
       if (!createdExercise) throw new Error('The new exercise could not be loaded.');
 
-      const store = useCustomSplitDraftStore.getState();
       if (picker === '1' && store.picker?.workoutId === workoutId) {
         store.updatePicker({ selected: [...store.picker.selected.filter(item => item.id !== createdExercise.id), createdExercise] });
       } else addExercise(workoutId, createdExercise);

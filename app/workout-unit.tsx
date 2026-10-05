@@ -7,7 +7,6 @@ import { SplitPressable as Pressable } from '@/components/custom-split/SplitPres
 import { redesignColors as c, redesignFonts as f } from '@/constants/theme';
 import { useWorkoutLaunch, workoutLaunch } from '@/store/workoutLaunch';
 import { navigateWorkoutLaunch } from '@/features/workout-launch/navigation';
-import { ONBOARDING_PREVIEW_ENABLED } from '@/features/onboarding/config';
 
 export default function WorkoutUnitSheet() {
   const router = useRouter(), navigation = useNavigation();
@@ -31,7 +30,7 @@ export default function WorkoutUnitSheet() {
     return () => { remove(); if (ownedIntent && workoutLaunch.getState().intent === ownedIntent) workoutLaunch.cancel(); };
   }, [navigation, ownedIntent]);
   useEffect(() => {
-    if (ONBOARDING_PREVIEW_ENABLED && ownedIntent && !state.intent && !handingOff.current) router.dismissTo('/(tabs)');
+    if (ownedIntent && !state.intent && !handingOff.current) router.dismissTo('/(tabs)');
   }, [ownedIntent, router, state.intent]);
   const start = () => {
     if (handingOff.current) return;
@@ -39,7 +38,7 @@ export default function WorkoutUnitSheet() {
     if (result.kind === 'started' || result.kind === 'resume') handingOff.current = true;
     navigateWorkoutLaunch(router, result, true);
   };
-  if (!ONBOARDING_PREVIEW_ENABLED || !ownedIntent) return <Redirect href="/(tabs)" />;
+  if (!ownedIntent) return <Redirect href="/(tabs)" />;
   return <>
     <Stack.Screen options={{ gestureEnabled: !state.busy }} />
     <ScrollView style={{ maxHeight: height - insets.top - 24 }} contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 24) }]}>

@@ -16,6 +16,8 @@ import { getCustomSplitDetailAsync } from '@/store/workoutDatabase';
 import { useWorkoutStore } from '@/store/workoutStore';
 import { clearOnboardingDraft, loadOnboardingDraft, useOnboardingDraft } from '@/store/onboardingDraft';
 import { loadSharedRoutineHandoff, onboardingDestination } from '@/store/sharedRoutineHandoff';
+import * as Haptics from '@/services/haptics';
+import { saveSharedRoutineDraft } from '@/features/sharing/saveSharedRoutineDraft';
 
 export default function ReviewSplit() {
   useMuscleColors(state => state.preferences);
@@ -40,6 +42,7 @@ export default function ReviewSplit() {
   const editing = state.editingSplitId !== null;
   // Stack's plan is always updated in place: never deleted, renamed or saved as a new routine.
   const stackPlan = state.source === 'stack';
+  const shared = state.source === 'shared';
   // First-run setup (e.g. a pasted routine) creates the profile only when the routine is saved.
   // A committed first-run save keeps this screen on the first-run path, so a retry finishes setup instead of saving twice.
   const firstRun = state.source === 'onboarding' && (!workouts.profile || savedBeforeSetup !== null);
@@ -97,11 +100,19 @@ export default function ReviewSplit() {
   const pendingCount = countPendingImports(draft);
   const invalid = !draft?.name.trim() ? 'Give your routine a name.'
     : pendingCount ? `Check the ${pendingCount === 1 ? 'exercise' : `${pendingCount} exercises`} Stack wasn’t sure about before saving.`
-    : draft.workouts.some(day => !day.exercises.length) ? 'Add exercises to every workout, or remove the workouts you don’t need.' : null;
+    : draft.workouts.some(day => !day.exercises.length && (!shared || !day.customName.trim())) ? 'Add exercises to every workout, or remove the workouts you don’t need.' : null;
   const save = async (activate: boolean) => {
     if (!draft || invalid || locked.current) return;
     locked.current = true; setSaving(true); setError(null);
     try {
+      if (shared) {
+        await saveSharedRoutineDraft();
+        void workouts.refreshCustomSplits().catch(() => {});
+        if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        locked.current = false;
+        router.dismissTo({ pathname: '/your-splits', params: { source: 'shared' } });
+        return;
+      }
       if (state.editingSplitId !== null) {
         const saved = await getCustomSplitDetailAsync(state.editingSplitId);
         if (!saved || splitRevision(saved) !== state.sourceRevision) {
@@ -123,6 +134,7 @@ export default function ReviewSplit() {
         workouts.activateSharedRoutine(splitId);
         await clearOnboardingDraft().catch(() => {});
         await loadSharedRoutineHandoff().catch(() => {});
+        if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         locked.current = false;
         state.discardDraft();
         router.replace(onboardingDestination());
@@ -135,6 +147,7 @@ export default function ReviewSplit() {
           ? (await workouts.saveCustomSplitDraft(draft.name.trim(), inputs, { stackPlan: true, activate: workouts.profile?.programMode === 'stack' })) !== undefined
           : (await workouts.saveCustomSplitDraft(draft.name.trim(), inputs, { activate, completeOnboarding: state.source === 'onboarding' })) !== undefined;
       if (!success) throw new Error('Couldn’t save your routine. Your draft is still here. Try again.');
+      if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       locked.current = false;
       state.discardDraft();
       if (state.source === 'onboarding') router.replace('/your-splits');
@@ -153,7 +166,7 @@ export default function ReviewSplit() {
         <View style={{ gap: 8 }}>
           {stackPlan ? null : <>
             <Text style={ui.label}>Routine name</Text>
-            <TextInput accessibilityLabel="Routine name" maxLength={48} value={draft.name} onChangeText={state.setSplitName} editable={!busy}
+            <TextInput accessibilityLabel="Routine name" maxLength={shared ? 64 : 48} value={draft.name} onChangeText={state.setSplitName} editable={!busy}
               style={ui.input} placeholder="Name your routine" placeholderTextColor={c.ash} returnKeyType="done" />
           </>}
           <Text style={ui.label}>{draft.workouts.length} {draft.workouts.length === 1 ? 'workout' : 'workouts'} · {draft.workouts.reduce((total, day) => total + day.exercises.length, 0)} {draft.workouts.reduce((total, day) => total + day.exercises.length, 0) === 1 ? 'exercise' : 'exercises'}</Text>
@@ -180,7 +193,7 @@ export default function ReviewSplit() {
           {day.exercises.length ? <View style={{ gap: 12 }}>{day.exercises.map((exercise, position) => <View key={exercise.id} style={[ui.row, { alignItems: 'flex-start' }]}>
             <Text style={[ui.number, { paddingTop: 3 }]}>{String(position + 1).padStart(2, '0')}</Text>
             <Text style={[ui.body, { flex: 1, color: c.bone }]}>{displayExerciseName(exercise.name)}</Text>
-          </View>)}</View> : day.pendingImports?.length ? null : <Text style={ui.body}>This workout needs exercises before you can save.</Text>}
+          </View>)}</View> : day.pendingImports?.length ? null : <Text style={ui.body}>{shared && day.customName.trim() ? 'No exercises yet.' : 'This workout needs exercises before you can save.'}</Text>}
           {day.pendingImports?.length ? <View style={{ gap: 6 }}>{day.pendingImports.map(item => <View key={item.key} style={ui.row}>
             <View style={[ui.dot, { backgroundColor: c.accent }]} />
             <Text style={[ui.body, { flex: 1 }]}>“{item.rawName}” needs a check</Text>
@@ -197,8 +210,8 @@ export default function ReviewSplit() {
           if (state.drafts.new) { setError('Finish or discard your other new routine draft in Your routines first. Both drafts are safe.'); return; }
           state.recoverAsNew(); setConflict(false); setError(null);
         }} /> : null}
-        <Action title={deleting ? 'Deleting…' : saving ? 'Saving…' : editing || stackPlan ? 'Save changes' : 'Save and use'} primary disabled={busy || !!invalid || conflict} onPress={() => { void save(true); }} />
-        {!editing && !stackPlan && state.source !== 'onboarding' ? <Action title="Save for later" disabled={busy || !!invalid || conflict} onPress={() => { void save(false); }} /> : null}
+        <Action title={deleting ? 'Deleting…' : saving ? 'Saving…' : shared ? 'Save routine' : editing || stackPlan ? 'Save changes' : 'Save and use'} primary disabled={busy || !!invalid || conflict} onPress={() => { void save(!shared); }} />
+        {!shared && !editing && !stackPlan && state.source !== 'onboarding' ? <Action title="Save for later" disabled={busy || !!invalid || conflict} onPress={() => { void save(false); }} /> : null}
       </View>
     </KeyboardAvoidingView> : <View style={ui.content}><Text style={ui.body}>Your routine has been saved or closed.</Text><Action title="Your routines" onPress={() => router.replace('/your-splits')} /></View>}
   </SafeAreaView>;

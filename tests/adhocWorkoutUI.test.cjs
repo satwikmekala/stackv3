@@ -25,6 +25,8 @@ function uiHarness(entry, state, params = {}, catalog = [], exerciseInfo = null,
     useRef(value) { const i=cursor++; return hooks[i] ?? (hooks[i]={current:value}); },
     useMemo(fn,deps) { const i=cursor++; if(!hooks[i] || deps?.some((v,j)=>v!==hooks[i].deps[j]))hooks[i]={deps,value:fn()};return hooks[i].value; },
     useCallback(fn,deps) { return react.useMemo(()=>fn,deps); },
+    useId() { return 'id'; },
+    Children: { toArray: children => [children].flat(Infinity).filter(child => child != null && typeof child !== 'boolean') },
     useContext() { return display.departure ?? null; },
     useEffect(fn,deps) { const i=cursor++; if(!hooks[i] || deps?.some((v,j)=>v!==hooks[i][j])) { hooks[i]=deps;effects.push(()=>{cleanups[i]?.();cleanups[i]=fn();}); } },
   };
@@ -63,7 +65,7 @@ function uiHarness(entry, state, params = {}, catalog = [], exerciseInfo = null,
       return {workoutLaunch:launchApi,useWorkoutLaunch:selector=>selector?selector(launchState):launchState};
     }
     if (id==='@/features/report/shareWorkoutReport') return {shareWorkoutReportPdf:report=>state.shareWorkoutReportPdf(report)};
-    if (id==='@/store/workoutDatabase') return {readExerciseCatalogSync:()=>catalog,getNextArchetypeVariant:()=> 'a',readArchetypeTemplateSync:()=>catalog};
+    if (id==='@/store/workoutDatabase') return {readExerciseNotesSync:exerciseId=>state.notes?.[exerciseId]??[],readExerciseCatalogSync:()=>catalog,getNextArchetypeVariant:()=> 'a',readArchetypeTemplateSync:()=>catalog};
     if (id==='@/store/weeklyQueueEngine') return {getWeeklyQueueState:()=>state.queueState ?? {nextUp:[],nextUpDate:null}};
     if (id==='@/components/home/HomeDeparture') return {HomeDeparture:{Provider:'Provider'},useHomeDepartureStyle:()=>({})};
     if (id==='@/constants/exerciseInfo') return {getExerciseInfo:()=>exerciseInfo};
@@ -85,14 +87,14 @@ function uiHarness(entry, state, params = {}, catalog = [], exerciseInfo = null,
     const resolved=['.tsx','.ts'].map(ext=>file+ext).find(f=>fs.existsSync(f));
     if(cache.has(resolved))return cache.get(resolved);
     const exports={};cache.set(resolved,exports);
-    const source=fs.readFileSync(resolved,'utf8') + (id==='@/app/(tabs)/index' ? '\nexports.testHomeContent = HomeContent;' : '');
+    const source=fs.readFileSync(resolved,'utf8') + (id==='@/app/(tabs)/index' ? '\nexports.testHomeContent = HomeContent;' : id==='@/components/home/WorkoutIntensityPicker' ? '\nexports.testFeedbackContent = FeedbackContent;' : '');
     const code=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText;
     new Function('exports','require','React','__DEV__',code)(exports,child=>load(child.startsWith('.')? '@/'+path.relative(root,path.resolve(path.dirname(resolved),child)):child),react,false);
     return exports;
   }
   load('@/constants/muscleColors').applyMuscleColorPreferences(musclePreferences);
   const module=load(entry);
-  const component=module.testHomeContent ?? Object.values(module).find(v=>typeof v==='function');
+  const component=display.component ? module[display.component] : module.testHomeContent ?? Object.values(module).find(v=>typeof v==='function');
   return {events,launch:()=>launchApi,beforeRemove(){let prevented=false;listeners.beforeRemove?.({preventDefault(){prevented=true;}});return prevented;},unmount(){cleanups.forEach(cleanup=>cleanup?.());},render(props={}) {let tree;for(let i=0;i<5;i++){cursor=0;dirty=false;tree=component(props);while(effects.length)effects.shift()();if(!dirty)break;}return tree;}};
 }
 function nodes(tree) { if(!tree || typeof tree!=='object')return [];if(Array.isArray(tree))return tree.flatMap(nodes);return [tree,...nodes(tree.props?.children)]; }
@@ -135,12 +137,41 @@ test('Full Body finish feedback keeps the session identity when legs is the firs
     assert.equal(picker.props.visible, true);
     assert.equal(picker.props.workoutLabel, 'Full Body');
     assert.equal(picker.props.accent, '#FF7A3D');
-    assert.equal(picker.props.prompt, 'How did it feel?');
-    const renderedPicker = uiHarness('@/components/home/WorkoutIntensityPicker', {}).render(picker.props);
-    assert.ok(textOf(renderedPicker).includes('FULL BODY'));
+    assert.equal(picker.props.prompt, 'How did this workout feel?');
+    const renderedPicker = uiHarness('@/components/home/WorkoutIntensityPicker', {}, {}, [], null, {}, { component: 'testFeedbackContent' }).render(picker.props);
+    assert.ok(textOf(renderedPicker).includes('Full Body'));
     assert.ok(!textOf(renderedPicker).includes('LEGS DAY'));
     assert.ok(nodes(renderedPicker).some(n => n.props?.style?.some?.(style => style?.backgroundColor === '#FF7A3D')));
   }
+});
+
+test('Workout feedback lets the user change their rating before finishing and commits only once', () => {
+  for (const [label, value] of [['Too easy', 0], ['Just right', 0.5], ['Too hard', 1]]) {
+    const chosen = [];
+    const h = uiHarness('@/components/home/WorkoutIntensityPicker', {}, {}, [], null, {}, { component: 'testFeedbackContent' });
+    const props = { workoutLabel: 'Push', accent: '#FF7A3D', onChoose: value => chosen.push(value), onClose() {} };
+    const options = () => nodes(h.render(props)).filter(n => n.props?.accessibilityRole === 'radio');
+    options().find(n => n.props.accessibilityLabel === 'Too hard').props.onPress();
+    options().find(n => n.props.accessibilityLabel === label).props.onPress();
+    assert.deepEqual(chosen, [], 'changing a rating must not finish the workout');
+    assert.equal(options().filter(n => n.props.accessibilityState.checked).length, 1);
+    assert.equal(options().find(n => n.props.accessibilityLabel === label).props.accessibilityState.checked, true);
+    const finish = nodes(h.render(props)).find(n => n.props?.accessibilityLabel === 'Save workout');
+    finish.props.onPress(); finish.props.onPress();
+    assert.deepEqual(chosen, [value]);
+    assert.equal(nodes(h.render(props)).find(n => n.props?.accessibilityLabel === 'Save workout').props.disabled, true);
+  }
+});
+
+test('Closing workout feedback keeps the workout and rating unsubmitted', () => {
+  let closed = 0, submitted = 0;
+  const h = uiHarness('@/components/home/WorkoutIntensityPicker', {}, {}, [], null, {}, { component: 'testFeedbackContent' });
+  const props = { workoutLabel: 'Full Body', accent: '#FF7A3D', onChoose() { submitted++; }, onClose() { closed++; } };
+  nodes(h.render(props)).find(n => n.props?.accessibilityLabel === 'Too easy').props.onPress();
+  nodes(h.render(props)).find(n => n.props?.accessibilityLabel === 'Close workout feedback').props.onPress();
+  assert.equal(closed, 1); assert.equal(submitted, 0);
+  const modal = uiHarness('@/components/home/WorkoutIntensityPicker', {}).render({ ...props, visible: false });
+  assert.equal(find(modal, 'FeedbackContent'), undefined, 'dismissing unmounts the selection so it resets on the next visit');
 });
 
 test('Finish feedback preserves merged, legacy and empty-workout identities', () => {
@@ -177,9 +208,10 @@ test('Summary: save routine stays secondary; Share opens the card sheet, whose P
   tree=h.render();
   const sheet=find(tree,'ShareSheet').props;
   assert.equal(sheet.visible,true);
+  assert.equal(sheet.workoutId,session.id);
   assert.equal(calls,0);
-  assert.equal(sheet.posterLayers.length,1);
-  assert.equal(sheet.posterLayers[0].name,'Bench Press');
+  assert.equal(sheet.frameExercises.length,1);
+  assert.equal(sheet.frameExercises[0].name,'Bench Press');
   await sheet.onSharePdf();
   assert.equal(calls,1);
 });
@@ -199,7 +231,7 @@ test('Summary: a failed PDF share rejects so the sheet can retry; program sessio
   await onSharePdf();assert.equal(calls,2);
 });
 
-test('Summary: Done exits fresh completion to Today and reopened summaries back to history', () => {
+test('Summary: Done exits fresh completion to Progress and reopened summaries back to history', () => {
   for (const source of [undefined, 'history']) {
     const state=stateFor([exercise()]);
     state.sessions=[{...state.currentSession,completed:true}];
@@ -207,8 +239,10 @@ test('Summary: Done exits fresh completion to Today and reopened summaries back 
     state.getCustomWorkoutLabel=()=>null;
     const h=uiHarness('@/app/workout-summary',state,{sessionId:'7',source});
     const tree=h.render();
-    nodes(tree).find(n=>n.props?.accessibilityLabel==='Done').props.onPress();
-    assert.ok(h.events.some(event=>source==='history' ? event[0]==='back' : event[0]==='replace' && event[1]==='/(tabs)'));
+    const done=nodes(tree).find(n=>n.props?.accessibilityLabel==='Done');
+    assert.equal(done.props.accessibilityHint,source==='history' ? 'Return to workout history' : 'Open Progress');
+    done.props.onPress();
+    assert.ok(h.events.some(event=>source==='history' ? event[0]==='back' : event[0]==='replace' && event[1]==='/(tabs)/profile'));
   }
 });
 
@@ -546,12 +580,46 @@ test('Adhoc UI: app and Live Activity end-of-list offer add/finish without autom
   }
 });
 
+test('Last-exercise add opens the picker in add mode for every workout and continues with the new exercise',()=>{
+  for(const origin of ['adhoc','custom_split','archetype','legacy']){
+    const completed=exercise();const state=stateFor([completed]);state.currentSession.origin=origin;
+    state.setWorkoutExerciseIndex=index=>{state.workoutFocus={workoutId:'7',exerciseIndex:index};};
+    const h=uiHarness('@/app/workout',state);
+    let tree=h.render();const finisher=find(tree,'ExerciseFinisher');
+    assert.equal(typeof finisher.props.onAddAnother,'function',origin);
+    const rendered=uiHarness('@/components/ExerciseFinisher',{}).render(finisher.props);
+    const buttons=nodes(rendered).filter(n=>n.props?.accessibilityRole==='button');
+    assert.ok(buttons.findIndex(n=>n.props.accessibilityLabel==='Add exercise') < buttons.findIndex(n=>n.props.accessibilityLabel==='Finish workout'));
+    finisher.props.onAddAnother();tree=h.render();
+    const picker=find(tree,'SwapExerciseSheet');
+    assert.equal(picker.props.visible,true);assert.equal(picker.props.mode,'add');assert.equal(picker.props.sessionId,'7');
+    const added={...exercise(),name:'Face Pull',sets:[{reps:12,weight:10,completed:false}]};
+    state.currentSession.exercises.push(added);
+    picker.props.onAdded();picker.props.onClose();tree=h.render();
+    assert.equal(state.workoutFocus.exerciseIndex,1);
+    assert.equal(state.currentSession.exercises[0],completed);
+    assert.equal(find(tree,'SwapExerciseSheet').props.visible,false);
+    assert.equal(find(tree,'WorkoutIntensityPicker').props.visible,false);
+    find(tree,'WorkoutHeaderActions').props.onChange();tree=h.render();
+    assert.equal(find(tree,'SwapExerciseSheet').props.mode,origin==='adhoc'?'add':'manage');
+  }
+});
+
+test('An exercise with remaining work offers advance without the last-exercise add action',()=>{
+  const remaining={...exercise(),name:'Face Pull',sets:[{reps:12,weight:10,completed:false}]};
+  const state=stateFor([exercise(),remaining]);state.currentSession.origin='custom_split';
+  state.workoutFocus={workoutId:'7',exerciseIndex:0};
+  const tree=uiHarness('@/app/workout',state).render();
+  assert.equal(find(tree,'ExerciseFinisher').props.nextExercise,remaining);
+  assert.equal(find(tree,'ExerciseFinisher').props.onAddAnother,undefined);
+});
+
 test('Adhoc UI: all-skipped finisher disables finish but still offers another exercise',()=>{
   const item=exercise();item.sets[0].skipped=true;
   const h=uiHarness('@/app/workout',stateFor([item]));const tree=h.render();
   const props=find(tree,'ExerciseFinisher').props;assert.equal(props.canFinish,false);assert.equal(typeof props.onAddAnother,'function');
   const finisher=uiHarness('@/components/ExerciseFinisher',{}).render(props);
-  assert.ok(textOf(finisher).includes('Add another exercise'));assert.ok(textOf(finisher).includes('Finish workout'));
+  assert.ok(textOf(finisher).includes('Add exercise'));assert.ok(textOf(finisher).includes('Finish workout'));
   assert.ok(nodes(finisher).some(n=>n.props?.onPress===props.onAdvance && n.props.disabled));
 });
 
@@ -738,7 +806,7 @@ test('Train without a program: opening and browsing show a ready hero and never 
     assert.equal(browse.length, 2);
     browse[0].props.onPress(); browse[1].props.onPress();
     assert.deepEqual(h.events.filter(event => event[0] === 'push').map(event => event[1]), [
-      { pathname: '/your-splits', params: { focus: 'stack' } }, { pathname: '/your-splits', params: { focus: 'library' } },
+      { pathname: '/program-setup', params: { source: 'train' } }, { pathname: '/your-splits', params: { focus: 'library' } },
     ]);
     assert.deepEqual(starts, []);
     assert.equal(state.currentSession, null);
@@ -907,4 +975,122 @@ test('live text-size changes preserve the unit sheet choice and captured routine
     nodes(h.render()).find(n => n.props?.accessibilityLabel === 'Cancel workout start').props.onPress();
     assert.equal(h.launch().getState().intent, null); assert.deepEqual(starts, []); assert.equal(state.profile.weightUnit, 'kg');
   } finally { h.unmount(); }
+});
+
+test('Exercise history and notes share one pill: history on the left, notes on the right, for the current exercise',()=>{
+  const first=exercise();first.exerciseId=3;
+  const current={...exercise(),name:'Incline Bench Press',exerciseId:4,entryUnit:'lbs',sets:[{reps:8,weight:20,completed:false}]};
+  const state=stateFor([first,current]);state.workoutFocus={workoutId:'7',exerciseIndex:1};
+  const tree=uiHarness('@/app/workout',state).render();
+  const pill=find(tree,'ExerciseActionPill');
+  const [history,notes]=pill.props.children;
+  assert.equal(history.type,'ExerciseHistory');
+  assert.deepEqual({workoutId:history.props.workoutId,exerciseName:history.props.exerciseName,weightUnit:history.props.weightUnit},
+    {workoutId:'7',exerciseName:'Incline Bench Press',weightUnit:'lbs'});
+  assert.equal(notes.type,'ExerciseNotes');
+  assert.deepEqual({workoutId:notes.props.workoutId,exerciseId:notes.props.exerciseId,exerciseName:notes.props.exerciseName},
+    {workoutId:'7',exerciseId:4,exerciseName:'Incline Bench Press'});
+  assert.equal(nodes(tree).filter(n=>n.type==='ExerciseNotes').length,1,'notes no longer float on their own');
+  // Without a catalog identity there are no notes, but history still matches by exercise name.
+  const legacy=uiHarness('@/app/workout',stateFor([exercise()])).render();
+  const [legacyHistory,legacyNotes]=find(legacy,'ExerciseActionPill').props.children;
+  assert.equal(legacyHistory.props.exerciseName,'Bench Press');
+  assert.equal(legacyNotes,null);
+});
+
+test('Exercise action pill separates independent actions and collapses to a single button',()=>{
+  const pill=uiHarness('@/components/ExerciseActionPill',{});
+  const two=pill.render({children:[{type:'History',props:{}},{type:'Notes',props:{}}]});
+  const rendered=nodes(two).filter(n=>n.type==='History'||n.type==='Notes'||n.props?.style?.height===26).map(n=>n.type==='View'?'divider':n.type);
+  assert.deepEqual(rendered,['History','divider','Notes']);
+  const one=pill.render({children:[{type:'History',props:{}},null]});
+  assert.equal(nodes(one).filter(n=>n.props?.style?.height===26).length,0);
+  assert.equal(pill.render({children:null}),null);
+});
+
+test('Notes keep their existing action as the right-hand pill button',()=>{
+  const state=stateFor([]);state.notes={4:[{id:1,workoutId:'2',exerciseId:4,text:'Elbows in',createdAt:'2026-09-01T10:00:00.000Z'}]};
+  const h=uiHarness('@/components/ExerciseNotes',state);
+  let tree=h.render({workoutId:'7',exerciseId:4,exerciseName:'Bench Press'});
+  const button=find(tree,'ExerciseActionButton');
+  assert.equal(button.props.symbol,'bubble.left');
+  assert.equal(button.props.accessibilityLabel,'Bench Press notes, 1 saved');
+  assert.equal(button.props.accessibilityHint,'Read previous notes or write a note for this exercise');
+  assert.equal(find(tree,'Modal').props.visible,false);
+  button.props.onPress();tree=h.render({workoutId:'7',exerciseId:4,exerciseName:'Bench Press'});
+  assert.equal(find(tree,'Modal').props.visible,true);
+  assert.equal(find(tree,'Modal').props.allowSwipeDismissal,false,'drafts stay protected');
+  assert.ok(textOf(find(tree,'Modal')).includes('Elbows in'));
+});
+
+test('History opens recent completed sets for this exercise only, newest first, in today’s unit',()=>{
+  const lift=(sets,extra={})=>({...exercise(),sets:sets.map(([weight,reps,more])=>({weight,reps,completed:true,skipped:false,...more})),...extra});
+  const done=(id,date,exercises,extra={})=>({id,date,exercises,completed:true,retroactive:false,origin:'adhoc',workoutTypes:['chest'],...extra});
+  const state=stateFor([]);
+  state.sessions=[
+    done('1','2026-09-01T10:00:00.000Z',[lift([[50,10]])]),
+    done('2','2026-09-08T10:00:00.000Z',[lift([[52.5,10],[55,8],[45,12,{type:'dropset'}]])]),
+    done('3','2026-09-10T10:00:00.000Z',[{...lift([[100,5]]),name:'Back Squat'}]),
+    done('4','2026-09-12T10:00:00.000Z',[lift([[60,8,{skipped:true}]])]),
+    done('5','2026-09-14T10:00:00.000Z',[lift([[55,9],[57.5,8]])]),
+    done('6','2026-09-16T10:00:00.000Z',[lift([[57.5,8]])],{retroactive:true}),
+    // The active workout, even if a stale copy reads as completed, is never its own history.
+    done('7','2026-10-05T10:00:00.000Z',[lift([[70,8]])]),
+  ];
+  const props={workoutId:'7',exerciseName:'Bench Press',weightUnit:'kg',accent:'#00FF00'};
+  const h=uiHarness('@/components/ExerciseHistory',state);
+  let tree=h.render(props);
+  const button=find(tree,'ExerciseActionButton');
+  assert.equal(button.props.symbol,'clock.arrow.circlepath');
+  assert.equal(button.props.accessibilityLabel,'Bench Press history');
+  assert.equal(find(tree,'Modal').props.visible,false);
+  assert.equal(nodes(tree).filter(n=>n.type?.name==='HistoryEntry').length,0,'nothing is derived until opened');
+  button.props.onPress();tree=h.render(props);
+  const modal=find(tree,'Modal');
+  assert.equal(modal.props.visible,true);
+  assert.equal(modal.props.presentationStyle,'pageSheet');
+  assert.equal(modal.props.allowSwipeDismissal,true);
+  assert.ok(textOf(modal).includes('Exercise history'));
+  const entries=nodes(tree).filter(n=>n.type?.name==='HistoryEntry');
+  assert.deepEqual(entries.map(n=>n.props.entry.sessionId),['5','2','1']);
+  const newest=entries[0].type(entries[0].props);
+  assert.ok(textOf(newest).includes('Sep 14'));
+  const values=nodes(newest).filter(n=>n.props?.style?.[0]?.fontVariant).map(n=>textOf(n.props.children));
+  assert.deepEqual(values.length,2);
+  const markers=nodes(newest).filter(n=>Array.isArray(n.props?.style)&&n.props.style[0]?.width===6);
+  assert.deepEqual(markers.map(n=>Boolean(n.props.style[1])),[false,true],'the heaviest set is marked');
+  assert.equal(markers[1].props.style[1].backgroundColor,'#00FF00');
+  assert.match(newest.props.accessibilityLabel,/57\.5 kilograms, 8 reps, best set/);
+  const withDrop=entries[1].type(entries[1].props);
+  assert.ok(textOf(withDrop).includes('DROP'));
+  // A unit change re-renders history in the unit being logged today.
+  const lbs=entries[2].type({...entries[2].props,weightUnit:'lbs'});
+  assert.ok(textOf(lbs).includes('110.2'));
+  assert.ok(textOf(lbs).includes('"lb"'));
+  modal.props.onRequestClose();tree=h.render(props);
+  assert.equal(find(tree,'Modal').props.visible,false);
+});
+
+test('History shows bodyweight, timed and weighted-timed sets in their own terms, and a calm empty state',()=>{
+  const done=(id,exercise)=>({id,date:`2026-09-0${id}T10:00:00.000Z`,exercises:[exercise],completed:true,retroactive:false});
+  const state=stateFor([]);
+  state.sessions=[
+    done('1',{name:'Pull-up',loadType:'bodyweight',metric:'reps',sets:[{weight:0,reps:12,completed:true}]}),
+    done('2',{name:'Plank',loadType:'bodyweight',metric:'duration',sets:[{weight:0,reps:0,durationS:45,completed:true}]}),
+    done('3',{name:'Farmer Carry',loadType:'external_weight',metric:'duration',sets:[{weight:24,reps:0,durationS:90,completed:true}]}),
+  ];
+  const open=name=>{
+    const h=uiHarness('@/components/ExerciseHistory',state);const props={workoutId:'7',exerciseName:name,weightUnit:'kg',accent:'#fff'};
+    find(h.render(props),'ExerciseActionButton').props.onPress();
+    const tree=h.render(props);const entry=nodes(tree).find(n=>n.type?.name==='HistoryEntry');
+    return {tree,entry:entry&&entry.type(entry.props)};
+  };
+  assert.ok(textOf(open('Pull-up').entry).includes('12 reps'));
+  assert.ok(textOf(open('Plank').entry).includes('0:45'));
+  const carry=textOf(open('Farmer Carry').entry);
+  assert.ok(carry.includes('24')&&carry.includes('"kg"')&&carry.includes('· 1:30'));
+  const empty=open('Pull-Up Negative');
+  assert.equal(empty.entry,undefined);
+  assert.ok(textOf(empty.tree).includes('No history yet'));
+  assert.ok(textOf(empty.tree).includes('Pull-Up Negative'));
 });

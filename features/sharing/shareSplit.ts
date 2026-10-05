@@ -1,11 +1,6 @@
 import type { CustomSplit } from '@/store/customSplits';
 import { portableSplitFromCustomSplit } from '@/features/sharing/customSplitAdapter';
-import type { SharedSplitResult } from '@/features/sharing/splitProtocol';
-import { buildSplitImportUrl, encodeSharedSplit } from '@/features/sharing/splitTransport';
-
-// The protocol accepts larger documents; direct links have a stricter budget.
-// Keep unusual programs out of a transport that messengers may truncate.
-export const MAX_SPLIT_SHARE_URL_LENGTH = 8192;
+import { serializeSharedSplit, type SharedSplitResult } from '@/features/sharing/splitProtocol';
 
 export interface SplitShareContent {
   title: string;
@@ -13,23 +8,26 @@ export interface SplitShareContent {
   url: string;
 }
 
+export interface SplitShareSnapshot {
+  title: string;
+  payload: string;
+}
+
 export const prepareSplitShare = (
   split: CustomSplit,
   builtInNames: ReadonlySet<string>
-): SharedSplitResult<SplitShareContent> => {
+): SharedSplitResult<SplitShareSnapshot> => {
   const portable = portableSplitFromCustomSplit(split, builtInNames);
-  const encoded = encodeSharedSplit(portable);
-  if (!encoded.ok) return encoded;
-  const url = buildSplitImportUrl(encoded.value);
-  if (url.length > MAX_SPLIT_SHARE_URL_LENGTH) {
-    return { ok: false, error: {
-      code: 'payload_too_large',
-      message: 'This routine is too big to share as a link.',
-    } };
-  }
+  const serialized = serializeSharedSplit(portable);
+  if (!serialized.ok) return serialized;
   return { ok: true, value: {
     title: portable.name.trim(),
-    message: `${portable.name.trim()}\n\nShared from Stack\n\n${url}`,
-    url,
+    payload: serialized.value,
   } };
 };
+
+export const composeSplitShare = (snapshot: SplitShareSnapshot, url: string): SplitShareContent => ({
+  title: snapshot.title,
+  message: `${snapshot.title}\n\nShared from Stack\n\n${url}`,
+  url,
+});

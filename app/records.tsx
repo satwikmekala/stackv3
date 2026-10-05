@@ -1,48 +1,32 @@
 import { displayExerciseName } from '@/constants/exerciseNames';
 import { useMuscleColors } from '@/store/muscleColors';
 /** @jsxImportSource react */
-// This StyleSheet-only screen uses native Pressable callbacks, including the unchanged FilterChip.
 import { useMemo, useState } from 'react';
-import { FlatList, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { ActionSheetIOS, FlatList, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Stack, useRouter } from 'expo-router';
 import * as Haptics from '@/services/haptics';
-import { ChevronLeft, ChevronRight, Search, CircleX } from 'lucide-react-native';
+import { ArrowUpDown, Check, ChevronRight, Search } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { redesignColors, redesignFonts } from '@/constants/theme';
 import { useWorkoutStore } from '@/store/workoutStore';
 import { DEFAULT_WEIGHT_UNIT, readExerciseCatalogSync } from '@/store/workoutDatabase';
-import { formatWeight, unitLabel } from '@/store/weightUnits';
+import { formatLiftDate, formatLiftPerformance } from '@/store/liftProgress';
 import {
-  derivePersonalRecords, filterPersonalRecords, getRecordMuscle,
-  highlightExerciseName, MUSCLE_GROUPS, type MuscleGroup,
+  derivePersonalRecords, filterPersonalRecords, getRecordMuscle, highlightExerciseName,
+  MUSCLE_GROUPS, PERSONAL_RECORD_SORTS, recordPerformance, sortPersonalRecords,
+  type MuscleGroup, type PersonalRecordSort,
 } from '@/store/personalRecords';
 import '@/global.css';
 
-function FilterChip({
-  label,
-  selected,
-  onPress,
-}: {
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-}) {
+const sortLabel = (sort: PersonalRecordSort) => PERSONAL_RECORD_SORTS.find((option) => option.value === sort)!.label;
+
+/** Same chip as Lift progress sorting, so filters read as one control family. */
+function FilterChip({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`Show ${label.toLowerCase()} records`}
-      accessibilityState={{ selected }}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.filterChip,
-        {
-          backgroundColor: selected ? '#FF7A3D' : '#1D1915',
-          borderColor: selected ? '#FF7A3D' : '#71685E',
-        },
-        pressed && styles.pressed,
-      ]}
-    >
-      <Text style={[styles.filterText, { color: selected ? '#13110E' : '#F5F0E8' }]}>{label}</Text>
+    <Pressable accessibilityRole="button" accessibilityLabel={`Show ${label.toLowerCase()} records`}
+      accessibilityState={{ selected }} onPress={onPress}
+      style={({ pressed }) => [styles.chip, selected && styles.chipSelected, pressed && styles.dimmed]}>
+      <Text style={[styles.chipLabel, selected && styles.chipLabelSelected]}>{label}</Text>
     </Pressable>
   );
 }
@@ -52,10 +36,11 @@ export default function PersonalRecords() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const sessions = useWorkoutStore((state) => state.sessions);
-  const weightUnit = useWorkoutStore((state) => state.profile?.weightUnit ?? DEFAULT_WEIGHT_UNIT);
+  const unit = useWorkoutStore((state) => state.profile?.weightUnit ?? DEFAULT_WEIGHT_UNIT);
   const [query, setQuery] = useState('');
-  const [focused, setFocused] = useState(false);
   const [selectedMuscles, setSelectedMuscles] = useState<MuscleGroup[]>([]);
+  const [sort, setSort] = useState<PersonalRecordSort>('recent');
+  const [showSort, setShowSort] = useState(false);
   const records = useMemo(() => {
     const catalog = new Map(readExerciseCatalogSync().map((exercise) => [exercise.name, exercise]));
     return derivePersonalRecords(sessions).map((record) => ({
@@ -65,6 +50,7 @@ export default function PersonalRecords() {
   const { normalizedQuery, muscles, visibleRecords } = useMemo(
     () => filterPersonalRecords(records, query, selectedMuscles), [records, query, selectedMuscles]
   );
+  const visible = useMemo(() => sortPersonalRecords(visibleRecords, sort), [visibleRecords, sort]);
   const filtering = Boolean(normalizedQuery) || selectedMuscles.length > 0;
   const tap = (callback: () => void) => {
     if (Platform.OS !== 'web') void Haptics.selectionAsync();
@@ -76,145 +62,152 @@ export default function PersonalRecords() {
     const available = filterPersonalRecords(records, value, []).muscles;
     setSelectedMuscles((selected) => selected.filter((muscle) => available.includes(muscle)));
   };
+  const chooseSort = (next: PersonalRecordSort) => {
+    if (next !== sort) tap(() => setSort(next));
+  };
+  const openSort = () => {
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions({
+        title: 'Sort records', options: [...PERSONAL_RECORD_SORTS.map((option) => option.label), 'Cancel'],
+        cancelButtonIndex: PERSONAL_RECORD_SORTS.length, userInterfaceStyle: 'dark',
+      }, (index) => {
+        if (index < PERSONAL_RECORD_SORTS.length) chooseSort(PERSONAL_RECORD_SORTS[index].value);
+      });
+    } else setShowSort(true);
+  };
 
   return (
     <View style={styles.screen}>
+      <Stack.Screen options={{
+        headerRight: records.length > 0 ? () => (
+          <Pressable accessibilityRole="button" accessibilityLabel={`Sort records. ${sortLabel(sort)}`}
+            onPress={openSort} hitSlop={6} style={({ pressed }) => [styles.headerButton, pressed && styles.dimmed]}>
+            <ArrowUpDown size={20} color={redesignColors.bone} />
+          </Pressable>
+        ) : undefined,
+      }} />
       <FlatList
-        data={visibleRecords}
+        data={visible}
         keyExtractor={(record) => record.name}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={[styles.content, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 32 }]}
-        ListHeaderComponent={
-          <>
-            <View style={styles.header}>
-              <Pressable accessibilityRole="button" accessibilityLabel="Back to progress"
-                onPress={() => tap(() => router.canGoBack() ? router.back() : router.replace('/(tabs)/profile'))}
-                style={styles.backButton}>
-                <ChevronLeft color={redesignColors.bone} size={23} />
-              </Pressable>
-              <View style={styles.headerCopy}>
-                <Text accessibilityRole="header" style={styles.title}>Personal records</Text>
-                <Text accessibilityLiveRegion="polite" style={[styles.subtitle, filtering && styles.accent]}>
-                  {filtering ? `${visibleRecords.length} OF ${records.length} SHOWING` : `${records.length} ${records.length === 1 ? 'EXERCISE' : 'EXERCISES'} TRACKED`}
+        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 32 }]}
+        ListHeaderComponent={records.length > 0 ? <>
+          <Text accessibilityLiveRegion="polite" style={styles.intro}>{filtering
+            ? `${visible.length} of ${records.length} ${records.length === 1 ? 'exercise' : 'exercises'}`
+            : sort === 'recent' ? 'Your best set for each exercise, newest record first.' : 'Your best set for each exercise.'}</Text>
+          <View style={styles.search}>
+            <Search size={18} color={redesignColors.ash} />
+            <TextInput accessibilityLabel="Search personal records" value={query} onChangeText={updateQuery}
+              placeholder="Search exercises" placeholderTextColor={redesignColors.ash} autoCapitalize="none" autoCorrect={false}
+              returnKeyType="search" selectionColor={redesignColors.accent} style={styles.searchInput} />
+            {query.length > 0 && <Pressable accessibilityRole="button" accessibilityLabel="Clear search" onPress={() => updateQuery('')} style={styles.clear}>
+              <Text style={styles.clearLabel}>Clear</Text>
+            </Pressable>}
+          </View>
+          {muscles.length > 1 && <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled"
+            contentContainerStyle={styles.chips} style={styles.chipScroll}>
+            <FilterChip label="All" selected={selectedMuscles.length === 0} onPress={() => tap(() => setSelectedMuscles([]))} />
+            {muscles.map((muscle) => (
+              <FilterChip key={muscle} label={MUSCLE_GROUPS[muscle].label} selected={selectedMuscles.includes(muscle)}
+                onPress={() => tap(() => setSelectedMuscles((selected) => selected.includes(muscle)
+                  ? selected.filter((value) => value !== muscle) : [...selected, muscle]))} />
+            ))}
+          </ScrollView>}
+        </> : null}
+        renderItem={({ item }) => {
+          const color = item.muscle === 'other' ? redesignColors.bone : MUSCLE_GROUPS[item.muscle].color;
+          const performance = formatLiftPerformance(recordPerformance(item.best), unit);
+          return (
+            <Pressable accessibilityRole="button"
+              accessibilityLabel={`${displayExerciseName(item.name)}. Personal record ${performance}, set ${formatLiftDate(item.achieved)}`}
+              accessibilityHint="Opens how this record progressed"
+              onPress={() => tap(() => router.push({ pathname: '/record-detail', params: { exerciseName: item.name } }))}
+              style={({ pressed }) => [styles.row, pressed && styles.dimmed]}>
+              <View style={styles.rowCopy}>
+                <Text style={styles.name}>
+                  {highlightExerciseName(displayExerciseName(item.name), normalizedQuery).map((part, index) => (
+                    <Text key={index} style={part.matched ? { backgroundColor: `${MUSCLE_GROUPS[item.muscle].color}40` } : undefined}>
+                      {part.text}
+                    </Text>
+                  ))}
                 </Text>
+                <Text style={[styles.performance, { color }]}>{performance}</Text>
+                <Text style={styles.meta}>PR · {formatLiftDate(item.achieved)}</Text>
               </View>
-            </View>
-            <View style={[styles.search, (focused || Boolean(normalizedQuery)) && styles.searchActive]}>
-              <Search size={18} color={focused || normalizedQuery ? redesignColors.accent : redesignColors.ashDim} />
-              <TextInput accessibilityLabel="Search exercises" placeholder="Search exercises"
-                placeholderTextColor={redesignColors.ashDim} value={query} onChangeText={updateQuery}
-                onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
-                autoCapitalize="none" autoCorrect={false} returnKeyType="search"
-                selectionColor={redesignColors.accent} style={styles.searchInput} />
-              {query.length > 0 ? (
-                <Pressable accessibilityRole="button" accessibilityLabel="Clear exercise search"
-                  onPress={() => updateQuery('')} hitSlop={8} style={styles.clearButton}>
-                  <CircleX size={17} color={redesignColors.ash} />
-                </Pressable>
-              ) : null}
-            </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled"
-              contentContainerStyle={styles.filters} style={styles.filterScroll}>
-              <FilterChip label="All" selected={selectedMuscles.length === 0} onPress={() => tap(() => setSelectedMuscles([]))} />
-              {muscles.map((muscle) => (
-                <FilterChip key={muscle} label={MUSCLE_GROUPS[muscle].label} selected={selectedMuscles.includes(muscle)}
-                  onPress={() => tap(() => setSelectedMuscles((selected) => selected.includes(muscle)
-                    ? selected.filter((value) => value !== muscle) : [...selected, muscle]))} />
-              ))}
-            </ScrollView>
-            <View style={styles.columns}>
-              <Text style={styles.columnLabel}>EXERCISE</Text>
-              <View style={styles.rule} />
-              <Text style={styles.columnLabel}>BEST SET</Text>
-            </View>
-          </>
-        }
-        renderItem={({ item }) => (
-          <Pressable accessibilityRole="button" accessibilityLabel={`View ${displayExerciseName(item.name)} recent lifts`}
-            onPress={() => tap(() => router.push({ pathname: '/record-detail', params: { exerciseName: item.name } }))}
-            style={({ pressed }) => [styles.recordRow, pressed && styles.pressed]}>
-            <View style={[styles.dot, { backgroundColor: MUSCLE_GROUPS[item.muscle].color }]} />
-            <Text style={styles.exerciseName}>
-              {highlightExerciseName(displayExerciseName(item.name), normalizedQuery).map((part, index) => (
-                <Text key={index} style={part.matched ? { backgroundColor: `${MUSCLE_GROUPS[item.muscle].color}40` } : undefined}>
-                  {part.text}
-                </Text>
-              ))}
-            </Text>
-            <Text style={styles.performance}>
-              {item.best.weight === 0 ? 'Bodyweight' : formatWeight(item.best.weight, weightUnit)}
-              <Text style={styles.muted}>{item.best.weight === 0 ? '' : ` ${unitLabel(weightUnit)}`} × {item.best.reps}</Text>
-            </Text>
-            <ChevronRight size={16} color={redesignColors.ashDim} />
-          </Pressable>
-        )}
+              <ChevronRight size={20} color={redesignColors.ash} />
+            </Pressable>
+          );
+        }}
         ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>{records.length === 0 ? 'No exercises logged yet' : 'No exercises found'}</Text>
-            <Text style={styles.emptyCopy}>{records.length === 0
-              ? 'Complete a workout to start tracking your personal records.'
-              : normalizedQuery ? `No matches for “${query.trim()}”. Try another name or clear your filters.`
-                : 'Try another muscle group or clear your filters.'}</Text>
-            {filtering && records.length > 0 ? (
-              <Pressable accessibilityRole="button" onPress={() => { setQuery(''); setSelectedMuscles([]); }} style={styles.resetButton}>
-                <Text style={styles.resetText}>Clear search and filters</Text>
+          <View style={styles.empty}>
+            <Text style={styles.emptyTitle}>{records.length === 0 ? 'No records yet' : 'No matching exercises'}</Text>
+            <Text style={styles.copy}>{records.length === 0
+              ? 'Your best set for each exercise will appear here after a workout.'
+              : normalizedQuery ? `No records match “${query.trim()}”.` : 'Try another muscle group.'}</Text>
+            {records.length === 0
+              ? <Pressable accessibilityRole="button" onPress={() => router.navigate('/(tabs)')} style={styles.textButton}>
+                <Text style={styles.textButtonLabel}>Go to Train</Text>
               </Pressable>
-            ) : null}
+              : <Pressable accessibilityRole="button" onPress={() => { setQuery(''); setSelectedMuscles([]); }} style={styles.textButton}>
+                <Text style={styles.textButtonLabel}>Clear search and filters</Text>
+              </Pressable>}
           </View>
         }
       />
+      <Modal visible={showSort} transparent animationType="fade" onRequestClose={() => setShowSort(false)}>
+        <View style={styles.modal}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Dismiss sort choices" onPress={() => setShowSort(false)} style={StyleSheet.absoluteFill} />
+          <View accessibilityViewIsModal style={styles.menu}>
+            <Text accessibilityRole="header" style={styles.menuTitle}>Sort records</Text>
+            {PERSONAL_RECORD_SORTS.map((option) => <Pressable key={option.value} accessibilityRole="radio"
+              accessibilityState={{ checked: option.value === sort }}
+              onPress={() => { chooseSort(option.value); setShowSort(false); }}
+              style={({ pressed }) => [styles.menuRow, pressed && styles.dimmed]}>
+              <Text style={styles.menuLabel}>{option.label}</Text>
+              {option.value === sort && <Check size={18} color={redesignColors.bone} />}
+            </Pressable>)}
+            <Pressable accessibilityRole="button" onPress={() => setShowSort(false)} style={styles.menuRow}>
+              <Text style={styles.menuLabel}>Cancel</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: redesignColors.ink },
-  content: { flexGrow: 1, paddingHorizontal: 20 },
-  header: { flexDirection: 'row', alignItems: 'center', minHeight: 56 },
-  backButton: { width: 44, minHeight: 48, justifyContent: 'center', alignItems: 'center', marginLeft: -8 },
-  headerCopy: { flex: 1, minWidth: 0, marginLeft: 10 },
-  title: { fontFamily: redesignFonts.display, fontSize: 28, lineHeight: 33, letterSpacing: -0.8, color: redesignColors.bone },
-  subtitle: { marginTop: 5, fontFamily: redesignFonts.mono, fontSize: 10, letterSpacing: 1.8, color: redesignColors.ash },
-  accent: { color: redesignColors.accent },
-  search: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 24, minHeight: 49, paddingHorizontal: 15,
-    borderWidth: 1, borderColor: redesignColors.border, borderRadius: 16, backgroundColor: redesignColors.surface },
-  searchActive: { borderColor: redesignColors.accent },
-  searchInput: { flex: 1, minWidth: 0, paddingVertical: 12, fontFamily: redesignFonts.uiSemiBold, fontSize: 16, color: redesignColors.bone },
-  clearButton: { minHeight: 44, justifyContent: 'center' },
-  filterScroll: { marginTop: 13 },
-  filters: { gap: 8, paddingBottom: 2 },
-  filterChip: {
-    minHeight: 42,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 21,
-    borderWidth: 1,
-    borderColor: '#71685E',
-    backgroundColor: redesignColors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  filterText: {
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 12,
-    letterSpacing: 0.5,
-    color: redesignColors.bone,
-  },
-  columns: { marginTop: 23, marginBottom: 4, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  columnLabel: { fontFamily: redesignFonts.mono, fontSize: 10, letterSpacing: 2, color: redesignColors.ash },
-  rule: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: redesignColors.border },
-  recordRow: { minHeight: 54, paddingVertical: 15, flexDirection: 'row', alignItems: 'center', gap: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: redesignColors.border },
-  dot: { width: 8, height: 8, borderRadius: 4 },
-  exerciseName: { flex: 1, fontFamily: redesignFonts.uiSemiBold, fontSize: 16, lineHeight: 21, color: redesignColors.bone },
-  performance: { flexShrink: 0, fontFamily: redesignFonts.monoBold, fontSize: 13, color: redesignColors.bone },
-  muted: { color: redesignColors.ash },
-  pressed: { opacity: 0.72, transform: [{ scale: 0.97 }] },
-  emptyState: { alignItems: 'center', paddingHorizontal: 20, paddingVertical: 48 },
-  emptyTitle: { fontFamily: redesignFonts.uiBold, fontSize: 19, color: redesignColors.bone },
-  emptyCopy: { marginTop: 10, textAlign: 'center', fontFamily: redesignFonts.ui, fontSize: 15, lineHeight: 22, color: redesignColors.ash },
-  resetButton: { minHeight: 48, justifyContent: 'center', marginTop: 12 },
-  resetText: { fontFamily: redesignFonts.uiBold, fontSize: 15, color: redesignColors.accent },
+  content: { paddingHorizontal: 24, paddingTop: 16, flexGrow: 1 },
+  headerButton: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  intro: { fontFamily: redesignFonts.ui, lineHeight: 22, fontSize: 15, color: redesignColors.ash, marginBottom: 18 },
+  dimmed: { opacity: 0.55 },
+  search: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 14, borderRadius: 14, backgroundColor: redesignColors.surface, marginBottom: 10 },
+  searchInput: { flex: 1, minWidth: 0, paddingVertical: 12, fontFamily: redesignFonts.ui, lineHeight: 23, fontSize: 16, color: redesignColors.bone },
+  clear: { minWidth: 44, minHeight: 44, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center' },
+  clearLabel: { fontFamily: redesignFonts.uiMedium, lineHeight: 19, fontSize: 13, color: redesignColors.ash },
+  chipScroll: { marginTop: 4, marginBottom: 6, marginHorizontal: -24 },
+  chips: { gap: 8, paddingHorizontal: 24 },
+  chip: { minHeight: 44, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 22, borderWidth: 1,
+    borderColor: redesignColors.ashDim, backgroundColor: redesignColors.surface, justifyContent: 'center', alignItems: 'center' },
+  chipSelected: { backgroundColor: redesignColors.accent, borderColor: redesignColors.accent },
+  chipLabel: { fontFamily: redesignFonts.uiSemiBold, fontSize: 13, lineHeight: 20, color: redesignColors.bone },
+  chipLabelSelected: { color: redesignColors.ink },
+  row: { paddingVertical: 20, minHeight: 96, flexDirection: 'row', alignItems: 'center', gap: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: redesignColors.border },
+  rowCopy: { flex: 1, minWidth: 0, gap: 7 },
+  name: { fontFamily: redesignFonts.uiSemiBold, lineHeight: 24, fontSize: 17, color: redesignColors.bone },
+  performance: { fontFamily: redesignFonts.monoBold, lineHeight: 22, fontSize: 15, fontVariant: ['tabular-nums'], color: redesignColors.bone },
+  meta: { fontFamily: redesignFonts.ui, lineHeight: 19, fontSize: 13, fontVariant: ['tabular-nums'], color: redesignColors.ash },
+  copy: { fontFamily: redesignFonts.ui, lineHeight: 20, fontSize: 14, color: redesignColors.ash },
+  empty: { paddingVertical: 40, gap: 12, alignItems: 'flex-start' },
+  emptyTitle: { fontFamily: redesignFonts.uiSemiBold, lineHeight: 27, fontSize: 20, color: redesignColors.bone },
+  textButton: { minWidth: 44, minHeight: 44, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' },
+  textButtonLabel: { fontFamily: redesignFonts.uiSemiBold, lineHeight: 23, fontSize: 16, color: redesignColors.bone },
+  modal: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 24, justifyContent: 'center' },
+  menu: { padding: 20, borderRadius: 22, backgroundColor: redesignColors.surface },
+  menuTitle: { fontFamily: redesignFonts.uiSemiBold, lineHeight: 25, fontSize: 18, color: redesignColors.bone },
+  menuRow: { minHeight: 48, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  menuLabel: { fontFamily: redesignFonts.uiMedium, lineHeight: 20, fontSize: 14, color: redesignColors.bone },
 });

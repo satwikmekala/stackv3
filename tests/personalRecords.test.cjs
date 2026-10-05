@@ -25,8 +25,10 @@ const verified = evaluate(source('store/verifiedSessions.ts'));
 const theme = evaluate(source('constants/theme.ts'));
 const muscleColors = evaluate(source('constants/muscleColors.ts'), () => theme);
 const measurement = evaluate(source('store/exerciseMeasurement.ts'));
+const weightUnits = evaluate(source('store/weightUnits.ts'));
 const records = evaluate(source('store/personalRecords.ts'), (id) => {
   if (id.endsWith('/exerciseMeasurement')) return measurement;
+  if (id.endsWith('/weightUnits')) return weightUnits;
   if (id.endsWith('/workoutCalendar')) return dates;
   if (id.endsWith('/verifiedSessions')) return verified;
   if (id.endsWith('/muscleColors')) return muscleColors;
@@ -107,11 +109,10 @@ test('real SQLite query returns complete verified history outside the old top th
     assert.equal(sets.length, 5);
     assert.deepEqual(sets.map((x) => x.sessionId), ['3', '2', '2', '2', '1']);
     assert.deepEqual(sets.filter((x) => x.sessionId === '2').map((x) => x.setIndex), [0, 1, 2]);
-    const groups = records.deriveRecentLifts(sets);
-    assert.deepEqual(groups.map((x) => x.key), ['2026-09-11', '2026-09-04', '2026-09-01']);
-    assert.equal(groups[0].hasPR, false); // Equal repeat is not another PR.
-    assert.deepEqual(groups[1].sets.map((x) => x.isPR), [false, true, true]);
-    assert.equal(groups[2].hasPR, true);
+    const { milestones, matches } = records.deriveRecordProgression(sets);
+    // 30×12 → 35×10 → 35×12; the earlier 25×15 and the later equal 35×12 never move the ceiling.
+    assert.deepEqual(milestones.map((x) => [x.set.sessionId, x.set.weight, x.set.reps]), [['2', 35, 12], ['2', 35, 10], ['1', 30, 12]]);
+    assert.equal(matches, 1); // Equal repeat is a match, not another PR.
     const best = records.getCurrentBest(sets);
     assert.deepEqual([best.weight, best.reps, best.sessionId], [35, 12, '3']);
     assert.equal(reader('Retro only', fixtures).length, 0);
@@ -126,9 +127,9 @@ test('same-day sessions retain separate set identities and latest tie wins', () 
   const base = { date: dates.parseSessionDate('2026-09-11'), exerciseIndex: 0, setIndex: 0, weight: 35, reps: 12 };
   const sets = [{ ...base, id: 'a', sessionId: '9' }, { ...base, id: 'b', sessionId: '10' }];
   assert.equal(records.getCurrentBest(sets).id, 'b');
-  const groups = records.deriveRecentLifts(sets);
-  assert.equal(groups.length, 1);
-  assert.deepEqual(groups[0].sets.map((x) => [x.id, x.isPR]), [['b', false], ['a', true]]);
+  const progression = records.deriveRecordProgression(sets);
+  assert.deepEqual(progression.milestones.map((x) => x.set.id), ['a']);
+  assert.equal(progression.matches, 1);
 });
 
 test('legacy monthly timeline and fixed exercise restrictions are fully removed', () => {
@@ -157,4 +158,111 @@ test('timed sets never enter the weight/reps record pipeline (in memory or SQLit
     }).readExerciseRecordSetsSync;
     assert.deepEqual(reader('Plank', history), []);
   } finally { db.close(); }
+});
+
+// ---- Record progression: only sets that moved the ceiling ----
+
+const recordSet = (id, day, weight, reps, extra = {}) => ({
+  id: String(id), sessionId: String(extra.sessionId ?? id), date: dates.parseSessionDate(day),
+  exerciseIndex: 0, setIndex: extra.setIndex ?? 0, weight, reps,
+});
+const shape = (progression) => progression.milestones.map((x) => [dates.toLocalCalendarDate(x.set.date), x.set.weight, x.set.reps, x.isCurrent]);
+
+test('progression keeps only PR-setting sets, newest first, from the product example', () => {
+  const sets = [
+    recordSet(1, '2026-01-01', 60, 8), recordSet(2, '2026-01-08', 60, 8), recordSet(3, '2026-01-15', 62.5, 8),
+    recordSet(4, '2026-01-22', 60, 10), recordSet(5, '2026-02-01', 65, 8),
+  ];
+  const progression = records.deriveRecordProgression([...sets].reverse()); // Input order never matters.
+  assert.deepEqual(shape(progression), [
+    ['2026-02-01', 65, 8, true], ['2026-01-15', 62.5, 8, false], ['2026-01-01', 60, 8, false],
+  ]);
+  assert.equal(progression.current.set.id, '5');
+  assert.equal(progression.matches, 0);
+  assert.deepEqual(progression.milestones.map((x) => records.formatRecordDelta(x.delta, 'kg')), ['+2.5 kg', '+2.5 kg', null]);
+  // Current PR in the list and on the detail agree on what and when.
+  const best = records.getCurrentBest(sets);
+  assert.deepEqual([best.weight, best.reps], [progression.current.set.weight, progression.current.set.reps]);
+});
+
+test('bodyweight progression counts reps and labels the record as bodyweight', () => {
+  const sets = [recordSet(1, '2026-06-14', 0, 8), recordSet(2, '2026-07-01', 0, 7), recordSet(3, '2026-08-02', 0, 10),
+    recordSet(4, '2026-09-18', 0, 12), recordSet(5, '2026-10-05', 0, 14)];
+  const progression = records.deriveRecordProgression(sets);
+  assert.deepEqual(progression.milestones.map((x) => x.set.reps), [14, 12, 10, 8]);
+  assert.deepEqual(progression.milestones.map((x) => records.formatRecordDelta(x.delta, 'kg')), ['+2 reps', '+2 reps', '+2 reps', null]);
+  const performance = records.recordPerformance(progression.current.set);
+  assert.equal(performance.bodyweight, true);
+  assert.equal(performance.reps, 14);
+});
+
+test('weighted progression: same load adds reps, heavier load wins even with fewer reps', () => {
+  const sets = [recordSet(1, '2026-09-01', 80, 4), recordSet(2, '2026-09-08', 80, 5), recordSet(3, '2026-09-15', 82.5, 3),
+    recordSet(4, '2026-09-22', 80, 9)];
+  const progression = records.deriveRecordProgression(sets);
+  assert.deepEqual(shape(progression).map((x) => x.slice(1, 3)), [[82.5, 3], [80, 5], [80, 4]]);
+  assert.deepEqual(progression.milestones.map((x) => x.delta), [
+    { kind: 'weight', from: 80, to: 82.5 }, { kind: 'reps', reps: 1 }, null,
+  ]);
+  assert.equal(records.formatRecordDelta({ kind: 'reps', reps: 1 }, 'kg'), '+1 rep');
+});
+
+test('ties never create milestones; repeated current PRs count distinct later sessions', () => {
+  const sets = [
+    recordSet(1, '2026-09-01', 100, 5), recordSet(2, '2026-09-01', 100, 5, { sessionId: 1, setIndex: 1 }),
+    recordSet(3, '2026-09-08', 100, 5), recordSet(4, '2026-09-08', 100, 5, { sessionId: 3, setIndex: 1 }),
+    recordSet(5, '2026-09-15', 100, 5), recordSet(6, '2026-09-20', 95, 8),
+  ];
+  const progression = records.deriveRecordProgression(sets);
+  assert.equal(progression.milestones.length, 1);
+  assert.equal(progression.current.set.id, '1'); // First time reached, not a later equal set.
+  assert.equal(progression.current.delta, null);
+  assert.equal(progression.matches, 2); // Sessions 3 and 5; another set inside session 1 is not a match.
+});
+
+test('single record, no sets, and decimal or unit-converted deltas', () => {
+  const single = records.deriveRecordProgression([recordSet(1, '2026-09-01', 42.5, 5)]);
+  assert.deepEqual(shape(single), [['2026-09-01', 42.5, 5, true]]);
+  assert.deepEqual(records.deriveRecordProgression([]), { milestones: [], current: undefined, matches: 0 });
+  assert.equal(records.formatRecordDelta({ kind: 'weight', from: 60, to: 61.25 }, 'kg'), '+1.3 kg');
+  assert.equal(records.formatRecordDelta({ kind: 'weight', from: 60, to: 62.5 }, 'lbs'), '+5.5 lb'); // 132.3 → 137.8 as displayed.
+  assert.equal(records.formatRecordDelta({ kind: 'weight', from: 0, to: 10 }, 'kg'), '+10 kg');
+  assert.equal(records.formatRecordDelta({ kind: 'weight', from: 60, to: 60.001 }, 'kg'), null); // Invisible on screen.
+  assert.equal(records.formatRecordDelta({ kind: 'reps', reps: 0 }, 'kg'), null);
+});
+
+test('list rows carry the date the current PR was first achieved, independent of session order', () => {
+  const history = [
+    session(3, '2026-09-28', [exercise('Bench Press', set(80, 6))]),
+    session(1, '2026-09-14', [exercise('Bench Press', set(75, 6)), exercise('Chest Dip', set(0, 12))]),
+    session(2, '2026-09-21', [exercise('Bench Press', set(80, 6)), exercise('Chest Dip', set(0, 14))]),
+    session(4, '2026-10-02', [exercise('Bench Press', set(70, 10)), exercise('Overhead Press', set(42.5, 5))]),
+  ];
+  const list = records.derivePersonalRecords(history);
+  const byName = Object.fromEntries(list.map((x) => [x.name, x]));
+  assert.equal(dates.toLocalCalendarDate(byName['Bench Press'].achieved), '2026-09-21');
+  assert.equal(dates.toLocalCalendarDate(byName['Bench Press'].lastPerformed), '2026-10-02');
+  assert.deepEqual([byName['Bench Press'].best.weight, byName['Bench Press'].best.reps], [80, 6]);
+  assert.equal(dates.toLocalCalendarDate(byName['Chest Dip'].achieved), '2026-09-21');
+  assert.equal(dates.toLocalCalendarDate(byName['Overhead Press'].achieved), '2026-10-02');
+  assert.deepEqual(records.sortPersonalRecords(list, 'recent').map((x) => x.name), ['Overhead Press', 'Bench Press', 'Chest Dip']);
+  assert.deepEqual(records.sortPersonalRecords(list, 'name').map((x) => x.name), ['Bench Press', 'Chest Dip', 'Overhead Press']);
+  assert.deepEqual(list.map((x) => x.name), ['Bench Press', 'Overhead Press', 'Chest Dip']); // Input list untouched by sorting.
+});
+
+test('detail is a record progression, not a second workout history', () => {
+  const detail = source('app/record-detail.tsx');
+  assert.match(detail, /deriveRecordProgression/);
+  assert.doesNotMatch(detail, /deriveRecentLifts|SectionList|RECENT LIFTS|SETS LOGGED|ChevronLeft|router\.back/);
+  assert.doesNotMatch(source('store/personalRecords.ts'), /export function deriveRecentLifts/);
+  const list = source('app/records.tsx');
+  assert.doesNotMatch(list, /ChevronLeft|lastPerformed|BEST SET/);
+  assert.match(list, /item\.achieved/);
+  // Both screens use the native stack header and its minimal back button, like History.
+  const layout = source('app/_layout.tsx');
+  for (const name of ['records', 'record-detail']) {
+    const block = layout.slice(layout.indexOf(`name="${name}"`), layout.indexOf('/>', layout.indexOf(`name="${name}"`)));
+    assert.match(block, /headerShown: true/);
+    assert.match(block, /headerBackButtonDisplayMode: 'minimal'/);
+  }
 });

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { StyleSheet, Text, View, type LayoutRectangle } from 'react-native';
+import { Platform, StyleSheet, Text, View, type LayoutRectangle } from 'react-native';
 import Animated, {
   useAnimatedRef,
   useAnimatedScrollHandler,
@@ -14,6 +14,7 @@ import { workoutSetSelectionSpring } from '@/constants/workoutMotion';
 import { resolveDayColor } from '@/features/custom-split/colors';
 import { getWorkoutDisplayName, type DraftWorkout } from '@/store/customSplitDraft';
 import { workoutEntryLabel } from '@/utils/content';
+import * as Haptics from '@/services/haptics';
 import { SplitPressable as Pressable } from './SplitPressable';
 import { Action, ui } from './ui';
 
@@ -91,7 +92,11 @@ export function WorkoutTabs({ workouts, activeWorkoutId, onSelect, onAdd }: {
         {workouts.map((day, index) => <Pressable key={day.id} accessibilityRole="tab"
           accessibilityLabel={`${workoutEntryLabel(index)}, ${getWorkoutDisplayName(day) || 'No exercises yet'}`}
           accessibilityState={{ selected: day.id === activeWorkoutId }}
-          onPress={() => { if (day.id !== activeWorkoutId) onSelect(day.id); }}
+          onPress={() => {
+            if (day.id === activeWorkoutId) return;
+            onSelect(day.id);
+            if (Platform.OS !== 'web') void Haptics.selectionAsync();
+          }}
           onLayout={({ nativeEvent: { layout } }) => setFrames(previous => {
             const frame = previous[day.id];
             if (frame && frame.x === layout.x && frame.y === layout.y &&

@@ -3,17 +3,17 @@ import { Redirect } from 'expo-router';
 
 import { LiftLogCard } from '@/components/LiftLogCard';
 import { STAT_STRIP_HEIGHT, STAT_STRIP_WIDTH, StatStripCard } from '@/components/StatStripCard';
-import { StackPosterCard, type StackPosterLayer } from '@/components/StackPosterCard';
+import { StackFrameCard, type StackFrameExercise } from '@/components/StackFrameCard';
 import { redesignColors, redesignFonts, splitColors } from '@/constants/theme';
 
 const SCALE = 0.3;
 
-const LAYERS: StackPosterLayer[] = [
-  { name: 'Deadlift', color: splitColors.back, weight: 0.55, detail: '3 SETS · 1,098 kg', record: true },
-  { name: 'Pull-ups', color: splitColors.back, weight: 0.2, detail: '3 SETS · 24 REPS', record: false },
-  { name: 'Barbell Rows', color: splitColors.back, weight: 0.45, detail: '3 SETS · 984 kg', record: false },
-  { name: 'Face Pulls', color: splitColors.shoulders, weight: 0.3, detail: '3 SETS · 594 kg', record: false },
-  { name: 'Barbell Curl', color: splitColors.arms, weight: 0.32, detail: '3 SETS · 708 kg', record: false },
+const EXERCISES: StackFrameExercise[] = [
+  { name: 'Deadlift', color: splitColors.back, setCount: 3, record: true },
+  { name: 'Pull-ups', color: splitColors.back, setCount: 3, record: false },
+  { name: 'Barbell Rows', color: splitColors.back, setCount: 3, record: false },
+  { name: 'Face Pulls', color: splitColors.shoulders, setCount: 3, record: false },
+  { name: 'Barbell Curl', color: splitColors.arms, setCount: 3, record: false },
 ];
 
 /** Dev-only visual QA for the three share cards, each on a photo-like backdrop. */
@@ -33,8 +33,8 @@ export default function DevShareCards() {
     <ScrollView style={styles.screen} contentContainerStyle={styles.content} horizontal>
       {frame('Stat Strip', <StatStripCard {...common} exerciseCount={5} recordCount={1} />)}
       {frame('Lift Log', <LiftLogCard accent={common.accent} title="Pull" date="Oct 4" volumeValue="3,384" volumeUnit="kg"
-        lines={[{ name: 'Deadlift', value: '61', unit: 'kg', scheme: '3 × 6', record: true }, { name: 'Pull-ups', value: '8', unit: 'reps', scheme: '3 × 8', record: false }]} more={0} />)}
-      {frame('My Stack', <StackPosterCard {...common} durationLabel="52 min" layers={LAYERS} />)}
+        lines={[{ name: 'Deadlift', value: '1,098', unit: 'kg', record: true }, { name: 'Pull-ups', value: 'Bodyweight', unit: '', record: false }]} more={0} />)}
+      {frame('Frame', <StackFrameCard {...common} recordCount={1} exercises={EXERCISES} />)}
     </ScrollView>
   );
 }

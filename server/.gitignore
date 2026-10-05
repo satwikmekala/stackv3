@@ -1,3 +1,6 @@
 node_modules/
 eval/results/
 .env
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm

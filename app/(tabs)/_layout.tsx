@@ -34,7 +34,10 @@ export default function TabLayout() {
         <NativeTabs.Trigger.Label>My Stack</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
           renderingMode="template"
-          src={<NativeTabs.Trigger.VectorIcon family={Ionicons} name="layers-outline" />}
+          src={{
+            default: require('@/assets/icons/stack-outline.png'),
+            selected: require('@/assets/icons/stack-filled.png'),
+          }}
         />
       </NativeTabs.Trigger>
     </NativeTabs>

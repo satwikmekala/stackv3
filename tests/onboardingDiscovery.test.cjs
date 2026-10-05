@@ -34,6 +34,37 @@ function handoffHarness(disk = new Map()) {
   const token = name => { const encoded = t.encodeSharedSplit({ name, workouts: [{ name: 'Day one', exercises: [{ kind: 'builtin', name: 'Bench Press' }] }] }); assert.equal(encoded.ok, true); return encoded.value; };
   return { h, disk, fail, token, load, hold: p => { hold = p; } };
 }
+
+test('remote ID handoff survives first-run setup and restart without a token, snapshot or saved routine', async () => {
+  const x = handoffHarness(), id = 'AAAAAAAAAAAAAAAAAAAAAA';
+  await x.h.rememberSharedRoutineId(id);
+  const draft = x.load('@/store/onboardingDraft');
+  await draft.saveOnboardingDraft({ step: 'welcome' }); await draft.saveOnboardingDraft({ step: 'name', name: 'Sam' });
+  await draft.clearOnboardingDraft();
+  const cold = handoffHarness(x.disk); await cold.h.loadSharedRoutineHandoff();
+  assert.deepEqual(cold.h.useSharedRoutineHandoff.getState().pending, { shareId: id, saved: null });
+  assert.deepEqual(cold.h.onboardingDestination(), { pathname: '/shared-routine', params: { id } });
+  assert.doesNotMatch(x.disk.get(x.h.SHARED_ROUTINE_HANDOFF_KEY), /token|workouts|attemptId|splitId/);
+});
+test('new incoming IDs own navigation; stale ID and legacy exits never clear a newer durable context', async () => {
+  const x = handoffHarness(), id = 'AAAAAAAAAAAAAAAAAAAAAA', next = 'BBBBBBBBBBBBBBBBBBBBBQ';
+  const token = x.token('Legacy'); await x.h.rememberSharedRoutine(token);
+  await x.h.rememberSharedRoutineId(id); await x.h.clearSharedRoutineHandoff(token);
+  assert.equal(x.h.onboardingDestination().params.id, id);
+  await x.h.rememberSharedRoutineId(next); await x.h.clearSharedRoutineHandoff(id);
+  assert.equal(x.h.onboardingDestination().params.id, next);
+  await x.h.clearSharedRoutineHandoff(next); assert.equal(x.h.onboardingDestination(), '/(tabs)');
+});
+test('failed ID persistence preserves the previous durable context and malformed/mixed handoffs fail closed', async () => {
+  const x = handoffHarness(), id = 'AAAAAAAAAAAAAAAAAAAAAA', next = 'BBBBBBBBBBBBBBBBBBBBBQ';
+  await x.h.rememberSharedRoutineId(id); x.fail.write = true;
+  await assert.rejects(x.h.rememberSharedRoutineId(next)); assert.equal(x.h.onboardingDestination().params.id, id);
+  x.fail.write = false; await x.h.rememberSharedRoutineId(next);
+  for (const pending of [{ shareId: 'short', saved: null }, { shareId: id, token: x.token('Legacy'), saved: null },
+    { shareId: id, saved: { splitId: 1, name: 'Cannot auto-save' } }, { shareId: id, saved: null, attemptId: 'bad' }]) {
+    assert.throws(() => x.h.parseSharedRoutineHandoff(JSON.stringify({ version: 1, pending })));
+  }
+});
 test('shared context survives setup draft clear, Back-like draft changes and cold relaunch without activating a program', async () => {
   const x = handoffHarness(), a = x.token('A routine');
   await x.h.rememberSharedRoutine(a, { splitId: 27, name: 'A routine' });
@@ -107,13 +138,13 @@ test('Stack discovery uses saved history, exposes contextual Train/help and rend
   const full = renderHarness('@/features/build/StackDiscovery', { '@/features/build/useBuildHistory': { useBuildHistory: () => ({ state: { pieces: [{ id: 'earned' }] } }) } });
   assert.equal(full.nodes[0].type, 'Monolith');
 });
-test('Stack example is read-only presentation and all colors have explanatory text; flag-off safely redirects', () => {
+test('Stack example is read-only presentation and all colors have explanatory text in the default flow', () => {
   const h = renderHarness('@/app/stack-example');
   assert.ok(h.nodes.some(n => n.props.children === 'EXAMPLE ONLY'));
   const slabs = h.nodes.find(n => n.type === 'BuildPreview').props.slabs; assert.ok(slabs.every(s => s.id.startsWith('welcome:')));
   assert.ok(h.nodes.some(n => n.props.accessibilityLabel?.includes('Your training data stays unchanged')));
   assert.ok(!h.nodes.some(n => n.props.numberOfLines)); h.nodes.find(n => n.props.accessibilityRole === 'button').props.onPress(); assert.deepEqual(h.routes, ['/(tabs)']);
-  const off = renderHarness('@/app/stack-example', { '@/features/onboarding/config': { ONBOARDING_PREVIEW_ENABLED: false } }); assert.equal(off.nodes[0].type, 'Redirect');
+  const off = renderHarness('@/app/stack-example', { '@/features/onboarding/config': { ONBOARDING_PREVIEW_ENABLED: false } }); assert.ok(off.nodes.some(n => n.type === 'BuildPreview'));
 });
 
 function importScreenHarness({ completed = false, saved = null, preview = true } = {}) {
@@ -138,7 +169,7 @@ function importScreenHarness({ completed = false, saved = null, preview = true }
     '@/features/sharing/splitTransport': { parseSharedSplit: () => ({ ok: true, value: { name: 'Shared', workouts: [{ name: 'Push', exercises: [{ name: 'Bench Press', kind: 'builtin' }] }] } }) },
     '@/store/workoutDatabase': { importPortableSplitSync: () => { calls.push('import'); return new Promise(resolve => { resolveImport = resolve; }); } },
     '@/store/workoutStore': { useWorkoutStore }, '@/store/customSplitDraft': { useCustomSplitDraftStore: selector => selector({ closeDraft: () => calls.push('closeDraft') }) },
-    '@/features/onboarding/config': { ONBOARDING_PREVIEW_ENABLED: preview, FIRST_RUN_ROUTE: '/onboarding-preview' },
+    '@/features/onboarding/config': { ONBOARDING_PREVIEW_ENABLED: preview, FIRST_RUN_ROUTE: '/(onboarding)' },
     '@/store/sharedRoutineHandoff': { useSharedRoutineHandoff: () => handoff, loadSharedRoutineHandoff: async () => {},
       prepareSharedRoutineImport: async () => { if (failContext) throw Error('storage'); return '00000000-0000-4000-8000-000000000009'; },
       rememberSharedRoutine: async (token, result) => { calls.push(['remember', token, result]); if (failContext) throw Error('storage'); handoff.pending = { token, saved: result ?? handoff.pending?.saved ?? null }; },
@@ -165,7 +196,7 @@ test('shared import taps persist once; a failed handoff retry retains the import
   assert.ok(h.render().some(n => n.props?.children === 'Added to Your routines'));
   assert.ok(h.render().some(n => typeof n.props?.children === 'string' && n.props.children.includes("Couldn’t add")));
   h.failContext(false); h.action('Continue to Stack')(); await settle();
-  assert.deepEqual(h.routes, ['/onboarding-preview']); assert.equal(h.handoff.pending.saved.splitId, 9);
+  assert.deepEqual(h.routes, ['/(onboarding)']); assert.equal(h.handoff.pending.saved.splitId, 9);
   assert.equal(h.profile.programMode, 'none'); assert.equal(h.calls.filter(c => c === 'import').length, 1);
 });
 test('explicit Use keeps the current screen on activation failure and retries without re-importing or double navigation', async () => {
@@ -176,29 +207,20 @@ test('explicit Use keeps the current screen on activation failure and retries wi
   assert.equal(h.profile.activeSplitId, 9); assert.deepEqual(h.routes, ['/(tabs)']); assert.equal(h.handoff.pending, null);
   assert.equal(h.calls.filter(c => c === 'import').length, 0);
 });
-test('Save for later leaves the active program alone; the production import screen retains its previous actions', async () => {
+test('Save for later leaves the active program alone in the default import flow', async () => {
   const h = importScreenHarness({ completed: true, saved: { splitId: 9, name: 'Shared' } }); h.profile.programMode = 'stack';
   h.action('Save for later')(); await settle(); assert.equal(h.profile.programMode, 'stack'); assert.deepEqual(h.routes, ['/your-splits']);
   assert.equal(h.calls.filter(c => Array.isArray(c) && c[0] === 'activate').length, 0);
   const legacy = importScreenHarness({ completed: true, saved: { splitId: 9, name: 'Shared' }, preview: false });
-  assert.ok(!legacy.render().some(n => n.props?.children === 'Use this routine')); legacy.action('Done')(); await settle(); assert.deepEqual(legacy.routes, ['/your-splits']);
+  assert.ok(legacy.render().some(n => n.props?.children === 'Use this routine')); legacy.action('Save for later')(); await settle(); assert.deepEqual(legacy.routes, ['/your-splits']);
 });
-test('retired onboarding routes redirect fresh/completed preview users while the flag-off five-screen flow stays intact', () => {
-  for (const completed of [false, true]) {
-    const h = renderHarness('@/app/(onboarding)/_layout', { '@/features/onboarding/config': { ONBOARDING_PREVIEW_ENABLED: true, FIRST_RUN_ROUTE: '/onboarding-preview' }, '@/store/workoutStore': { useWorkoutStore: selector => selector({ profile: { onboardingCompleted: completed } }) } });
-    assert.equal(h.nodes[0].type, 'Redirect'); assert.equal(h.nodes[0].props.href, completed ? '/(tabs)' : '/onboarding-preview');
-  }
-  const legacy = renderHarness('@/app/(onboarding)/_layout', { '@/features/onboarding/config': { ONBOARDING_PREVIEW_ENABLED: false }, '@/store/workoutStore': { useWorkoutStore: selector => selector({ profile: null }) } });
-  assert.deepEqual(legacy.nodes.filter(n => n.type === 'Stack.Screen').map(n => n.props.name), ['welcome', 'whatsurname', 'experience', 'current-week', 'split-choice']);
-  assert.ok(!legacy.nodes.some(n => n.type === 'Redirect'));
-});
-test('Help deliberately reopens the retained introduction and returns to its caller; unavailable preview redirects safely', () => {
+test('Help reopens the retained introduction and returns to its caller in the default flow', () => {
   const returned = [];
   const h = renderHarness('@/app/stack-help', { '@/features/build/BuildEntry': { __esModule: true, default: 'BuildEntry' }, 'expo-router': { Redirect: 'Redirect', useRouter: () => ({ canGoBack: () => true, back: () => returned.push('caller') }) } });
   assert.equal(h.nodes[0].type, 'BuildEntry'); assert.equal(h.nodes[0].props.forceIntroduction, true); assert.equal(h.nodes[0].props.children, null);
   h.nodes[0].props.onFinish(); assert.deepEqual(returned, ['caller']);
   const off = renderHarness('@/app/stack-help', { '@/features/build/BuildEntry': { __esModule: true, default: 'BuildEntry' }, '@/features/onboarding/config': { ONBOARDING_PREVIEW_ENABLED: false } });
-  assert.equal(off.nodes[0].type, 'Redirect');
+  assert.equal(off.nodes[0].type, 'BuildEntry');
 });
 
 test('import attempt is durable before SQL, survives cold load and failed saved-ID writes, and a dismissed link gets a new attempt', async () => {

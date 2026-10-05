@@ -13,8 +13,8 @@ import { Action, StackMark, ui } from '@/components/custom-split/ui';
 import { ChevronLeft, MoreHorizontal, Plus, SlidersHorizontal } from 'lucide-react-native';
 import { useMuscleColors } from '@/store/muscleColors';
 import { redesignColors as c, redesignFonts as f } from '@/constants/theme';
-import { countPendingImports, getWorkoutDisplayName, splitRevision, useCustomSplitDraftStore, type CustomSplitSource, type DraftExercise } from '@/store/customSplitDraft';
-import { getCustomSplitDetailAsync, getNextArchetypeVariant, getNextCustomSplitNameAsync, readArchetypeTemplateCatalogSync, readArchetypeVariantsSync } from '@/store/workoutDatabase';
+import { countPendingImports, getWorkoutDisplayName, splitDraftKey, splitRevision, useCustomSplitDraftStore, type CustomSplitSource, type DraftExercise } from '@/store/customSplitDraft';
+import { getCustomSplitDetailAsync, getNextArchetypeVariant, getNextCustomSplitNameAsync, hasSharedSplitImportReceiptSync, readArchetypeTemplateCatalogSync, readArchetypeVariantsSync } from '@/store/workoutDatabase';
 import { useWorkoutStore } from '@/store/workoutStore';
 import { getProgramFrequency } from '@/store/trainingPreferences';
 import { buildProgramLineup } from '@/features/program/lineup';
@@ -22,7 +22,7 @@ import { buildProgramLineup } from '@/features/program/lineup';
 export type { CustomSplitSource };
 export default function CustomSplitBuilderScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ splitId?: string; source?: CustomSplitSource }>();
+  const params = useLocalSearchParams<{ splitId?: string; source?: CustomSplitSource; shareId?: string }>();
   const state = useCustomSplitDraftStore();
   useMuscleColors(state => state.preferences);
   const [loading, setLoading] = useState(true);
@@ -49,8 +49,21 @@ export default function CustomSplitBuilderScreen() {
       const store = useCustomSplitDraftStore.getState();
       const target = params.splitId === undefined ? null : Number(params.splitId);
       const stackPlan = params.source === 'stack';
+      if (params.source === 'shared') {
+        if (target !== null || !params.shareId) throw new Error('This routine link is invalid.');
+        if (store.source !== 'shared' || store.sharedContext?.shareId !== params.shareId || !store.draft) {
+          store.closeDraft();
+          if (!store.resumeDraft(null, 'shared', params.shareId)) throw new Error('This draft is no longer available.');
+        }
+        const context = useCustomSplitDraftStore.getState().sharedContext;
+        if (context?.attemptId && hasSharedSplitImportReceiptSync(context.attemptId)) {
+          useCustomSplitDraftStore.getState().discardDraft();
+          router.replace({ pathname: '/your-splits', params: { source: 'shared' } });
+        }
+        return;
+      }
       if (target !== null && (!Number.isSafeInteger(target) || target <= 0)) throw new Error('This routine link is invalid.');
-      if (store.draft && store.editingSplitId === target && (target !== null || (store.source === 'stack') === stackPlan)) {
+      if (store.draft && store.source !== 'shared' && store.editingSplitId === target && (target !== null || (store.source === 'stack') === stackPlan)) {
         if (target !== null) {
           const saved = await getCustomSplitDetailAsync(target);
           if (!cancelled) setConflict(!saved || splitRevision(saved) !== store.sourceRevision);
@@ -80,18 +93,23 @@ export default function CustomSplitBuilderScreen() {
     void load().catch(e => { if (!cancelled) setError('Couldn’t open this routine. Try again.'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [params.splitId, params.source, state.hydrated, retry]);
+  }, [params.splitId, params.source, params.shareId, state.hydrated, retry, router]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ y: 0, animated: false });
   }, [state.activeWorkoutId, scrollRef]);
 
-  useEffect(() => () => useCustomSplitDraftStore.getState().closeDraft(), []);
+  useEffect(() => () => {
+    const current = useCustomSplitDraftStore.getState();
+    const target = params.splitId === undefined ? null : Number(params.splitId);
+    if (splitDraftKey(current.editingSplitId, current.source, current.sharedContext?.shareId) ===
+      splitDraftKey(target, params.source, params.shareId)) current.closeDraft();
+  }, [params.source, params.shareId, params.splitId]);
   const headerOptions = useMemo(() => {
     const disabled = loading || !state.draft || conflict || !!error;
     const openReview = () => router.push('/custom-split/review');
     const review = <Action title="Review routine" compact pill disabled={disabled} onPress={openReview} />;
-    return { headerShown: true, title: state.source === 'stack' ? 'Edit Stack’s plan' : state.editingSplitId !== null ? 'Edit routine' : 'New routine',
+    return { headerShown: true, title: state.source === 'stack' ? 'Edit Stack’s plan' : state.source === 'shared' || state.editingSplitId !== null ? 'Edit routine' : 'New routine',
       headerBackButtonDisplayMode: 'minimal' as const,
       headerLeft: Platform.OS === 'ios' ? undefined : () => <Action title="Back" compact
         icon={<ChevronLeft color={c.bone} size={20} />} onPress={() => router.back()} />,

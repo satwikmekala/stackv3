@@ -234,8 +234,9 @@ export function ExerciseFinisher({
         {restStartedAt !== null ? <RestElapsed since={restStartedAt} /> : null}
 
         {onAddAnother ? (
-          <TouchableOpacity accessibilityRole="button" onPress={onAddAnother} activeOpacity={0.7} style={styles.secondary}>
-            <Text allowFontScaling={false} style={styles.secondaryText}>Add another exercise</Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Add exercise" onPress={onAddAnother} activeOpacity={0.7} style={styles.secondary}>
+            <Plus color={redesignColors.bone} size={18} strokeWidth={2} />
+            <Text allowFontScaling={false} style={styles.secondaryText}>Add exercise</Text>
           </TouchableOpacity>
         ) : null}
         {finishDisabled ? (
@@ -349,6 +350,8 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     borderRadius: 18,
     backgroundColor: redesignColors.raised,
+    flexDirection: 'row',
+    gap: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
