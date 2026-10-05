@@ -1,0 +1,18 @@
+{
+  "counts": {
+    "profile": 0,
+    "sessions": 0,
+    "session_exercises": 0,
+    "sets": 0,
+    "custom_splits": 0
+  },
+  "draft": {
+    "version": 1,
+    "draft": {
+      "step": "starting-point",
+      "choice": "stack",
+      "frequency": null,
+      "structure": "full-body"
+    }
+  }
+}

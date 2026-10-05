@@ -39,31 +39,31 @@ const pieceCopy = (sessions, piece, unit = 'kg') => pieceCardCopy(piece, pieceCa
 
 test('0 sealed weeks: Your Case, no count, no cards', () => {
   const { header, cards } = archive([]);
-  assert.deepEqual(header, { title: 'Your Case', count: null, note: 'Every finished week is kept here.' });
+  assert.deepEqual(header, { title: "Past weeks", count: null, note: 'Every finished week is kept here.' });
   assert.deepEqual(cards, []);
 });
 
-test('0 sealed weeks with pieces this week: shelf still empty and the open week shown', () => {
+test("0 sealed weeks with blocks this week: shelf still empty and the open week shown", () => {
   const { header, cards } = archive([session(1, '2026-09-22', bench())]);
-  assert.deepEqual(header, { title: 'Your Case', count: null, note: 'Every finished week is kept here.' });
-  assert.deepEqual(cards, [{ kind: 'week', title: 'THIS WEEK', detail: '1 stack · OPEN', a11y: 'This week, open, 1 stack' }]);
+  assert.deepEqual(header, { title: "Past weeks", count: null, note: 'Every finished week is kept here.' });
+  assert.deepEqual(cards, [{ kind: 'week', title: 'This week', detail: "1 block · Open", a11y: "This week, open, 1 block" }]);
 });
 
 test('1 sealed week: singular headline, card range and aggregate', () => {
   const { header, cards } = archive([session(1, '2026-09-15', bench())]);
-  assert.deepEqual(header, { title: 'Your Case', count: '1 WEEK', note: null });
-  assert.deepEqual(cards, [{ kind: 'week', title: '14–20 SEP', detail: '1 stack · 840 KG', a11y: 'Week of 14 September, 1 stack' }]);
+  assert.deepEqual(header, { title: "Past weeks", count: '1 week', note: null });
+  assert.deepEqual(cards, [{ kind: 'week', title: "14–20 Sep", detail: "1 block · 840 kg", a11y: "Week of 14 September, 1 block" }]);
 });
 
-test('many sealed weeks, with the current week first when it has pieces', () => {
+test("many sealed weeks, with the current week first when it has blocks", () => {
   const sessions = [session(1, '2026-09-01', bench()), session(2, '2026-09-08', bench()), session(3, '2026-09-10', bench(70)), session(4, '2026-09-15', bench()), session(5, '2026-09-21', bench()), session(6, '2026-09-22', bench())];
   const { header, cards } = archive(sessions);
-  assert.deepEqual(header, { title: 'Your Case', count: '3 WEEKS', note: null });
+  assert.deepEqual(header, { title: "Past weeks", count: '3 weeks', note: null });
   assert.deepEqual(cards.map((card) => [card.title, card.detail]), [
-    ['THIS WEEK', '2 stacks · OPEN'],
-    ['14–20 SEP', '1 stack · 840 KG'],
-    ['7–13 SEP', '2 stacks · 1,820 KG'],
-    ['31 AUG–6 SEP', '1 stack · 840 KG'],
+    ['This week', "2 blocks · Open"],
+    ["14–20 Sep", "1 block · 840 kg"],
+    ["7–13 Sep", "2 blocks · 1,820 kg"],
+    ["31 Aug–6 Sep", "1 block · 840 kg"],
   ]);
 });
 
@@ -72,50 +72,50 @@ test('100+ sealed weeks: the count stays in digits', () => {
     const date = new Date(2026, 8, 16 - 7 * index);
     return session(index + 1, `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`, bench());
   });
-  assert.equal(archive(sessions).header.count, '104 WEEKS');
+  assert.equal(archive(sessions).header.count, '104 weeks');
 });
 
 test('a single empty week gets its own NO SESSIONS card and is not tappable', () => {
   const { cards } = archive([session(1, '2026-09-01', bench()), session(2, '2026-09-15', bench())]);
   assert.deepEqual(cards, [
-    { kind: 'week', title: '14–20 SEP', detail: '1 stack · 840 KG', a11y: 'Week of 14 September, 1 stack' },
-    { kind: 'empty', title: '7–13 SEP', detail: 'NO SESSIONS', a11y: 'Week of 7 September, no sessions' },
-    { kind: 'week', title: '31 AUG–6 SEP', detail: '1 stack · 840 KG', a11y: 'Week of 31 August, 1 stack' },
+    { kind: 'week', title: "14–20 Sep", detail: "1 block · 840 kg", a11y: "Week of 14 September, 1 block" },
+    { kind: 'empty', title: "7–13 Sep", detail: "No workouts", a11y: "Week of 7 September, no workouts" },
+    { kind: 'week', title: "31 Aug–6 Sep", detail: "1 block · 840 kg", a11y: "Week of 31 August, 1 block" },
   ]);
 });
 
 test('consecutive empty weeks collapse into one card, across a month', () => {
   const { cards } = archive([session(1, '2026-08-05', bench()), session(2, '2026-09-16', bench())]);
   assert.deepEqual(cards, [
-    { kind: 'week', title: '14–20 SEP', detail: '1 stack · 840 KG', a11y: 'Week of 14 September, 1 stack' },
-    { kind: 'empty', title: '10 AUG–13 SEP', detail: 'NO SESSIONS', a11y: '10 August to 13 September, no sessions' },
-    { kind: 'week', title: '3–9 AUG', detail: '1 stack · 840 KG', a11y: 'Week of 3 August, 1 stack' },
+    { kind: 'week', title: "14–20 Sep", detail: "1 block · 840 kg", a11y: "Week of 14 September, 1 block" },
+    { kind: 'empty', title: "10 Aug–13 Sep", detail: "No workouts", a11y: "10 August to 13 September, no workouts" },
+    { kind: 'week', title: "3–9 Aug", detail: "1 block · 840 kg", a11y: "Week of 3 August, 1 block" },
   ]);
   const collapsed = caseCards(caseEntries(derive([session(1, '2026-08-05', bench()), session(2, '2026-09-16', bench())])))[1];
   assert.deepEqual(collapsed, { id: 'case:2026-09-07', kind: 'empty', start: '2026-08-10', end: '2026-09-13', weeks: 5 });
 });
 
-test('no cards before the first piece, and an empty current week adds no card', () => {
+test("no cards before the first block, and an empty current week adds no card", () => {
   const { cards } = archive([session(1, '2026-09-09', bench()), session(2, '2026-09-15', bench())]);
-  assert.deepEqual(cards.map((card) => card.title), ['14–20 SEP', '7–13 SEP']);
+  assert.deepEqual(cards.map((card) => card.title), ["14–20 Sep", "7–13 Sep"]);
   assert.equal(cards.at(-1).kind, 'week');
 });
 
 test('unpacked current week: open header, singular and plural', () => {
   const one = derive([session(1, '2026-09-22', bench())]).currentWeek;
-  assert.deepEqual(unpackedHeader(one, 'kg'), { title: 'This week', tiles: [{ value: '840', label: 'KG MOVED' }, { value: '1', label: 'STACK' }] });
+  assert.deepEqual(unpackedHeader(one, 'kg'), { title: 'This week', tiles: [{ value: '840', label: "kg moved" }, { value: '1', label: "BLOCK" }] });
   const two = derive([session(1, '2026-09-21', bench()), session(2, '2026-09-22', bench())]).currentWeek;
-  assert.deepEqual(unpackedHeader(two, 'kg'), { title: 'This week', tiles: [{ value: '1,680', label: 'KG MOVED' }, { value: '2', label: 'STACKS' }] });
+  assert.deepEqual(unpackedHeader(two, 'kg'), { title: 'This week', tiles: [{ value: '1,680', label: "kg moved" }, { value: '2', label: "BLOCKS" }] });
 });
 
-test('unpacked one-piece sealed week with zero lifts up: no zero segments', () => {
+test("unpacked one-block sealed week with zero lifts up: no zero segments", () => {
   const sessions = [session(1, '2026-09-15', bench())];
   const week = derive(sessions).sealedWeeks[0];
-  assert.deepEqual(unpackedHeader(week, 'kg'), { title: '14–20 September', tiles: [{ value: '840', label: 'KG MOVED' }, { value: '1', label: 'STACK' }] });
-  assert.deepEqual(pieceCopy(sessions, week.pieces[0]), { title: 'Push · Tue', detail: '840 kg moved', a11y: 'View Push summary, 15 September' });
+  assert.deepEqual(unpackedHeader(week, 'kg'), { title: "14–20 Sep", tiles: [{ value: '840', label: "kg moved" }, { value: '1', label: "BLOCK" }] });
+  assert.deepEqual(pieceCopy(sessions, week.pieces[0]), { title: 'Push · Tue', detail: '840 kg moved', a11y: "Open Push summary, 15 September" });
 });
 
-test('multiple PRs in one piece fold into one PRs segment; summary uses PRS', () => {
+test("multiple PRs in one block fold into one PRs segment; summary uses PRs", () => {
   const sessions = [
     session(1, '2026-09-08', [lift('Bench press', [set(80, 8)]), lift('Squat', [set(100, 5)])]),
     session(2, '2026-09-15', [lift('Bench press', [set(85, 8)]), lift('Squat', [set(105, 5)])]),
@@ -124,7 +124,7 @@ test('multiple PRs in one piece fold into one PRs segment; summary uses PRS', ()
   const week = derive(sessions).sealedWeeks.at(-1);
   assert.equal(pieceCopy(sessions, week.pieces[0]).detail, '1,205 kg moved · PRs: Bench press · 85 kg × 8, Squat · 105 kg × 5');
   assert.equal(pieceCopy(sessions, week.pieces[1]).title, 'Back · Thu');
-  assert.deepEqual(unpackedHeader(week, 'kg'), { title: '14–20 September', tiles: [{ value: '1,845', label: 'KG MOVED' }, { value: '2', label: 'STACKS' }, { value: '2', label: 'PRS' }] });
+  assert.deepEqual(unpackedHeader(week, 'kg'), { title: "14–20 Sep", tiles: [{ value: '1,845', label: "kg moved" }, { value: '2', label: "BLOCKS" }, { value: '2', label: "PRs" }] });
 });
 
 test('a bodyweight PR reads Bodyweight × reps, and a bodyweight session reads Bodyweight', () => {
@@ -134,15 +134,15 @@ test('a bodyweight PR reads Bodyweight × reps, and a bodyweight session reads B
   ];
   const week = derive(sessions).sealedWeeks.at(-1);
   assert.equal(pieceCopy(sessions, week.pieces[0]).detail, 'Bodyweight · PR: Pull-up · Bodyweight × 15');
-  assert.deepEqual(unpackedHeader(week, 'kg'), { title: '14–20 September', tiles: [{ value: '1', label: 'STACK' }, { value: '1', label: 'PR' }] });
+  assert.deepEqual(unpackedHeader(week, 'kg'), { title: "14–20 Sep", tiles: [{ value: '1', label: "BLOCK" }, { value: '1', label: 'PR' }] });
 });
 
 test('lb profile: separators, no decimals on session values, lb aggregates', () => {
   const sessions = [session(1, '2026-09-08', [lift('Bench press', [set(100, 10)])]), session(2, '2026-09-15', [lift('Bench press', [set(102.5, 10)])])];
   const { header, cards } = archive(sessions, 'lbs');
-  assert.equal(header.count, '2 WEEKS');
-  assert.deepEqual(cards.map((card) => card.detail), ['1 stack · 2,260 LB', '1 stack · 2,205 LB']);
+  assert.equal(header.count, '2 weeks');
+  assert.deepEqual(cards.map((card) => card.detail), ["1 block · 2,260 lb", "1 block · 2,205 lb"]);
   const week = derive(sessions).sealedWeeks.at(-1);
-  assert.equal(pieceCopy(sessions, week.pieces[0], 'lbs').detail, '2,260 lb moved · PR: Bench press · 226 lbs × 10');
-  assert.deepEqual(unpackedHeader(week, 'lbs').tiles[0], { value: '2,260', label: 'LB MOVED' });
+  assert.equal(pieceCopy(sessions, week.pieces[0], 'lbs').detail, "2,260 lb moved · PR: Bench press · 226 lb × 10");
+  assert.deepEqual(unpackedHeader(week, 'lbs').tiles[0], { value: '2,260', label: "lb moved" });
 });

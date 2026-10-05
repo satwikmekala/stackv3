@@ -12,8 +12,8 @@ import {
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { File } from 'expo-file-system';
-import * as Haptics from 'expo-haptics';
-import { Check, Copy } from 'lucide-react-native';
+import * as Haptics from '@/services/haptics';
+import { Check, Copy, FileText } from 'lucide-react-native';
 import Animated, {
   runOnJS,
   useAnimatedStyle,
@@ -32,6 +32,7 @@ import {
 import { withMotionTiming } from '@/constants/motion';
 import { redesignColors, redesignFonts } from '@/constants/theme';
 import type { LiftLog } from '@/store/liftLog';
+import { StackPosterCard, type StackPosterLayer } from '@/components/StackPosterCard';
 
 const CAPTURE_OPTIONS = {
   width: 1080,
@@ -48,9 +49,14 @@ interface ShareSheetProps extends StatStripCardProps {
   onClose: () => void;
   /** Every lift's top set; the Lift Log design is offered when it has a line. */
   liftLog?: LiftLog;
+  /** Exercises as slabs; "The Stack" poster is offered when there is at least one. */
+  posterLayers?: StackPosterLayer[];
+  /** Sends the full set-by-set report as a PDF through the system share sheet. */
+  onSharePdf?: () => Promise<void>;
 }
 
-const DESIGN_NAMES = ['Stat Strip', 'Lift Log'] as const;
+type Design = 'strip' | 'liftLog' | 'poster';
+const DESIGN_NAMES: Record<Design, string> = { strip: 'Stat Strip', liftLog: 'Lift Log', poster: 'My Stack' };
 
 export function ShareSheet({
   visible,
@@ -63,31 +69,46 @@ export function ShareSheet({
   setCount,
   repCount,
   specialSetLabel,
+  exerciseCount,
+  durationLabel,
+  recordCount,
   liftLog,
+  posterLayers,
+  onSharePdf,
 }: ShareSheetProps) {
   const { height: screenHeight, width: screenWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [isMounted, setIsMounted] = useState(visible);
   const [feedback, setFeedback] = useState<Feedback>('idle');
   const [isCopying, setIsCopying] = useState(false);
+  const [isSharingPdf, setIsSharingPdf] = useState(false);
+  const [pdfError, setPdfError] = useState(false);
   const [captureReady, setCaptureReady] = useState(false);
   const progress = useSharedValue(visible ? 1 : 0);
   const stripRef = useRef<View>(null);
   const liftLogRef = useRef<View>(null);
+  const posterRef = useRef<View>(null);
   // One capture per design, each warmed once and reused for every copy.
-  const capturedUrisRef = useRef<(string | null)[]>([null, null]);
-  const capturePromisesRef = useRef<(Promise<string> | null)[]>([null, null]);
+  const capturedUrisRef = useRef<(string | null)[]>([null, null, null]);
+  const capturePromisesRef = useRef<(Promise<string> | null)[]>([null, null, null]);
   const [page, setPage] = useState(0);
-  const designCount = liftLog && liftLog.lines.length > 0 ? 2 : 1;
+  const designs: Design[] = [
+    'strip',
+    ...(liftLog && liftLog.lines.length > 0 ? ['liftLog' as const] : []),
+    ...(posterLayers && posterLayers.length > 0 ? ['poster' as const] : []),
+  ];
+  const designCount = designs.length;
+  const designsKey = designs.join(',');
   const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (visible) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Mount the retained sheet before driving its native entrance animation.
       setIsMounted(true);
       setFeedback('idle');
       setPage(0);
       // Re-capture on every opening, so a copy always matches what the sheet shows.
-      capturedUrisRef.current = [null, null];
+      capturedUrisRef.current = [null, null, null];
       setCaptureReady(false);
       progress.value = withMotionTiming(
         1,
@@ -139,7 +160,8 @@ export function ShareSheet({
     if (cached) return cached;
     const pending = capturePromisesRef.current[index];
     if (pending) return pending;
-    const target = index === 1 ? liftLogRef.current : stripRef.current;
+    const design = designsKey.split(',')[index] as Design | undefined;
+    const target = design === 'liftLog' ? liftLogRef.current : design === 'poster' ? posterRef.current : stripRef.current;
     if (!target) throw new Error('The share card is not ready to capture.');
 
     const capturePromise = captureRef(target, CAPTURE_OPTIONS);
@@ -152,7 +174,7 @@ export function ShareSheet({
     } finally {
       capturePromisesRef.current[index] = null;
     }
-  }, []);
+  }, [designsKey]);
 
   useEffect(() => {
     if (!visible || !captureReady) return;
@@ -197,6 +219,23 @@ export function ShareSheet({
     }
   }, [getCapturedUri, isCopying, page, showFeedback]);
 
+  const handleSharePdf = useCallback(async () => {
+    if (!onSharePdf || isSharingPdf) return;
+    setIsSharingPdf(true);
+    setPdfError(false);
+    if (Platform.OS !== 'web') void Haptics.selectionAsync();
+    try {
+      await onSharePdf();
+    } catch {
+      if (Platform.OS !== 'web') {
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      }
+      setPdfError(true);
+    } finally {
+      setIsSharingPdf(false);
+    }
+  }, [isSharingPdf, onSharePdf]);
+
   if (!isMounted) return null;
 
   const previewHeight = Math.min(390, Math.max(276, screenHeight * 0.43));
@@ -204,7 +243,7 @@ export function ShareSheet({
   const previewScale = previewWidth / STAT_STRIP_WIDTH;
   // Each page is the sheet's full inner width, so a swipe moves one whole design.
   const pageWidth = screenWidth - 48;
-  const designName = DESIGN_NAMES[page];
+  const designName = DESIGN_NAMES[designs[page] ?? 'strip'];
   const copyLabel = isCopying
     ? 'Copying…'
     : feedback === 'copied'
@@ -273,11 +312,14 @@ export function ShareSheet({
                     setCount={setCount}
                     repCount={repCount}
                     {...(specialSetLabel ? { specialSetLabel } : {})}
+                    {...(exerciseCount ? { exerciseCount } : {})}
+                    {...(durationLabel ? { durationLabel } : {})}
+                    {...(recordCount ? { recordCount } : {})}
                   />
                 </View>
               </View>
             </View>
-            {designCount > 1 && liftLog ? (
+            {designs.includes('liftLog') && liftLog ? (
               <View
                 accessible
                 accessibilityLabel="Lift Log design"
@@ -302,6 +344,33 @@ export function ShareSheet({
                 </View>
               </View>
             ) : null}
+            {designs.includes('poster') && posterLayers ? (
+              <View
+                accessible
+                accessibilityLabel="My Stack design"
+                style={[styles.page, { width: pageWidth }]}
+              >
+                <View style={[styles.previewFrame, { width: previewWidth, height: previewHeight }]}>
+                  <View
+                    pointerEvents="none"
+                    style={[styles.previewScale, { transform: [{ scale: previewScale }] }]}
+                  >
+                    <StackPosterCard
+                      ref={posterRef}
+                      accent={accent}
+                      title={title}
+                      date={date}
+                      volumeValue={volumeValue}
+                      volumeUnit={volumeUnit}
+                      setCount={setCount}
+                      repCount={repCount}
+                      layers={posterLayers}
+                      {...(durationLabel ? { durationLabel } : {})}
+                    />
+                  </View>
+                </View>
+              </View>
+            ) : null}
           </ScrollView>
 
           {designCount > 1 ? (
@@ -311,9 +380,9 @@ export function ShareSheet({
               accessibilityLabel={`${designName} design, ${page + 1} of ${designCount}. Swipe to change.`}
               style={styles.pager}
             >
-              {DESIGN_NAMES.slice(0, designCount).map((name, index) => (
+              {designs.map((design, index) => (
                 <View
-                  key={name}
+                  key={design}
                   style={[
                     styles.pagerDot,
                     index === page && [styles.pagerDotActive, { backgroundColor: accent }],
@@ -323,41 +392,71 @@ export function ShareSheet({
             </View>
           ) : null}
 
-          <View style={styles.copyAction}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={feedback === 'copied'
-                ? `${designName} copied to clipboard`
-                : `Copy ${designName} image to clipboard`}
-              accessibilityState={{ disabled: isCopying || !captureReady }}
-              disabled={isCopying || !captureReady}
-              onPress={() => void handleCopy()}
-              style={({ pressed }) => [
-                styles.copyButton,
-                feedback === 'copied' && {
-                  borderColor: accent,
-                },
-                pressed && styles.buttonPressed,
-                (isCopying || !captureReady) && styles.buttonDisabled,
-              ]}
-            >
-              {isCopying ? (
-                <ActivityIndicator color={redesignColors.bone} size="small" />
-              ) : feedback === 'copied' ? (
-                <Check color={accent} size={23} strokeWidth={3} />
-              ) : (
-                <Copy color={redesignColors.bone} size={21} strokeWidth={2.2} />
-              )}
-            </Pressable>
-            <Text
-              allowFontScaling={false}
-              style={[
-                styles.copyLabel,
-                feedback === 'copied' && { color: accent },
-              ]}
-            >
-              {copyLabel}
-            </Text>
+          <View style={styles.actions}>
+            <View style={styles.copyAction}>
+              <Pressable
+                cssInterop={false}
+                accessibilityRole="button"
+                accessibilityLabel={feedback === 'copied'
+                  ? `${designName} copied to clipboard`
+                  : `Copy ${designName} image to clipboard`}
+                accessibilityState={{ disabled: isCopying || !captureReady }}
+                disabled={isCopying || !captureReady}
+                onPress={() => void handleCopy()}
+                style={({ pressed }) => [
+                  styles.copyButton,
+                  feedback === 'copied' && {
+                    borderColor: accent,
+                  },
+                  pressed && styles.buttonPressed,
+                  (isCopying || !captureReady) && styles.buttonDisabled,
+                ]}
+              >
+                {isCopying ? (
+                  <ActivityIndicator color={redesignColors.bone} size="small" />
+                ) : feedback === 'copied' ? (
+                  <Check color={accent} size={23} strokeWidth={3} />
+                ) : (
+                  <Copy color={redesignColors.bone} size={21} strokeWidth={2.2} />
+                )}
+              </Pressable>
+              <Text
+                allowFontScaling={false}
+                style={[
+                  styles.copyLabel,
+                  feedback === 'copied' && { color: accent },
+                ]}
+              >
+                {copyLabel}
+              </Text>
+            </View>
+            {onSharePdf ? (
+              <View style={styles.copyAction}>
+                <Pressable
+                  cssInterop={false}
+                  accessibilityRole="button"
+                  accessibilityLabel="Share full workout report as PDF"
+                  accessibilityHint="Opens the share sheet with every set as a PDF document"
+                  accessibilityState={{ disabled: isSharingPdf, busy: isSharingPdf }}
+                  disabled={isSharingPdf}
+                  onPress={() => void handleSharePdf()}
+                  style={({ pressed }) => [
+                    styles.copyButton,
+                    pressed && styles.buttonPressed,
+                    isSharingPdf && styles.buttonDisabled,
+                  ]}
+                >
+                  {isSharingPdf ? (
+                    <ActivityIndicator color={redesignColors.bone} size="small" />
+                  ) : (
+                    <FileText color={redesignColors.bone} size={21} strokeWidth={2.2} />
+                  )}
+                </Pressable>
+                <Text allowFontScaling={false} style={styles.copyLabel}>
+                  {isSharingPdf ? 'Preparing…' : pdfError ? 'Try again' : 'Share PDF'}
+                </Text>
+              </View>
+            ) : null}
           </View>
         </Animated.View>
       </View>
@@ -433,8 +532,14 @@ const styles = StyleSheet.create({
     height: STAT_STRIP_HEIGHT,
     transformOrigin: 'top left',
   },
-  copyAction: {
+  actions: {
     marginTop: 16,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 40,
+  },
+  copyAction: {
+    minWidth: 64,
     alignItems: 'center',
   },
   copyButton: {

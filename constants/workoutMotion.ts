@@ -27,3 +27,20 @@ export const confirmationExit = FadeOut.duration(workoutMotion.press)
   .reduceMotion(ReduceMotion.System);
 export const recordReveal = FadeIn.duration(workoutMotion.reward)
   .reduceMotion(ReduceMotion.System);
+
+// Convert units in place without spinning through every intermediate weight.
+export const weightUnitEnter = FadeIn.duration(workoutMotion.number)
+  .reduceMotion(ReduceMotion.System);
+export const weightUnitExit = FadeOut.duration(workoutMotion.number)
+  .reduceMotion(ReduceMotion.System);
+
+
+// Near-critical, bounded selection glide. Reanimated carries the current
+// position and velocity into a new target when the user changes direction.
+export const workoutSetSelectionSpring = {
+  stiffness: 520,
+  damping: 42,
+  mass: 1,
+  overshootClamping: true,
+  reduceMotion: ReduceMotion.System,
+} as const;

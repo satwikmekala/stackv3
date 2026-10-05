@@ -11,7 +11,7 @@ export function WeeklyProgressPill({ completed, goal, accent }: WeeklyProgressPi
   const visibleGoal = Math.max(1, Math.min(goal, 7));
 
   return (
-    <View style={styles.pill} accessibilityLabel={`${completed} of ${goal} workouts completed this week`}>
+    <View style={styles.pill} accessibilityLabel={`${completed} of ${goal} training days this week`}>
       <View style={styles.countRow}>
         <Text style={styles.completed}>{completed}</Text>
         <Text style={styles.goal}>/{goal}</Text>

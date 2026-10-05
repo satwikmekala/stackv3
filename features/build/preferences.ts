@@ -10,17 +10,23 @@ export function createBuildPreferences(storage: PresentationStorage) {
   return {
     getSnapshot: () => snapshot,
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
-    load() {
+    load(force = false) {
+      if (force) loaded = undefined;
       if (loaded) return loaded;
       const started = revision;
       return loaded = storage.getItem(BUILD_EFFECTS_KEY).then((value) => { if (revision === started) publish({ ready: true, reduceEffects: value === '1' }); }).catch(() => { if (revision === started) publish({ ready: true, reduceEffects: false }); });
     },
     setReduceEffects(value: boolean) {
-      revision++;
+      const previous = snapshot.reduceEffects;
+      const request = ++revision;
       publish({ ready: true, reduceEffects: value });
-      writes = writes.then(() => storage.setItem(BUILD_EFFECTS_KEY, value ? '1' : '0')).catch(() => {});
-      return writes;
+      writes = writes.catch(() => {}).then(() => storage.setItem(BUILD_EFFECTS_KEY, value ? '1' : '0'));
+      return writes.catch(error => {
+        if (revision === request) publish({ ready: true, reduceEffects: previous });
+        throw error;
+      });
     },
+    flush() { return writes; },
   };
 }
 /** Rewards must never outrun reading or bypass an explicit low-effects preference. */

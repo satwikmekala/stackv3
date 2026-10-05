@@ -1,4 +1,5 @@
-import type { ExerciseLoadType, WorkoutType } from '@/store/workoutStore';
+import type { DayColor } from '@/features/custom-split/colors';
+import type { ExerciseLoadType, ExerciseMetric, WorkoutType } from '@/store/workoutStore';
 
 export const EMPTY_CUSTOM_WORKOUT_MESSAGE =
   "This workout doesn't have any exercises yet — add some first.";
@@ -11,6 +12,9 @@ export class EmptyCustomWorkoutError extends Error {
 }
 
 export interface CustomSplitSummary {
+  hasHevyDetails?: boolean;
+  /** The edited Stack's plan. Shown as Stack's plan, never in the routine library. */
+  isStackPlan?: boolean;
   id: number;
   name: string;
   createdAt: string;
@@ -24,10 +28,12 @@ export interface CustomSplit {
   name: string;
   createdAt: string;
   updatedAt: string;
+  isStackPlan?: boolean;
   workouts: CustomSplitWorkout[];
 }
 
 export interface CustomSplitWorkout {
+  color?: DayColor | null;
   id: number;
   splitId: number;
   name: string;
@@ -42,6 +48,7 @@ export interface CustomSplitExercise {
   primaryMuscle: string;
   equipment: string | null;
   loadType: ExerciseLoadType;
+  metric: ExerciseMetric;
   workoutType: WorkoutType;
   isCustom: boolean;
   position: number;

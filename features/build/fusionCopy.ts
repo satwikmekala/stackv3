@@ -15,7 +15,7 @@ export type FusionCopy = {
   stack: { label: string; before: number; after: number };
 };
 
-export const weeksBuilt = (count: number) => `${countLabel(count, 'week')} built`;
+export const weeksBuilt = (count: number) => `${countLabel(count, 'layer')} built`;
 /** The weeks-built number shown `progress` (0–1) of the way through the count-up. */
 export const builtCount = ({ before, after }: { before: number; after: number }, progress: number) =>
   after <= before ? after : before + Math.round((after - before) * Math.max(0, Math.min(1, progress)));
@@ -48,18 +48,18 @@ export function fusionCopy({ state, weekId, unit, category, builtBefore }: {
   const thickest = earlier.length > 0 && earlier.every((item) => week.compositeHeight > item.compositeHeight);
   return {
     // Pieces are already in chronological order within their week.
-    week: { range, title: count === 1 ? 'One piece.' : `${spelledCount(count)} pieces.`, rows: week.pieces.map((piece) => pieceRow(piece, category(piece), unit)) },
+    week: { range, title: count === 1 ? 'One block.' : `${spelledCount(count)} blocks.`, rows: week.pieces.map((piece) => pieceRow(piece, category(piece), unit)) },
     sealed: {
-      kicker: `${range} · SEALED`,
+      kicker: `${range} · COMPLETE`,
       title: 'One week.\nOne layer.',
       summary: [
-        `${count} ${count === 1 ? 'PIECE' : 'PIECES'}`,
+        `${count} ${count === 1 ? 'BLOCK' : 'BLOCKS'}`,
         moved ? `${moved} MOVED` : null,
-        records > 0 ? `${records} ${records >= 2 ? 'PRS' : 'PR'}` : null,
+        records > 0 ? `${records} ${records >= 2 ? 'PRs' : 'PR'}` : null,
       ].filter((value): value is string => Boolean(value)).join(' · '),
       thickest: thickest ? 'Your thickest layer yet.' : null,
     },
-    stack: { label: 'YOUR STACK', before: Math.min(builtBefore, built.length), after: built.length },
+    stack: { label: 'MY STACK', before: Math.min(builtBefore, built.length), after: built.length },
   };
 }
 
@@ -77,5 +77,5 @@ export function fusionStaticContent(copy: FusionCopy) {
 export function fusionAnnouncement(copy: FusionCopy) {
   const content = fusionStaticContent(copy);
   return `${[content.sealed.title, content.sealed.summary, content.sealed.thickest, content.built]
-    .filter((part): part is string => Boolean(part)).map((part) => part.replace(/\n/g, ' ').replace(/\.$/, '')).join('. ')}.`;
+    .filter((part): part is string => Boolean(part)).map((part) => part.replace(/\n/g, ' ').replace(/PRs/g, 'personal records').replace(/PR/g, 'personal record').replace(/\.$/, '').toLowerCase()).join('. ')}.`;
 }

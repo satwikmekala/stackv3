@@ -1,3 +1,5 @@
+import { displayExerciseName } from '@/constants/exerciseNames';
+import { useMuscleColors } from '@/store/muscleColors';
 import { WorkoutTouchable } from '@/components/WorkoutTouchable';
 import { useEffect, useMemo, useRef } from 'react';
 import {
@@ -43,6 +45,7 @@ export function UpNextSheet({
   onNavigate,
   onClose,
 }: UpNextSheetProps) {
+  useMuscleColors(state => state.preferences);
   const insets = useSafeAreaInsets();
   const { height: screenHeight } = useWindowDimensions();
   const translateY = useRef(new Animated.Value(0)).current;
@@ -132,7 +135,7 @@ export function UpNextSheet({
             <View style={styles.titleRow}>
               <View style={styles.titleCopy}>
                 <Text allowFontScaling={false} style={styles.title}>
-                  Up Next
+                  Up next
                 </Text>
                 <Text allowFontScaling={false} style={styles.subtitle}>
                   {exercises.length} {exercises.length === 1 ? 'exercise' : 'exercises'} remaining
@@ -172,7 +175,7 @@ export function UpNextSheet({
                 <WorkoutTouchable
                   key={`${exercise.name}-${index}`}
                   accessibilityRole="button"
-                  accessibilityLabel={`${exercise.name}, ${exercise.sets.length} ${
+                  accessibilityLabel={`${displayExerciseName(exercise.name)}, ${exercise.sets.length} ${
                     exercise.sets.length === 1 ? 'set' : 'sets'
                   }`}
                   accessibilityHint="Jump to this exercise"
@@ -182,7 +185,7 @@ export function UpNextSheet({
                 >
                   <View style={[styles.dot, { backgroundColor: muscleColor }]} />
                   <Text numberOfLines={1} allowFontScaling={false} style={styles.exerciseName}>
-                    {exercise.name}
+                    {displayExerciseName(exercise.name)}
                   </Text>
                   <Text numberOfLines={1} allowFontScaling={false} style={styles.setCount}>
                     {exercise.sets.length} {exercise.sets.length === 1 ? 'SET' : 'SETS'}

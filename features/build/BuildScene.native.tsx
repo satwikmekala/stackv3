@@ -10,6 +10,7 @@ import { createHistoryGeometry, createRecordSeamGeometry, createSlabGeometry } f
 import { BASE_HEIGHT, layoutSlabs, type BuildSlab, type BuildTuning, type Lamination } from './model';
 import type { BuildSceneProps } from './sceneTypes';
 import { OVERVIEW_PULLBACK_END, overviewCamera, overviewDrop, overviewDropLifts, overviewLanding, overviewProgressTarget } from './introOverview';
+import { welcomeFrame, WELCOME_DURATION_MS } from './welcomeMotion';
 
 /** Where page 3 (weekly fusion) leaves the camera; page 4 starts its pull-back from here. */
 const INTRO_HANDOFF_Y = 0.08;
@@ -43,7 +44,7 @@ class SceneBoundary extends Component<{ children: ReactNode; onError?: () => voi
   componentDidCatch(error: Error) { console.error('[Build renderer]', error); this.props.onError?.(); }
   render() {
     return this.state.failed && this.props.onError ? null : this.state.failed
-      ? <View style={styles.error}><Text style={styles.errorText}>The 3D preview could not open. Your training is saved. Close Your Stack and open it again to retry.</Text></View>
+      ? <View style={styles.error}><Text style={styles.errorText}>Couldn’t open My Stack. Your training is saved. Try again.</Text></View>
       : this.props.children;
   }
 }
@@ -107,7 +108,7 @@ function FusionHistory({ items, tuning, material }: { items: { slab: BuildSlab; 
 }
 
 function Scene(props: BuildSceneProps) {
-  const { slabs, tuning, lamination, overview, reducedMotion, benchmark, onStats, focusRange, markers, onMarkers, onSelectSlab, paused, casting, fusion, introStack, introProgress, introFusion, introOverview } = props;
+  const { slabs, tuning, lamination, overview, reducedMotion, benchmark, onStats, focusRange, markers, onMarkers, onSelectSlab, paused, casting, fusion, introStack, introProgress, introFusion, introOverview, welcome } = props;
   const { size, invalidate, gl } = useThree();
   const { items, top } = useMemo(() => layoutSlabs(slabs, props.pieceGap), [slabs, props.pieceGap]);
   const looseItems = useMemo(() => layoutSlabs(introFusion?.loosePieces ?? []).items, [introFusion?.loosePieces]);
@@ -125,6 +126,11 @@ function Scene(props: BuildSceneProps) {
   const castItem = casting ? items.find((item) => item.slab.id === casting.slabId) : undefined;
   const castWarmup = useRef(0);
   const castElapsed = useRef(0);
+  const welcomeObject = useRef<Group>(null);
+  const welcomeElapsed = useRef(0);
+  const welcomeWarmup = useRef(0);
+  const welcomeFinished = useRef(false);
+  const welcomeItem = welcome ? items.at(-1) : undefined;
   // Casting's hidden history is one merged mesh clipped to where the reveal leaves the camera,
   // as fusion does, rather than a mesh per slab across the whole history.
   const castHistory = useMemo(() => {
@@ -140,12 +146,15 @@ function Scene(props: BuildSceneProps) {
   const introFinished = useRef(false);
   const introIsStatic = Boolean(introStack?.alreadyPlayed || introProgress?.alreadyPlayed || introFusion?.alreadyPlayed || reducedMotion);
   const hasIntroScene = Boolean(introStack || introProgress || introFusion);
+  const hasIntroProgress = Boolean(introProgress);
   const introProgressSeam = useMemo(() => {
-    const source = introProgress ? items[4]?.slab : undefined;
+    const source = hasIntroProgress ? items[4]?.slab : undefined;
     if (!source) return null;
     return createRecordSeamGeometry({ ...source, layers: source.layers.map((layer) => ({ ...layer, record: true })) }, tuning, true);
-  }, [Boolean(introProgress), items, tuning]);
+  }, [hasIntroProgress, items, tuning]);
   useEffect(() => () => introProgressSeam?.dispose(), [introProgressSeam]);
+  // Three owns these mutable scene handles; adding refs does not change React output.
+  // eslint-disable-next-line react-hooks/refs
   while (introObjects.current.length < items.length) introObjects.current.push(createRef<Group>());
   const progressElapsed = useRef(0);
   const progressLandings = useRef([false, false]);
@@ -193,11 +202,11 @@ function Scene(props: BuildSceneProps) {
   useEffect(() => {
     if (paused) return;
     // Native GL can recreate its drawable after the layout commit, and a screen handoff
-    // (intro -> Your Stack, a sheet closing) can take longer than any fixed timer. Keep
+    // (intro -> My Stack, a sheet closing) can take longer than any fixed timer. Keep
     // painting every frame for a short window instead, then return to demand-only rendering.
     repaintUntil.current = performance.now() + 700;
     invalidate();
-  }, [size.width, size.height, paused, invalidate]);
+  }, [size.width, size.height, paused, props.repaintKey, welcome?.alreadyPlayed, invalidate]);
   useEffect(() => {
     if (!benchmark) return;
     measure.current = { start: performance.now(), last: 0, samples: [] };
@@ -208,6 +217,23 @@ function Scene(props: BuildSceneProps) {
   useFrame(({ camera }, delta) => {
     const ortho = camera as OrthographicCamera;
     let { targetY, zoom: desiredZoom } = overview && !introOverview ? overviewFillFrame(top, size.width, size.height) : cameraFrame(top, size.width, size.height, overview, focusRange);
+    if (welcome && welcomeItem) {
+      if (!welcomeFinished.current && welcomeWarmup.current++ >= 3) welcomeElapsed.current += Math.min(delta * 1000, 34);
+      const frame = welcomeFrame(welcomeElapsed.current, welcome.alreadyPlayed || reducedMotion);
+      // Reserve the lifted piece's headroom, then settle on a generous final object.
+      const framing = overviewFillFrame(top + frame.lift, size.width, size.height);
+      targetY = framing.targetY;
+      desiredZoom = framing.zoom;
+      const object = welcomeObject.current;
+      if (object) {
+        object.visible = frame.visible;
+        object.position.y = welcomeItem.y + frame.lift;
+        object.scale.set(frame.scale, frame.scale, frame.scale);
+      }
+      welcome.onFrame(welcome.alreadyPlayed || reducedMotion ? WELCOME_DURATION_MS : welcomeElapsed.current);
+      if (frame.done && !welcomeFinished.current) { welcomeFinished.current = true; welcome.onComplete(); }
+      if (!frame.done) invalidate();
+    }
     if (introOverview && (introOverview.alreadyPlayed || reducedMotion)) {
       const frame = cameraFrame(top, size.width, size.height, true);
       targetY = frame.targetY;
@@ -491,7 +517,7 @@ function Scene(props: BuildSceneProps) {
     if (introStack || introProgress || introFusion) targetY += introDropY(desiredZoom, size.height);
     const logZoom = Math.log(desiredZoom);
     let moving = false;
-    if (casting || fusion || introOverview || reducedMotion || !positioned.current) {
+    if (casting || fusion || introOverview || welcome || reducedMotion || !positioned.current) {
       target.current.y = targetY;
       ortho.zoom = desiredZoom;
       cameraVelocity.current.y = 0;
@@ -557,6 +583,7 @@ function Scene(props: BuildSceneProps) {
     }
   });
 
+  /* eslint-disable react-hooks/refs -- R3F meshes bind imperative Three object handles, not render-time React data. */
   return <>
     <group ref={historyObject}>
     <mesh position={[0, 0, 0]}>
@@ -567,7 +594,8 @@ function Scene(props: BuildSceneProps) {
       <boxGeometry args={[2.36, 0.075, 2.36]} />
       <meshBasicMaterial color="#29231B" />
     </mesh>
-    {fusionItem ? <FusionHistory items={fusionHistory} tuning={tuning} material={material} /> : castItem ? castHistory.length > 0 && <FusionHistory items={castHistory} tuning={tuning} material={material} /> : introOverview ? <FusionHistory items={overviewBase} tuning={tuning} material={material} /> : !hasIntroScene && items.filter(({ slab }) => slab.id !== casting?.slabId).map(({ slab, y }) => <Slab key={slab.id} slab={slab} y={y} onSelect={onSelectSlab} tuning={tuning} lamination={lamination} material={material} />)}
+    {fusionItem ? <FusionHistory items={fusionHistory} tuning={tuning} material={material} /> : castItem ? castHistory.length > 0 && <FusionHistory items={castHistory} tuning={tuning} material={material} /> : introOverview ? <FusionHistory items={overviewBase} tuning={tuning} material={material} /> : !hasIntroScene && items.filter(({ slab }) => slab.id !== casting?.slabId && slab.id !== welcomeItem?.slab.id).map(({ slab, y }) => <Slab key={slab.id} slab={slab} y={y} onSelect={onSelectSlab} tuning={tuning} lamination={lamination} material={material} />)}
+    {welcomeItem && <IntroSlab slab={welcomeItem.slab} y={welcomeItem.y} tuning={tuning} material={material} objectRef={welcomeObject} visible={welcome?.alreadyPlayed || reducedMotion} />}
     {introStack && items.map(({ slab, y }, index) => <IntroSlab key={slab.id} slab={slab} y={y} tuning={tuning} material={material} objectRef={introObjects.current[index]} visible={introIsStatic} />)}
     {introProgress && items.map(({ slab, y }, index) => <IntroProgressSlab key={slab.id} slab={{ ...slab, height: index === 3 ? 1 : slab.height, layers: slab.layers.map((layer) => ({ ...layer, record: false })) }} y={y} tuning={tuning} material={material} goldMaterial={goldMaterial} objectRef={introObjects.current[index]} visible={introIsStatic || index < 3} seamGeometry={index === 4 ? introProgressSeam ?? undefined : undefined} />)}
     {introOverview && overviewDrops.map(({ slab, y }, index) => <IntroSlab key={slab.id} slab={slab} y={y} tuning={tuning} material={material} objectRef={introObjects.current[index]} visible={introOverview.alreadyPlayed || reducedMotion} />)}
@@ -582,6 +610,7 @@ function Scene(props: BuildSceneProps) {
   </>;
 }
 
+/* eslint-enable react-hooks/refs */
 const MemoScene = memo(Scene);
 
 export default function BuildScene(props: BuildSceneProps) {

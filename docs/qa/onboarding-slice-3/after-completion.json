@@ -1,0 +1,23 @@
+{
+  "counts": {
+    "sessions": 1,
+    "session_exercises": 1,
+    "sets": 3,
+    "custom_splits": 0
+  },
+  "sessions": [
+    {
+      "id": 1,
+      "origin": "adhoc",
+      "completed": 1,
+      "custom_split_id": null
+    }
+  ],
+  "profile": {
+    "program_mode": "none",
+    "active_split_id": null,
+    "weekly_goal": 0,
+    "training_days": "[]",
+    "weight_unit_confirmed": 0
+  }
+}

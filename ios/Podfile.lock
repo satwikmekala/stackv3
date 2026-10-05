@@ -94,6 +94,8 @@ PODS:
     - ExpoModulesJSI
     - ExpoModulesWorklets
     - RNWorklets
+  - ExpoPrint (57.0.2):
+    - ExpoModulesCore
   - ExpoRouter (57.0.22):
     - ExpoModulesCore
     - RNScreens
@@ -2381,6 +2383,8 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
+  - StackWorkoutControls (1.0.0):
+    - ExpoModulesCore
   - Yoga (0.0.0)
 
 DEPENDENCIES:
@@ -2405,6 +2409,7 @@ DEPENDENCIES:
   - ExpoModulesJSI (from `../node_modules/expo-modules-jsi/apple`)
   - ExpoModulesWorklets (from `../node_modules/expo-modules-core/ExpoModulesWorklets.podspec`)
   - ExpoModulesWorkletsAdapter (from `../node_modules/expo-modules-core`)
+  - ExpoPrint (from `../node_modules/expo-print/ios/ExpoPrint.podspec`)
   - ExpoRouter (from `../node_modules/expo-router/ios`)
   - ExpoSharing (from `../node_modules/expo-sharing/ios`)
   - ExpoSplashScreen (from `../node_modules/expo-splash-screen/ios`)
@@ -2499,6 +2504,7 @@ DEPENDENCIES:
   - RNScreens (from `../node_modules/react-native-screens`)
   - RNSVG (from `../node_modules/react-native-svg`)
   - RNWorklets (from `../node_modules/react-native-worklets`)
+  - StackWorkoutControls (from `../modules/stack-workout-controls/ios`)
   - Yoga (from `../node_modules/react-native/ReactCommon/yoga`)
 
 EXTERNAL SOURCES:
@@ -2544,6 +2550,8 @@ EXTERNAL SOURCES:
     :podspec: "../node_modules/expo-modules-core/ExpoModulesWorklets.podspec"
   ExpoModulesWorkletsAdapter:
     :path: "../node_modules/expo-modules-core"
+  ExpoPrint:
+    :podspec: "../node_modules/expo-print/ios/ExpoPrint.podspec"
   ExpoRouter:
     :path: "../node_modules/expo-router/ios"
   ExpoSharing:
@@ -2731,6 +2739,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native-svg"
   RNWorklets:
     :path: "../node_modules/react-native-worklets"
+  StackWorkoutControls:
+    :path: "../modules/stack-workout-controls/ios"
   Yoga:
     :path: "../node_modules/react-native/ReactCommon/yoga"
 
@@ -2756,6 +2766,7 @@ SPEC CHECKSUMS:
   ExpoModulesJSI: 9df8e7c9719f59e8c001ec33611774137fc1484a
   ExpoModulesWorklets: 986cf72c18400743869b4642d243115f831e404d
   ExpoModulesWorkletsAdapter: 45b4ea99adb80abaa012b45e9a9543b4763275c9
+  ExpoPrint: 460476a4b6291114e4d515e8df4c0225b92161b0
   ExpoRouter: 3a8e63a51be53961b03f331c33108629090cf667
   ExpoSharing: f958c26d3ef378dbe5601327cffdce6b7cc37473
   ExpoSplashScreen: e771da4f26d550ea4fd067d8fb942657e47bb846
@@ -2849,6 +2860,7 @@ SPEC CHECKSUMS:
   RNScreens: c1a06fd73d0581a2a28a160577be393f579662b9
   RNSVG: 3fe8590403ac9f107b4d14591bc6e54da4894e5c
   RNWorklets: 43af89f696342f91118a2f1f3a879056e2f47331
+  StackWorkoutControls: 7767289b8a7d807efeb035e419df9dd40c7e70dc
   Yoga: 18b74b3ade30bebc1904004dfaceae1dd02a330a
 
 PODFILE CHECKSUM: cd49cb8e3dea532404a0f107a3a5a8c33bd60f78

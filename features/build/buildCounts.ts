@@ -1,4 +1,4 @@
-import { getVerifiedSessions } from '../../store/verifiedSessions';
+import { getBuildSessions } from '../../store/verifiedSessions';
 import { getStartOfWeek, parseSessionDate, toLocalCalendarDate } from '../../store/workoutCalendar';
 import type { WorkoutSession } from '../../store/workoutStore';
 import type { FusionMarker } from './fusion';
@@ -15,7 +15,7 @@ export type BuildCounts = { weeksBuilt: number; piecesThisWeek: number; hasHisto
 export function buildCounts(sessions: readonly WorkoutSession[], currentWeekStart: string): BuildCounts {
   const weekById = new Map<string, string>();
   const seen = new Set<string>();
-  for (const session of getVerifiedSessions(sessions)) {
+  for (const session of getBuildSessions(sessions)) {
     // Duplicate IDs keep the first row, as the derivation does.
     if (seen.has(session.id)) continue;
     seen.add(session.id);

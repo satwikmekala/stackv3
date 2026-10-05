@@ -1,7 +1,11 @@
+import { isDayColor, type DayColor } from '@/features/custom-split/colors';
 import { openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
 
 import type { Archetype } from '@/constants/archetypes';
 import { EmptyCustomWorkoutError } from '@/store/customSplits';
+import { persistPortableSplit, type ImportedSplit } from '@/store/splitImport';
+import type { PortableSplit } from '@/features/sharing/splitProtocol';
+import { resolveProgramPreferences, type ProgramMode, type ThreeDayStructure } from '@/store/programPreferences';
 
 import type {
   CustomSplit,
@@ -15,15 +19,26 @@ import type {
   Exercise,
   ExerciseLoadType,
   ExerciseSet,
+  SessionExercise,
   ExperienceLevel,
   IntensityLevel,
   UserProfile,
   WorkoutSession,
+  SessionOrigin,
+  WorkoutFocus,
+  SetValueOrigin,
   WorkoutType,
 } from '@/store/workoutStore';
+import { sameSetTarget, type WorkoutSetTarget } from '@/store/workoutSetActions';
+import { EXERCISE_NOTE_MAX_LENGTH, normalizeExerciseNote, type ExerciseNote } from '@/store/exerciseNotes';
 import type { WeightUnit } from '@/store/weightUnits';
 import type { RecordSet } from '@/store/personalRecords';
 import { getVerifiedSessions } from '@/store/verifiedSessions';
+import { IMPORT_SCHEMA, type ImportedWorkoutFacts } from '@/features/import/persistence';
+import type { ImportExercise, ImportTemplate } from '@/features/import/models';
+import { routineWorkingSets, unsupportedRoutineTarget } from '@/features/import/models';
+import { templateMeasurement } from '@/features/import/hevy/exerciseResolver';
+import { DEFAULT_DURATION_S, getExerciseMetric, type ExerciseMetric } from '@/store/exerciseMeasurement';
 import {
   createCompletedSessionExercise,
   createSessionExercise,
@@ -31,14 +46,14 @@ import {
 } from '@/store/workoutProgression';
 
 const DATABASE_NAME = 'workouts.db';
-const CURRENT_SCHEMA_VERSION = 14;
+export const CURRENT_SCHEMA_VERSION = 23;
 
 // Kg-native step assigned only when a brand-new profile is created. Legacy
 // profiles that predate this column retain the historical 2.5 kg migration
 // backfill below.
 export const NEW_PROFILE_WEIGHT_INCREMENT = 0.5;
 
-// Display unit for every weight surface; storage stays kg-canonical regardless.
+// Global display preference; session exercises keep their own input units; storage stays kg-canonical regardless.
 export const DEFAULT_WEIGHT_UNIT: WeightUnit = 'kg';
 
 // Lb-native step, independent of the new-profile kg increment — it is not a
@@ -51,10 +66,12 @@ export interface ExerciseSeed {
   primaryMuscle: string;
   secondaryMuscle: string | null;
   loadType: ExerciseLoadType;
+  metric: ExerciseMetric;
 }
 
-type ExerciseSeedDefinition = Omit<ExerciseSeed, 'loadType'> & {
+type ExerciseSeedDefinition = Omit<ExerciseSeed, 'loadType' | 'metric'> & {
   loadType?: ExerciseLoadType;
+  metric?: ExerciseMetric;
 };
 
 const defineExerciseSeeds = (
@@ -63,14 +80,26 @@ const defineExerciseSeeds = (
   seeds.map((seed) => ({
     ...seed,
     loadType: seed.loadType ?? 'external_weight',
+    metric: seed.metric ?? 'reps',
   }));
 
 export interface SplitTemplateSeed {
   workoutType: WorkoutType;
   name: string;
+  /** 0 for timed exercises; their target lives in `targetDurationS`. */
   targetReps: number;
   targetWeight: number;
+  targetDurationS?: number;
 }
+
+/**
+ * Built-ins whose pre-v17 history stored seconds in `sets.reps`. Verified,
+ * not inferred from names: Plank's shipped split template targeted "60 reps",
+ * a 60-second hold. Side Plank, Hollow Body Hold and the carries become timed
+ * from v17 on, but no seeded target ever gave their logged reps a seconds
+ * meaning, so their old sessions keep the rep metric they were recorded with.
+ */
+export const LEGACY_SECONDS_EXERCISES: readonly string[] = ['Plank'];
 
 export interface ArchetypeTemplateSeed {
   archetype: Archetype;
@@ -89,6 +118,7 @@ export interface ExerciseCatalogItem {
   isCustom: boolean;
   equipment: string | null;
   loadType: ExerciseLoadType;
+  metric: ExerciseMetric;
 }
 
 export const EXERCISE_SEEDS: ExerciseSeed[] = defineExerciseSeeds([
@@ -231,7 +261,7 @@ export const EXERCISE_SEEDS: ExerciseSeed[] = defineExerciseSeeds([
   { name: 'Pendulum Squat', workoutType: 'legs', primaryMuscle: 'Legs', secondaryMuscle: 'Glutes' },
   { name: 'Single-Leg Press', workoutType: 'legs', primaryMuscle: 'Legs', secondaryMuscle: 'Glutes' },
 
-  { name: 'Plank', workoutType: 'core', primaryMuscle: 'Abs / Core Stability', secondaryMuscle: null, loadType: 'bodyweight' },
+  { name: 'Plank', workoutType: 'core', primaryMuscle: 'Abs / Core Stability', secondaryMuscle: null, loadType: 'bodyweight', metric: 'duration' },
   { name: 'Crunches', workoutType: 'core', primaryMuscle: 'Abs', secondaryMuscle: null, loadType: 'bodyweight' },
   { name: 'Cable Crunch', workoutType: 'core', primaryMuscle: 'Abs', secondaryMuscle: null },
   { name: 'Hanging Leg Raise', workoutType: 'core', primaryMuscle: 'Abs', secondaryMuscle: 'Hip Flexors', loadType: 'bodyweight' },
@@ -239,7 +269,7 @@ export const EXERCISE_SEEDS: ExerciseSeed[] = defineExerciseSeeds([
   { name: 'Russian Twists', workoutType: 'core', primaryMuscle: 'Obliques', secondaryMuscle: null },
   { name: 'Ab Wheel Rollout', workoutType: 'core', primaryMuscle: 'Abs', secondaryMuscle: 'Lower Back, Shoulders', loadType: 'bodyweight' },
   { name: 'Mountain Climbers', workoutType: 'core', primaryMuscle: 'Abs', secondaryMuscle: 'Hip Flexors', loadType: 'bodyweight' },
-  { name: 'Side Plank', workoutType: 'core', primaryMuscle: 'Obliques', secondaryMuscle: null, loadType: 'bodyweight' },
+  { name: 'Side Plank', workoutType: 'core', primaryMuscle: 'Obliques', secondaryMuscle: null, loadType: 'bodyweight', metric: 'duration' },
   { name: 'Cable Woodchopper', workoutType: 'core', primaryMuscle: 'Obliques', secondaryMuscle: 'Core Rotation' },
   { name: 'Hanging Knee Raise', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: 'Hip Flexors', loadType: 'bodyweight' },
   { name: 'Reverse Crunch', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: null, loadType: 'bodyweight' },
@@ -247,15 +277,16 @@ export const EXERCISE_SEEDS: ExerciseSeed[] = defineExerciseSeeds([
   { name: 'Dead Bug', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: null, loadType: 'bodyweight' },
   { name: 'Pallof Press', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: 'Shoulders' },
   { name: 'V-Ups', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: 'Hip Flexors', loadType: 'bodyweight' },
-  { name: 'Hollow Body Hold', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: null, loadType: 'bodyweight' },
+  { name: 'Hollow Body Hold', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: null, loadType: 'bodyweight', metric: 'duration' },
   { name: 'Decline Crunch', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: null, loadType: 'bodyweight' },
   { name: 'Ab Crunch Machine', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: null },
   { name: 'Toe Touches', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: null, loadType: 'bodyweight' },
   { name: 'Kneeling Cable Crunch', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: null },
   { name: 'Weighted Sit-Up', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: null },
   { name: 'Bird Dog', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: 'Glutes', loadType: 'bodyweight' },
-  { name: 'Suitcase Carry', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: 'Forearms' },
-  { name: 'Farmer Carry', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: 'Forearms, Traps' },
+  // Carries are logged as load held for time; distance is not modelled yet.
+  { name: 'Suitcase Carry', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: 'Forearms', metric: 'duration' },
+  { name: 'Farmer Carry', workoutType: 'core', primaryMuscle: 'Core', secondaryMuscle: 'Forearms, Traps', metric: 'duration' },
 ]);
 
 export const SPLIT_TEMPLATE_SEEDS: SplitTemplateSeed[] = [
@@ -279,7 +310,7 @@ export const SPLIT_TEMPLATE_SEEDS: SplitTemplateSeed[] = [
   { workoutType: 'legs', name: 'Leg Press', targetReps: 10, targetWeight: 100 },
   { workoutType: 'legs', name: 'Lunges', targetReps: 12, targetWeight: 20 },
   { workoutType: 'legs', name: 'Calf Raises', targetReps: 15, targetWeight: 40 },
-  { workoutType: 'core', name: 'Plank', targetReps: 60, targetWeight: 0 },
+  { workoutType: 'core', name: 'Plank', targetReps: 0, targetWeight: 0, targetDurationS: 60 },
   { workoutType: 'core', name: 'Crunches', targetReps: 20, targetWeight: 0 },
   { workoutType: 'core', name: 'Leg Raises', targetReps: 15, targetWeight: 0 },
   { workoutType: 'core', name: 'Russian Twists', targetReps: 30, targetWeight: 5 },
@@ -361,12 +392,21 @@ const ARCHETYPE_TEMPLATE_SEEDS: ArchetypeTemplateSeed[] = [
   { archetype: 'full_body', variant: 'c', exerciseName: 'Calf Raise', matchingExerciseName: 'Calf Raises', targetReps: 15, targetWeight: 40 },
 ];
 
-const ARCHETYPE_EXERCISE_SEEDS: ExerciseSeed[] = defineExerciseSeeds([
+export const ARCHETYPE_EXERCISE_SEEDS: ExerciseSeed[] = defineExerciseSeeds([
   { name: 'Back Squat', workoutType: 'legs', primaryMuscle: 'Quads, Glutes', secondaryMuscle: 'Core' },
   { name: 'Barbell Curl', workoutType: 'arms', primaryMuscle: 'Biceps', secondaryMuscle: 'Forearms' },
   { name: 'Walking Lunge', workoutType: 'legs', primaryMuscle: 'Quads, Glutes', secondaryMuscle: 'Hamstrings' },
   { name: 'Overhead Triceps Extension', workoutType: 'arms', primaryMuscle: 'Triceps', secondaryMuscle: null },
 ]);
+
+const COMPLETION_GUARD_SQL = `CREATE TRIGGER IF NOT EXISTS sessions_require_performed_set
+BEFORE UPDATE OF completed ON sessions
+WHEN OLD.completed = 0 AND NEW.completed = 1 AND NOT EXISTS (
+  SELECT 1 FROM session_exercises se JOIN sets st ON st.session_exercise_id = se.id
+  WHERE se.session_id = OLD.id AND st.completed = 1 AND st.skipped <> 1
+)
+BEGIN SELECT RAISE(ABORT, 'Log at least one non-skipped set before finishing your workout.'); END;
+`;
 
 export const WORKOUT_DATABASE_SCHEMA = `
 PRAGMA foreign_keys = ON;
@@ -380,20 +420,32 @@ CREATE TABLE IF NOT EXISTS exercises (
   is_custom INTEGER NOT NULL DEFAULT 0,
   equipment TEXT,
   load_type TEXT NOT NULL DEFAULT 'external_weight'
-    CHECK (load_type IN ('external_weight', 'bodyweight'))
+    CHECK (load_type IN ('external_weight', 'bodyweight')),
+  metric TEXT NOT NULL DEFAULT 'reps' CHECK (metric IN ('reps', 'duration'))
 );
 
 CREATE TABLE IF NOT EXISTS custom_splits (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  -- 1 marks the edited Stack's plan: owned by Stack, never listed as a user routine.
+  is_stack_plan INTEGER NOT NULL DEFAULT 0 CHECK (is_stack_plan IN (0, 1))
+);
+
+-- Transient recovery metadata, excluded from training backups. Idempotent
+-- bootstrap also installs this schema-22 addition in existing preview databases.
+CREATE TABLE IF NOT EXISTS shared_split_import_receipts (
+  attempt_id TEXT PRIMARY KEY NOT NULL,
+  payload TEXT NOT NULL,
+  split_id INTEGER NOT NULL REFERENCES custom_splits(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS custom_split_workouts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   split_id INTEGER NOT NULL REFERENCES custom_splits(id),
   name TEXT NOT NULL DEFAULT '',
+  color TEXT,
   position INTEGER NOT NULL
 );
 
@@ -410,7 +462,8 @@ CREATE TABLE IF NOT EXISTS split_templates (
   exercise_id INTEGER NOT NULL REFERENCES exercises(id),
   position INTEGER NOT NULL,
   target_reps INTEGER NOT NULL,
-  target_weight REAL NOT NULL
+  target_weight REAL NOT NULL,
+  target_duration_s INTEGER DEFAULT NULL
 );
 
 CREATE TABLE IF NOT EXISTS archetype_templates (
@@ -420,24 +473,28 @@ CREATE TABLE IF NOT EXISTS archetype_templates (
   exercise_id INTEGER NOT NULL REFERENCES exercises(id),
   position INTEGER NOT NULL,
   target_reps INTEGER NOT NULL,
-  target_weight REAL NOT NULL
+  target_weight REAL NOT NULL,
+  target_duration_s INTEGER DEFAULT NULL
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   date TEXT NOT NULL,
+  origin TEXT NOT NULL DEFAULT 'legacy' CHECK (origin IN ('archetype', 'custom', 'adhoc', 'legacy')),
   archetype TEXT DEFAULT NULL,
   secondary_archetype TEXT DEFAULT NULL,
   archetype_variant TEXT DEFAULT NULL,
   secondary_archetype_variant TEXT DEFAULT NULL,
   intensity TEXT,
   completed INTEGER NOT NULL DEFAULT 0,
+  completed_at TEXT DEFAULT NULL,
   retroactive INTEGER NOT NULL DEFAULT 0,
   -- Source metadata for sessions started from a saved Custom Split. Kept
   -- without foreign keys on purpose: training history must survive a split
   -- (or one of its workouts) being edited or deleted later.
   custom_split_id INTEGER DEFAULT NULL,
-  custom_split_workout_id INTEGER DEFAULT NULL
+  custom_split_workout_id INTEGER DEFAULT NULL,
+  focus_session_exercise_id INTEGER DEFAULT NULL
 );
 
 CREATE TABLE IF NOT EXISTS session_workout_types (
@@ -452,8 +509,25 @@ CREATE TABLE IF NOT EXISTS session_exercises (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id INTEGER NOT NULL REFERENCES sessions(id),
   exercise_id INTEGER NOT NULL REFERENCES exercises(id),
-  position INTEGER NOT NULL
+  position INTEGER NOT NULL,
+  entry_unit TEXT NOT NULL DEFAULT 'kg' CHECK (entry_unit IN ('kg', 'lbs')),
+  -- Measurement snapshot taken when the exercise entered the session. History
+  -- reads these, never the live catalog row.
+  load_type TEXT NOT NULL DEFAULT 'external_weight'
+    CHECK (load_type IN ('external_weight', 'bodyweight')),
+  metric TEXT NOT NULL DEFAULT 'reps' CHECK (metric IN ('reps', 'duration'))
 );
+
+CREATE TABLE IF NOT EXISTS exercise_notes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  exercise_id INTEGER NOT NULL REFERENCES exercises(id) ON DELETE CASCADE,
+  session_id INTEGER REFERENCES sessions(id) ON DELETE SET NULL,
+  text TEXT NOT NULL CHECK (length(trim(text)) > 0 AND length(text) <= ${EXERCISE_NOTE_MAX_LENGTH}),
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS exercise_notes_exercise_date
+  ON exercise_notes(exercise_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS exercise_notes_session ON exercise_notes(session_id);
 
 CREATE TABLE IF NOT EXISTS sets (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -465,13 +539,18 @@ CREATE TABLE IF NOT EXISTS sets (
   target_weight REAL,
   completed INTEGER NOT NULL DEFAULT 0,
   skipped INTEGER NOT NULL DEFAULT 0,
-  bonus_type TEXT
+  bonus_type TEXT,
+  value_origin TEXT NOT NULL DEFAULT 'user' CHECK (value_origin IN ('template', 'history', 'propagated', 'user')),
+  -- Integer seconds for duration-metric sets; reps then holds a neutral 0.
+  duration_s INTEGER DEFAULT NULL,
+  target_duration_s INTEGER DEFAULT NULL
 );
 
 CREATE TABLE IF NOT EXISTS profile (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   name TEXT NOT NULL DEFAULT '',
   weekly_goal INTEGER NOT NULL DEFAULT 3,
+  program_weekly_goal INTEGER NOT NULL DEFAULT 3,
   experience_level TEXT NOT NULL DEFAULT 'intermediate',
   training_days TEXT NOT NULL DEFAULT '[]',
   onboarding_completed INTEGER NOT NULL DEFAULT 0,
@@ -479,7 +558,10 @@ CREATE TABLE IF NOT EXISTS profile (
   weight_increment REAL NOT NULL DEFAULT ${NEW_PROFILE_WEIGHT_INCREMENT},
   weight_unit TEXT NOT NULL DEFAULT 'kg',
   weight_increment_lbs REAL NOT NULL DEFAULT 5,
-  active_split_id INTEGER REFERENCES custom_splits(id)
+  active_split_id INTEGER REFERENCES custom_splits(id),
+  program_mode TEXT NOT NULL DEFAULT 'none' CHECK (program_mode IN ('none', 'stack', 'custom')),
+  three_day_structure TEXT NOT NULL DEFAULT 'full-body' CHECK (three_day_structure IN ('full-body', 'push-pull-legs')),
+  weight_unit_confirmed INTEGER NOT NULL DEFAULT 0 CHECK (weight_unit_confirmed IN (0, 1))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS sessions_one_in_progress
@@ -498,11 +580,15 @@ CREATE INDEX IF NOT EXISTS custom_split_workouts_split_position
   ON custom_split_workouts(split_id, position);
 CREATE INDEX IF NOT EXISTS custom_split_workout_exercises_workout_position
   ON custom_split_workout_exercises(workout_id, position);
+
+${COMPLETION_GUARD_SQL}
+${IMPORT_SCHEMA}
 `;
 
 interface ProfileRow {
   name: string;
   weekly_goal: number;
+  program_weekly_goal?: number;
   experience_level: ExperienceLevel;
   training_days: string;
   onboarding_completed: number;
@@ -511,11 +597,18 @@ interface ProfileRow {
   weight_unit: WeightUnit;
   weight_increment_lbs: number;
   active_split_id: number | null;
+  program_mode?: ProgramMode;
+  three_day_structure?: ThreeDayStructure;
+  weight_unit_confirmed?: number;
 }
 
 interface SessionJoinRow {
+  imported_session_id: number | null;
+  origin: SessionOrigin;
   session_id: number;
   date: string;
+  completed_at: string | null;
+  entry_unit: WeightUnit;
   archetype: Archetype | null;
   secondary_archetype: Archetype | null;
   archetype_variant: string | null;
@@ -528,8 +621,10 @@ interface SessionJoinRow {
   session_completed: number;
   session_retroactive: number;
   session_exercise_id: number | null;
+  catalog_exercise_id: number | null;
   exercise_name: string | null;
   exercise_load_type: ExerciseLoadType | null;
+  exercise_metric: ExerciseMetric | null;
   exercise_position: number | null;
   set_id: number | null;
   set_index: number | null;
@@ -540,21 +635,28 @@ interface SessionJoinRow {
   set_completed: number | null;
   skipped: number | null;
   bonus_type: BonusSetType | null;
+  value_origin: SetValueOrigin;
+  duration_s: number | null;
+  target_duration_s: number | null;
 }
 
 interface SplitTemplateRow {
   workout_type: WorkoutType;
   name: string;
   load_type: ExerciseLoadType;
+  metric: ExerciseMetric;
   target_reps: number;
   target_weight: number;
+  target_duration_s: number | null;
 }
 
 interface ArchetypeTemplateRow {
   name: string;
   load_type: ExerciseLoadType;
+  metric: ExerciseMetric;
   target_reps: number;
   target_weight: number;
+  target_duration_s: number | null;
 }
 
 interface ArchetypeTemplateCatalogRow extends ExerciseCatalogRow {
@@ -573,6 +675,7 @@ interface ExerciseCatalogRow {
   is_custom: number;
   equipment: string | null;
   load_type: ExerciseLoadType;
+  metric: ExerciseMetric;
 }
 
 interface PositionedIdRow {
@@ -581,6 +684,8 @@ interface PositionedIdRow {
 }
 
 interface CustomSplitSummaryRow {
+  has_hevy_details: number;
+  is_stack_plan: number;
   id: number;
   name: string;
   created_at: string;
@@ -594,9 +699,11 @@ interface CustomSplitRow {
   name: string;
   created_at: string;
   updated_at: string;
+  is_stack_plan: number;
 }
 
 interface CustomSplitDetailRow {
+  color: string | null;
   workout_id: number;
   split_id: number;
   workout_name: string;
@@ -607,6 +714,7 @@ interface CustomSplitDetailRow {
   primary_muscle: string | null;
   equipment: string | null;
   load_type: ExerciseLoadType | null;
+  metric: ExerciseMetric | null;
   workout_type: WorkoutType | null;
   is_custom: number | null;
   exercise_position: number | null;
@@ -616,6 +724,7 @@ export interface WorkoutDatabaseSnapshot {
   profile: UserProfile | null;
   sessions: WorkoutSession[];
   currentSession: WorkoutSession | null;
+  workoutFocus: WorkoutFocus | null;
   splitTemplates: Record<WorkoutType, Exercise[]>;
   customSplits: CustomSplitSummary[];
 }
@@ -625,8 +734,12 @@ let databasePromise: Promise<SQLiteDatabase> | null = null;
 
 const sessionJoinSql = (where = '') => `
   SELECT
+    iw.session_id AS imported_session_id,
     s.id AS session_id,
+    s.origin,
     s.date,
+    s.completed_at,
+    se.entry_unit,
     s.archetype,
     s.secondary_archetype,
     s.archetype_variant,
@@ -639,8 +752,10 @@ const sessionJoinSql = (where = '') => `
     s.completed AS session_completed,
     s.retroactive AS session_retroactive,
     se.id AS session_exercise_id,
+    se.exercise_id AS catalog_exercise_id,
     e.name AS exercise_name,
-    e.load_type AS exercise_load_type,
+    se.load_type AS exercise_load_type,
+    se.metric AS exercise_metric,
     se.position AS exercise_position,
     st.id AS set_id,
     st.set_index,
@@ -650,8 +765,12 @@ const sessionJoinSql = (where = '') => `
     st.target_weight,
     st.completed AS set_completed,
     st.skipped,
-    st.bonus_type
+    st.bonus_type,
+    st.value_origin,
+    st.duration_s,
+    st.target_duration_s
   FROM sessions s
+  LEFT JOIN imported_workouts iw ON iw.session_id = s.id
   LEFT JOIN session_workout_types swt ON swt.session_id = s.id
   LEFT JOIN session_exercises se ON se.session_id = s.id
   LEFT JOIN exercises e ON e.id = se.exercise_id
@@ -683,6 +802,7 @@ const profileFromRow = (row: ProfileRow | null): UserProfile | null => {
   return {
     name: row.name,
     weeklyGoal: row.weekly_goal,
+    programWeeklyGoal: row.program_weekly_goal ?? Math.max(1, Math.min(6, row.weekly_goal || 3)),
     experienceLevel: row.experience_level,
     trainingDays,
     onboardingCompleted: Boolean(row.onboarding_completed),
@@ -691,20 +811,66 @@ const profileFromRow = (row: ProfileRow | null): UserProfile | null => {
     weightUnit: row.weight_unit ?? DEFAULT_WEIGHT_UNIT,
     weightIncrementLbs: row.weight_increment_lbs ?? DEFAULT_WEIGHT_INCREMENT_LBS,
     activeSplitId: row.active_split_id ?? null,
+    ...resolveProgramPreferences({
+      activeSplitId: row.active_split_id ?? null,
+      experienceLevel: row.experience_level,
+      programMode: row.program_mode,
+      threeDayStructure: row.three_day_structure,
+      weightUnitConfirmed: row.weight_unit_confirmed === undefined ? undefined : Boolean(row.weight_unit_confirmed),
+    }),
   };
 };
 
-const sessionsFromRows = (rows: SessionJoinRow[]): WorkoutSession[] => {
+interface ExerciseNoteRow {
+  id: number;
+  exercise_id: number;
+  session_id: number | null;
+  text: string;
+  created_at: string;
+}
+const noteFromRow = (row: ExerciseNoteRow): ExerciseNote => ({
+  id: row.id, exerciseId: row.exercise_id,
+  workoutId: row.session_id === null ? null : String(row.session_id),
+  text: row.text, createdAt: row.created_at,
+});
+const SESSION_NOTES_SQL = 'SELECT * FROM exercise_notes WHERE session_id IS NOT NULL ORDER BY created_at ASC, id ASC';
+
+const sessionsFromRows = (
+  rows: SessionJoinRow[],
+  notes?: ExerciseNoteRow[]
+): WorkoutSession[] => {
+  // Targeted readbacks (saving a note or changing an exercise) only fetch the
+  // sessions being reconstructed, rather than every historical note.
+  if (!notes) {
+    const ids = [...new Set(rows.map((row) => row.session_id))];
+    notes = ids.length === 0 ? [] : getDatabase().getAllSync<ExerciseNoteRow>(
+      `SELECT * FROM exercise_notes WHERE session_id IN (${ids.join(',')}) ORDER BY created_at ASC, id ASC`
+    );
+  }
   const sessions = new Map<number, WorkoutSession>();
-  const exercises = new Map<number, Exercise>();
+  const exercises = new Map<number, SessionExercise>();
   const sets = new Set<number>();
+  // A source snapshot can be large. Read it once per workout, rather than duplicating
+  // the JSON across every set and muscle-category row in the history join.
+  const imported = new Map<number, ImportedWorkoutFacts>();
+  const importedIds = [...new Set(rows.flatMap(row => row.imported_session_id == null ? [] : [row.imported_session_id]))];
+  for (let offset = 0; offset < importedIds.length; offset += 400) {
+    const ids = importedIds.slice(offset, offset + 400);
+    for (const facts of getDatabase().getAllSync<{ session_id: number; data: string }>(
+      `SELECT session_id, data FROM imported_workouts WHERE session_id IN (${ids.map(() => '?').join(',')})`, ...ids)) {
+      imported.set(facts.session_id, JSON.parse(facts.data) as ImportedWorkoutFacts);
+    }
+  }
 
   for (const row of rows) {
     let session = sessions.get(row.session_id);
     if (!session) {
       session = {
+        ...(imported.has(row.session_id) ? { imported: imported.get(row.session_id) } : {}),
         id: String(row.session_id),
+        origin: row.origin,
         date: row.date,
+        completedAt: row.completed_at ?? null,
         archetype: row.archetype,
         secondaryArchetype: row.secondary_archetype,
         archetypeVariant: row.archetype_variant,
@@ -729,8 +895,12 @@ const sessionsFromRows = (rows: SessionJoinRow[]): WorkoutSession[] => {
     let exercise = exercises.get(row.session_exercise_id);
     if (!exercise) {
       exercise = {
+        exerciseId: row.catalog_exercise_id ?? undefined,
+        notes: [],
         name: row.exercise_name,
+        entryUnit: row.entry_unit,
         loadType: row.exercise_load_type ?? 'external_weight',
+        metric: row.exercise_metric ?? 'reps',
         sets: [],
       };
       exercises.set(row.session_exercise_id, exercise);
@@ -748,6 +918,8 @@ const sessionsFromRows = (rows: SessionJoinRow[]): WorkoutSession[] => {
     }
 
     const set: ExerciseSet = {
+      ...(session.imported ? { sourceKind: session.imported.exercises[row.exercise_position ?? 0]?.sets[row.set_index]?.kind } : {}),
+      valueOrigin: row.value_origin,
       reps: row.reps,
       weight: row.weight,
       completed: Boolean(row.set_completed),
@@ -755,12 +927,46 @@ const sessionsFromRows = (rows: SessionJoinRow[]): WorkoutSession[] => {
     };
     if (row.target_reps !== null) set.targetReps = row.target_reps;
     if (row.target_weight !== null) set.targetWeight = row.target_weight;
+    if (row.duration_s !== null) set.durationS = row.duration_s;
+    if (row.target_duration_s !== null) set.targetDurationS = row.target_duration_s;
     if (row.bonus_type !== null) set.type = row.bonus_type;
     exercise.sets.push(set);
     sets.add(row.set_id);
   }
 
+  const notesByExercise = new Map<string, ExerciseNote[]>();
+  for (const row of notes) {
+    const key = `${row.session_id}:${row.exercise_id}`;
+    const list = notesByExercise.get(key) ?? [];
+    list.push(noteFromRow(row));
+    notesByExercise.set(key, list);
+  }
+  for (const session of sessions.values()) {
+    for (const exercise of session.exercises) {
+      exercise.notes = notesByExercise.get(`${session.id}:${exercise.exerciseId}`) ?? [];
+    }
+  }
   return [...sessions.values()];
+};
+
+/** Three template sets; a timed template carries its seconds, never reps. */
+const templateExerciseFromRow = (row: {
+  name: string;
+  load_type: ExerciseLoadType;
+  metric: ExerciseMetric | null;
+  target_reps: number;
+  target_weight: number;
+  target_duration_s: number | null;
+}): Exercise => {
+  const metric = row.metric ?? 'reps';
+  return {
+    name: row.name,
+    loadType: row.load_type,
+    metric,
+    sets: Array.from({ length: 3 }, () => metric === 'duration'
+      ? { reps: 0, weight: row.target_weight, durationS: row.target_duration_s ?? DEFAULT_DURATION_S }
+      : { reps: row.target_reps, weight: row.target_weight }),
+  };
 };
 
 const splitTemplatesFromRows = (
@@ -768,14 +974,7 @@ const splitTemplatesFromRows = (
 ): Record<WorkoutType, Exercise[]> => {
   const templates = emptySplitTemplates();
   for (const row of rows) {
-    templates[row.workout_type].push({
-      name: row.name,
-      loadType: row.load_type,
-      sets: Array.from({ length: 3 }, () => ({
-        reps: row.target_reps,
-        weight: row.target_weight,
-      })),
-    });
+    templates[row.workout_type].push(templateExerciseFromRow(row));
   }
   return templates;
 };
@@ -784,13 +983,14 @@ const insertSeedDataAsync = async (db: SQLiteDatabase): Promise<void> => {
   for (const seed of EXERCISE_SEEDS) {
     await db.runAsync(
       `INSERT INTO exercises
-        (name, workout_type, primary_muscle, secondary_muscle, is_custom, load_type)
-       VALUES (?, ?, ?, ?, 0, ?)`,
+        (name, workout_type, primary_muscle, secondary_muscle, is_custom, load_type, metric)
+       VALUES (?, ?, ?, ?, 0, ?, ?)`,
       seed.name,
       seed.workoutType,
       seed.primaryMuscle,
       seed.secondaryMuscle,
-      seed.loadType
+      seed.loadType,
+      seed.metric
     );
   }
 
@@ -805,13 +1005,14 @@ const insertSeedDataAsync = async (db: SQLiteDatabase): Promise<void> => {
     const position = positions.get(seed.workoutType) ?? 0;
     await db.runAsync(
       `INSERT INTO split_templates
-        (workout_type, exercise_id, position, target_reps, target_weight)
-       VALUES (?, ?, ?, ?, ?)`,
+        (workout_type, exercise_id, position, target_reps, target_weight, target_duration_s)
+       VALUES (?, ?, ?, ?, ?, ?)`,
       seed.workoutType,
       exercise.id,
       position,
       seed.targetReps,
-      seed.targetWeight
+      seed.targetWeight,
+      seed.targetDurationS ?? null
     );
     positions.set(seed.workoutType, position + 1);
   }
@@ -823,13 +1024,14 @@ const insertSeedDataSync = (db: SQLiteDatabase): void => {
   for (const seed of EXERCISE_SEEDS) {
     db.runSync(
       `INSERT INTO exercises
-        (name, workout_type, primary_muscle, secondary_muscle, is_custom, load_type)
-       VALUES (?, ?, ?, ?, 0, ?)`,
+        (name, workout_type, primary_muscle, secondary_muscle, is_custom, load_type, metric)
+       VALUES (?, ?, ?, ?, 0, ?, ?)`,
       seed.name,
       seed.workoutType,
       seed.primaryMuscle,
       seed.secondaryMuscle,
-      seed.loadType
+      seed.loadType,
+      seed.metric
     );
   }
 
@@ -844,13 +1046,14 @@ const insertSeedDataSync = (db: SQLiteDatabase): void => {
     const position = positions.get(seed.workoutType) ?? 0;
     db.runSync(
       `INSERT INTO split_templates
-        (workout_type, exercise_id, position, target_reps, target_weight)
-       VALUES (?, ?, ?, ?, ?)`,
+        (workout_type, exercise_id, position, target_reps, target_weight, target_duration_s)
+       VALUES (?, ?, ?, ?, ?, ?)`,
       seed.workoutType,
       exercise.id,
       position,
       seed.targetReps,
-      seed.targetWeight
+      seed.targetWeight,
+      seed.targetDurationS ?? null
     );
     positions.set(seed.workoutType, position + 1);
   }
@@ -868,13 +1071,14 @@ const insertMissingExerciseSeedsAsync = async (db: SQLiteDatabase): Promise<void
     for (const seed of EXERCISE_SEEDS) {
       await db.runAsync(
         `INSERT OR IGNORE INTO exercises
-          (name, workout_type, primary_muscle, secondary_muscle, is_custom, load_type)
-         VALUES (?, ?, ?, ?, 0, ?)`,
+          (name, workout_type, primary_muscle, secondary_muscle, is_custom, load_type, metric)
+         VALUES (?, ?, ?, ?, 0, ?, ?)`,
         seed.name,
         seed.workoutType,
         seed.primaryMuscle,
         seed.secondaryMuscle,
-        seed.loadType
+        seed.loadType,
+        seed.metric
       );
     }
   });
@@ -1031,6 +1235,7 @@ const verifySeedDataSync = (db: SQLiteDatabase): void => {
 const seedFreshDatabaseAsync = async (db: SQLiteDatabase): Promise<void> => {
   await db.withTransactionAsync(async () => {
     await db.execAsync(`
+      DELETE FROM exercise_notes;
       DELETE FROM sets;
       DELETE FROM session_exercises;
       DELETE FROM session_workout_types;
@@ -1068,7 +1273,7 @@ const sessionsHasSecondaryArchetypeAsync = async (
 
 const tableHasColumnAsync = async (
   db: SQLiteDatabase,
-  table: 'archetype_templates' | 'exercises' | 'sessions' | 'profile',
+  table: 'archetype_templates' | 'exercises' | 'sessions' | 'profile' | 'custom_splits' | 'custom_split_workouts',
   columnName: string
 ): Promise<boolean> => {
   const columns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${table})`);
@@ -1188,16 +1393,19 @@ const ensureExerciseLoadTypeColumnAsync = async (
   }
 };
 
-const reconcileExerciseLoadTypesAsync = async (
+// Built-in catalog rows follow the shipped seed. Session snapshots keep each
+// workout's own measurement, so this never reinterprets history.
+const reconcileExerciseMeasurementsAsync = async (
   db: SQLiteDatabase
 ): Promise<void> => {
   await db.withTransactionAsync(async () => {
     for (const seed of [...EXERCISE_SEEDS, ...ARCHETYPE_EXERCISE_SEEDS]) {
       await db.runAsync(
         `UPDATE exercises
-         SET load_type = ?
+         SET load_type = ?, metric = ?
          WHERE name = ? AND is_custom = 0`,
         seed.loadType,
+        seed.metric,
         seed.name
       );
     }
@@ -1234,6 +1442,13 @@ const ensureCustomSplitsSchemaAsync = async (
     CREATE INDEX IF NOT EXISTS custom_split_workout_exercises_workout_position
       ON custom_split_workout_exercises(workout_id, position);
   `);
+
+  if (!(await tableHasColumnAsync(db, 'custom_split_workouts', 'color'))) {
+    await db.execAsync('ALTER TABLE custom_split_workouts ADD COLUMN color TEXT;');
+  }
+  if (!(await tableHasColumnAsync(db, 'custom_splits', 'is_stack_plan'))) {
+    await db.execAsync('ALTER TABLE custom_splits ADD COLUMN is_stack_plan INTEGER NOT NULL DEFAULT 0 CHECK (is_stack_plan IN (0, 1));');
+  }
 
   if (!(await tableHasColumnAsync(db, 'exercises', 'equipment'))) {
     await db.execAsync('ALTER TABLE exercises ADD COLUMN equipment TEXT;');
@@ -1386,6 +1601,7 @@ const rebuildFreshDatabaseAsync = async (db: SQLiteDatabase): Promise<void> => {
   try {
     await db.withTransactionAsync(async () => {
       await db.execAsync(`
+        DROP TABLE IF EXISTS exercise_notes;
         DROP TABLE IF EXISTS sets;
         DROP TABLE IF EXISTS session_exercises;
         DROP TABLE IF EXISTS session_workout_types;
@@ -1413,6 +1629,154 @@ const rebuildFreshDatabaseAsync = async (db: SQLiteDatabase): Promise<void> => {
   }
 };
 
+// v15 preserves unknown legacy values as user-owned rather than risking
+// destructive propagation. Newly created sets record their actual source.
+const ensureWorkoutStateColumnsAsync = async (db: SQLiteDatabase): Promise<void> => {
+  const sets = await db.getAllAsync<{ name: string }>('PRAGMA table_info(sets)');
+  const sessions = await db.getAllAsync<{ name: string }>('PRAGMA table_info(sessions)');
+  await db.withTransactionAsync(async () => {
+    if (!sets.some((column) => column.name === 'value_origin')) {
+      await db.execAsync("ALTER TABLE sets ADD COLUMN value_origin TEXT NOT NULL DEFAULT 'user' CHECK (value_origin IN ('template', 'history', 'propagated', 'user'));");
+    }
+    if (!sessions.some((column) => column.name === 'focus_session_exercise_id')) {
+      await db.execAsync('ALTER TABLE sessions ADD COLUMN focus_session_exercise_id INTEGER DEFAULT NULL;');
+    }
+    await db.execAsync(`UPDATE sessions SET focus_session_exercise_id = COALESCE(
+      (SELECT se.id FROM session_exercises se JOIN sets st ON st.session_exercise_id = se.id
+       WHERE se.session_id = sessions.id AND st.completed = 0 ORDER BY se.position, st.set_index LIMIT 1),
+      (SELECT se.id FROM session_exercises se WHERE se.session_id = sessions.id ORDER BY se.position DESC LIMIT 1)
+    ) WHERE completed = 0 AND focus_session_exercise_id IS NULL;`);
+  });
+};
+
+// v16 snapshots the migration-time preference once for legacy exercises.
+// No weights/profile/history timestamps are rewritten. Run after profile-unit
+// migration so very old databases can safely use the same fallback.
+const ensureExerciseUnitsAndCompletionAsync = async (db: SQLiteDatabase): Promise<void> => {
+  const exercises = await db.getAllAsync<{ name: string }>('PRAGMA table_info(session_exercises)');
+  const sessions = await db.getAllAsync<{ name: string }>('PRAGMA table_info(sessions)');
+  await db.withTransactionAsync(async () => {
+    if (!sessions.some((column) => column.name === 'completed_at')) {
+      await db.execAsync('ALTER TABLE sessions ADD COLUMN completed_at TEXT DEFAULT NULL;');
+    }
+    if (!exercises.some((column) => column.name === 'entry_unit')) {
+      await db.execAsync("ALTER TABLE session_exercises ADD COLUMN entry_unit TEXT NOT NULL DEFAULT 'kg' CHECK (entry_unit IN ('kg', 'lbs'));");
+      await db.execAsync(`UPDATE session_exercises SET entry_unit = CASE
+        WHEN (SELECT weight_unit FROM profile WHERE id = 1) = 'lbs' THEN 'lbs' ELSE 'kg' END;`);
+    }
+  });
+};
+
+/**
+ * v17 measurement model. Adds the catalog metric, the session measurement
+ * snapshot and integer-second duration storage, then moves verified legacy
+ * seconds out of `reps`. The whole step is keyed on the snapshot column and
+ * runs in one transaction, so it either completes once or not at all; every
+ * rewrite is additionally guarded so a repeat can never move a value twice.
+ */
+const ensureExerciseMeasurementAsync = async (db: SQLiteDatabase): Promise<void> => {
+  const columnsOf = async (table: string) =>
+    (await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${table})`)).map((column) => column.name);
+  const exercises = await columnsOf('exercises');
+  const sessionExercises = await columnsOf('session_exercises');
+  const sets = await columnsOf('sets');
+  const splitTemplates = await columnsOf('split_templates');
+  const archetypeTemplates = await columnsOf('archetype_templates');
+  const legacy = LEGACY_SECONDS_EXERCISES.map(() => '?').join(', ');
+  const legacyExerciseIds = `SELECT id FROM exercises WHERE is_custom = 0 AND name IN (${legacy})`;
+
+  await db.withTransactionAsync(async () => {
+    if (!exercises.includes('metric')) {
+      // Existing built-in and custom exercises are rep-based until the seed
+      // reconciliation below; custom names are never inspected.
+      await db.execAsync("ALTER TABLE exercises ADD COLUMN metric TEXT NOT NULL DEFAULT 'reps' CHECK (metric IN ('reps', 'duration'));");
+    }
+    if (!sets.includes('duration_s')) {
+      await db.execAsync('ALTER TABLE sets ADD COLUMN duration_s INTEGER DEFAULT NULL;');
+    }
+    if (!sets.includes('target_duration_s')) {
+      await db.execAsync('ALTER TABLE sets ADD COLUMN target_duration_s INTEGER DEFAULT NULL;');
+    }
+    if (!splitTemplates.includes('target_duration_s')) {
+      await db.execAsync('ALTER TABLE split_templates ADD COLUMN target_duration_s INTEGER DEFAULT NULL;');
+    }
+    if (!archetypeTemplates.includes('target_duration_s')) {
+      await db.execAsync('ALTER TABLE archetype_templates ADD COLUMN target_duration_s INTEGER DEFAULT NULL;');
+    }
+    if (sessionExercises.includes('metric')) return;
+
+    if (!sessionExercises.includes('load_type')) {
+      await db.execAsync("ALTER TABLE session_exercises ADD COLUMN load_type TEXT NOT NULL DEFAULT 'external_weight' CHECK (load_type IN ('external_weight', 'bodyweight'));");
+    }
+    await db.execAsync("ALTER TABLE session_exercises ADD COLUMN metric TEXT NOT NULL DEFAULT 'reps' CHECK (metric IN ('reps', 'duration'));");
+    // Pre-v17 reads used the catalog load type, so snapshotting it now keeps
+    // every existing session exactly as it displayed before.
+    await db.execAsync(`UPDATE session_exercises SET load_type = COALESCE(
+      (SELECT e.load_type FROM exercises e WHERE e.id = session_exercises.exercise_id), 'external_weight');`);
+    await db.runAsync(
+      `UPDATE session_exercises SET metric = 'duration' WHERE exercise_id IN (${legacyExerciseIds})`,
+      ...LEGACY_SECONDS_EXERCISES
+    );
+    // Completed, active and bonus rows alike: the number was always seconds.
+    await db.execAsync(`UPDATE sets
+      SET duration_s = reps, target_duration_s = target_reps, reps = 0, target_reps = NULL
+      WHERE duration_s IS NULL
+        AND session_exercise_id IN (SELECT id FROM session_exercises WHERE metric = 'duration');`);
+    for (const table of ['split_templates', 'archetype_templates']) {
+      await db.runAsync(
+        `UPDATE ${table} SET target_duration_s = target_reps, target_reps = 0
+         WHERE target_duration_s IS NULL AND exercise_id IN (${legacyExerciseIds})`,
+        ...LEGACY_SECONDS_EXERCISES
+      );
+    }
+  });
+};
+
+const ensureSessionOriginAsync = async (db: SQLiteDatabase): Promise<void> => {
+  const columns = await db.getAllAsync<{ name: string }>('PRAGMA table_info(sessions)');
+  if (columns.some((column) => column.name === 'origin')) return;
+  await db.withTransactionAsync(async () => {
+    await db.execAsync("ALTER TABLE sessions ADD COLUMN origin TEXT NOT NULL DEFAULT 'legacy' CHECK (origin IN ('archetype', 'custom', 'adhoc', 'legacy'));");
+    await db.execAsync(`UPDATE sessions SET origin = CASE
+      WHEN custom_split_id IS NOT NULL OR custom_split_workout_id IS NOT NULL THEN 'custom'
+      WHEN archetype IS NOT NULL OR secondary_archetype IS NOT NULL
+        OR archetype_variant IS NOT NULL OR secondary_archetype_variant IS NOT NULL THEN 'archetype'
+      ELSE 'legacy' END;`);
+  });
+};
+
+// Preserve the old program exactly once, before goal editing becomes independent.
+const ensureProgramFrequencyAsync = async (db: SQLiteDatabase): Promise<void> => {
+  const columns = await db.getAllAsync<{ name: string }>('PRAGMA table_info(profile)');
+  if (columns.some(column => column.name === 'program_weekly_goal')) return;
+  await db.withTransactionAsync(async () => {
+    await db.execAsync('ALTER TABLE profile ADD COLUMN program_weekly_goal INTEGER NOT NULL DEFAULT 3;');
+    await db.execAsync('UPDATE profile SET program_weekly_goal = MAX(1, MIN(6, CASE WHEN weekly_goal > 0 THEN weekly_goal ELSE 3 END));');
+  });
+};
+
+/** Schema 22: preserve legacy selection, structure and units together, once. */
+const ensureProgramPreferencesAsync = async (db: SQLiteDatabase): Promise<void> => {
+  const columns = new Set((await db.getAllAsync<{ name: string }>('PRAGMA table_info(profile)')).map(column => column.name));
+  if (['program_mode', 'three_day_structure', 'weight_unit_confirmed'].every(column => columns.has(column))) return;
+  await db.withTransactionAsync(async () => {
+    if (!columns.has('program_mode')) {
+      await db.execAsync("ALTER TABLE profile ADD COLUMN program_mode TEXT NOT NULL DEFAULT 'none' CHECK (program_mode IN ('none', 'stack', 'custom'));");
+      // An orphaned reference is genuinely missing, rather than a failed load.
+      await db.execAsync("UPDATE profile SET program_mode = CASE WHEN active_split_id IS NULL THEN 'stack' WHEN EXISTS (SELECT 1 FROM custom_splits WHERE id = active_split_id) THEN 'custom' ELSE 'none' END;");
+      await db.execAsync('UPDATE profile SET active_split_id = NULL WHERE program_mode = \'none\';');
+    }
+    if (!columns.has('three_day_structure')) {
+      await db.execAsync("ALTER TABLE profile ADD COLUMN three_day_structure TEXT NOT NULL DEFAULT 'full-body' CHECK (three_day_structure IN ('full-body', 'push-pull-legs'));");
+      await db.execAsync("UPDATE profile SET three_day_structure = CASE WHEN experience_level = 'beginner' THEN 'full-body' ELSE 'push-pull-legs' END;");
+    }
+    if (!columns.has('weight_unit_confirmed')) {
+      await db.execAsync('ALTER TABLE profile ADD COLUMN weight_unit_confirmed INTEGER NOT NULL DEFAULT 0 CHECK (weight_unit_confirmed IN (0, 1));');
+      await db.execAsync('UPDATE profile SET weight_unit_confirmed = 1;');
+    }
+  });
+};
+
 export const initializeWorkoutDatabase = async (): Promise<SQLiteDatabase> => {
   if (database) return database;
   if (databasePromise) return databasePromise;
@@ -1423,6 +1787,8 @@ export const initializeWorkoutDatabase = async (): Promise<SQLiteDatabase> => {
     // Older databases need this before any migration path inserts newly shipped
     // archetype or catalog exercises using the canonical load classification.
     await ensureExerciseLoadTypeColumnAsync(opened);
+    await ensureWorkoutStateColumnsAsync(opened);
+    await ensureExerciseMeasurementAsync(opened);
 
     const schemaVersion = await opened.getFirstAsync<{ user_version: number }>(
       'PRAGMA user_version'
@@ -1445,13 +1811,13 @@ export const initializeWorkoutDatabase = async (): Promise<SQLiteDatabase> => {
     } else if (version < 3) {
       await migrateArchetypeTemplatesAsync(opened);
     }
-    if (!hasLegacyWorkoutType && version > 0 && version < CURRENT_SCHEMA_VERSION) {
+    if (!hasLegacyWorkoutType && version > 0 && version < 14) {
       await migrateSessionArchetypesAsync(opened);
     }
-    if (!hasLegacyWorkoutType && version >= 3 && version < CURRENT_SCHEMA_VERSION) {
+    if (!hasLegacyWorkoutType && version >= 3 && version < 14) {
       await migrateArchetypeVariantsAsync(opened);
     }
-    if (version > 0 && version < CURRENT_SCHEMA_VERSION) {
+    if (version > 0 && version < 14) {
       await removeLegacyTestExerciseAsync(opened);
     }
     await ensureSessionRetroactiveColumnAsync(opened);
@@ -1459,10 +1825,15 @@ export const initializeWorkoutDatabase = async (): Promise<SQLiteDatabase> => {
     await ensureProfileWeightIncrementColumnAsync(opened);
     await ensureProfileWeightUnitColumnAsync(opened);
     await ensureProfileWeightIncrementLbsColumnAsync(opened);
+    await ensureProgramFrequencyAsync(opened);
     await ensureCustomSplitsSchemaAsync(opened);
+    await ensureProgramPreferencesAsync(opened);
     await ensureSessionCustomSplitColumnsAsync(opened);
+    await ensureExerciseUnitsAndCompletionAsync(opened);
+    await ensureSessionOriginAsync(opened);
+    await opened.execAsync(COMPLETION_GUARD_SQL);
     await insertMissingExerciseSeedsAsync(opened);
-    await reconcileExerciseLoadTypesAsync(opened);
+    await reconcileExerciseMeasurementsAsync(opened);
     if (!hasLegacyWorkoutType && version > 0 && version < CURRENT_SCHEMA_VERSION) {
       await opened.execAsync(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION}`);
     }
@@ -1497,7 +1868,8 @@ const readSplitTemplatesAsync = async (
 ): Promise<Record<WorkoutType, Exercise[]>> =>
   splitTemplatesFromRows(
     await db.getAllAsync<SplitTemplateRow>(`
-      SELECT st.workout_type, e.name, e.load_type, st.target_reps, st.target_weight
+      SELECT st.workout_type, e.name, e.load_type, e.metric, st.target_reps,
+             st.target_weight, st.target_duration_s
       FROM split_templates st
       JOIN exercises e ON e.id = st.exercise_id
       ORDER BY st.workout_type, st.position
@@ -1507,7 +1879,8 @@ const readSplitTemplatesAsync = async (
 export const readSplitTemplatesSync = (): Record<WorkoutType, Exercise[]> =>
   splitTemplatesFromRows(
     getDatabase().getAllSync<SplitTemplateRow>(`
-      SELECT st.workout_type, e.name, e.load_type, st.target_reps, st.target_weight
+      SELECT st.workout_type, e.name, e.load_type, e.metric, st.target_reps,
+             st.target_weight, st.target_duration_s
       FROM split_templates st
       JOIN exercises e ON e.id = st.exercise_id
       ORDER BY st.workout_type, st.position
@@ -1567,21 +1940,14 @@ export const readArchetypeTemplateSync = (
   variant = 'a'
 ): Exercise[] =>
   getDatabase().getAllSync<ArchetypeTemplateRow>(
-    `SELECT e.name, e.load_type, at.target_reps, at.target_weight
+    `SELECT e.name, e.load_type, e.metric, at.target_reps, at.target_weight, at.target_duration_s
      FROM archetype_templates at
      JOIN exercises e ON e.id = at.exercise_id
      WHERE at.archetype = ? AND at.variant = ?
      ORDER BY at.position`,
     archetype,
     variant
-  ).map((row) => ({
-    name: row.name,
-    loadType: row.load_type,
-    sets: Array.from({ length: 3 }, () => ({
-      reps: row.target_reps,
-      weight: row.target_weight,
-    })),
-  }));
+  ).map(templateExerciseFromRow);
 
 /**
  * Read-only builder projection of an archetype template. Unlike the active
@@ -1595,7 +1961,7 @@ export const readArchetypeTemplateCatalogSync = (
   getDatabase()
     .getAllSync<ArchetypeTemplateCatalogRow>(
       `SELECT e.id, e.name, e.workout_type, e.primary_muscle,
-              e.is_custom, e.equipment, e.load_type, at.position
+              e.is_custom, e.equipment, e.load_type, e.metric, at.position
        FROM archetype_templates at
        JOIN exercises e ON e.id = at.exercise_id
        WHERE at.archetype = ? AND at.variant = ?
@@ -1611,6 +1977,7 @@ export const readArchetypeTemplateCatalogSync = (
       isCustom: Boolean(row.is_custom),
       equipment: row.equipment,
       loadType: row.load_type,
+      metric: row.metric,
     }));
 
 interface SelectedArchetypeVariant {
@@ -1634,7 +2001,10 @@ const combineArchetypeTemplatesSync = (
   );
 
 const readAllSessionsAsync = async (db: SQLiteDatabase): Promise<WorkoutSession[]> =>
-  sessionsFromRows(await db.getAllAsync<SessionJoinRow>(sessionJoinSql()));
+  sessionsFromRows(
+    await db.getAllAsync<SessionJoinRow>(sessionJoinSql()),
+    await db.getAllAsync<ExerciseNoteRow>(SESSION_NOTES_SQL)
+  );
 
 export const readCompletedSessionsSync = (): WorkoutSession[] =>
   sessionsFromRows(
@@ -1658,10 +2028,13 @@ export function readExerciseRecordSetsSync(
      JOIN session_exercises se ON se.id = st.session_exercise_id
      JOIN sessions s ON s.id = se.session_id
      JOIN exercises e ON e.id = se.exercise_id
-     WHERE e.name = ? AND st.completed = 1 AND st.skipped = 0
+     WHERE e.name = ? AND se.metric = 'reps' AND st.completed = 1 AND st.skipped = 0
      ORDER BY julianday(s.date) DESC, s.id DESC, se.position ASC, st.set_index ASC`,
     exerciseName
-  ).filter((row) => verified.has(String(row.session_id))).map((row) => {
+  ).filter((row) => {
+    const session = verified.get(String(row.session_id));
+    return session && session.exercises[row.exercise_index]?.sets[row.set_index]?.sourceKind !== 'warmup';
+  }).map((row) => {
     const session = verified.get(String(row.session_id))!;
     // Preserve the app's local-calendar interpretation of date-only legacy sessions.
     const date = /^\d{4}-\d{2}-\d{2}$/.test(session.date)
@@ -1722,7 +2095,7 @@ export const readCustomSplitWorkoutLabelSync = (
     : null;
 };
 
-const readSessionByIdSync = (id: number): WorkoutSession | undefined =>
+export const readSessionByIdSync = (id: number): WorkoutSession | undefined =>
   sessionsFromRows(
     getDatabase().getAllSync<SessionJoinRow>(sessionJoinSql('WHERE s.id = ?'), id)
   )[0];
@@ -1731,15 +2104,22 @@ export const readInitialWorkoutSnapshot = async (): Promise<WorkoutDatabaseSnaps
   const db = await initializeWorkoutDatabase();
 
   // This first profile read is deliberately awaited before startup routing.
-  const profile = await readProfileAsync(db);
+  let profile = await readProfileAsync(db);
   const splitTemplates = await readSplitTemplatesAsync(db);
   const allSessions = await readAllSessionsAsync(db);
   const customSplits = await getCustomSplitsAsync();
+  // Only a successful catalog read can prove that the selected routine is gone.
+  const selectedSplitId = profile?.activeSplitId;
+  if (profile?.programMode === 'custom' && !customSplits.some(split => split.id === selectedSplitId)) {
+    chooseNoProgramSync();
+    profile = readProfileSync();
+  }
 
   const snapshot = {
     profile,
     sessions: allSessions.filter((session) => session.completed),
     currentSession: allSessions.find((session) => !session.completed) ?? null,
+    workoutFocus: readCurrentWorkoutFocusSync(),
     splitTemplates,
     customSplits,
   };
@@ -1747,32 +2127,26 @@ export const readInitialWorkoutSnapshot = async (): Promise<WorkoutDatabaseSnaps
 };
 
 export const writeProfile = (profile: UserProfile): void => {
-  getDatabase().runSync(
-    `INSERT INTO profile
-      (id, name, weekly_goal, experience_level, training_days, onboarding_completed,
-       auto_increase_weight, weight_increment, weight_unit, weight_increment_lbs, active_split_id)
-     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET
-       name = excluded.name,
-       weekly_goal = excluded.weekly_goal,
-       experience_level = excluded.experience_level,
-       training_days = excluded.training_days,
-       onboarding_completed = excluded.onboarding_completed,
-       auto_increase_weight = excluded.auto_increase_weight,
-       weight_increment = excluded.weight_increment,
-       weight_unit = excluded.weight_unit,
-       weight_increment_lbs = excluded.weight_increment_lbs,
-       active_split_id = excluded.active_split_id`,
-    profile.name,
-    profile.weeklyGoal,
-    profile.experienceLevel,
-    JSON.stringify(profile.trainingDays),
-    profile.onboardingCompleted ? 1 : 0,
-    profile.autoIncreaseWeight ? 1 : 0,
-    profile.weightIncrement,
-    profile.weightUnit,
-    profile.weightIncrementLbs,
-    profile.activeSplitId
+  const preferences = resolveProgramPreferences(profile);
+  // Older setup callers can still write before additive migrations finish.
+  const db = getDatabase();
+  const supported = new Set(db.getAllSync<{ name: string }>('PRAGMA table_info(profile)').map(column => column.name));
+  const values: Record<string, string | number | null> = {
+    name: profile.name, weekly_goal: profile.weeklyGoal,
+    program_weekly_goal: profile.programWeeklyGoal ?? Math.max(1, Math.min(6, profile.weeklyGoal || 3)),
+    experience_level: profile.experienceLevel, training_days: JSON.stringify(profile.trainingDays),
+    onboarding_completed: profile.onboardingCompleted ? 1 : 0,
+    auto_increase_weight: profile.autoIncreaseWeight ? 1 : 0,
+    weight_increment: profile.weightIncrement, weight_unit: profile.weightUnit,
+    weight_increment_lbs: profile.weightIncrementLbs, active_split_id: profile.activeSplitId,
+    program_mode: preferences.programMode, three_day_structure: preferences.threeDayStructure,
+    weight_unit_confirmed: preferences.weightUnitConfirmed ? 1 : 0,
+  };
+  const columns = Object.keys(values).filter(column => supported.has(column));
+  db.runSync(
+    `INSERT INTO profile (id, ${columns.join(', ')}) VALUES (1, ${columns.map(() => '?').join(', ')})
+     ON CONFLICT(id) DO UPDATE SET ${columns.map(column => `${column} = excluded.${column}`).join(', ')}`,
+    ...columns.map(column => values[column])
   );
 };
 
@@ -1836,6 +2210,15 @@ export const createCustomSplitSync = (name: string): number => {
   ).lastInsertRowId;
 };
 
+/** Sharing uses both seed catalogs; these names are portable, never row IDs. */
+export const BUILT_IN_EXERCISE_NAMES: ReadonlySet<string> = new Set(
+  [...EXERCISE_SEEDS, ...ARCHETYPE_EXERCISE_SEEDS].map((seed) => seed.name)
+);
+
+/** Save an independent copy without activating it. Database must be hydrated. */
+export const importPortableSplitSync = (split: PortableSplit, attemptId?: string): ImportedSplit =>
+  persistPortableSplit(getDatabase(), split, [...EXERCISE_SEEDS, ...ARCHETYPE_EXERCISE_SEEDS], attemptId);
+
 export const renameCustomSplitSync = (splitId: number, name: string): void => {
   const normalizedName = name.trim();
   if (!normalizedName) throw new Error('Custom split name cannot be empty.');
@@ -1852,23 +2235,40 @@ export const renameCustomSplitSync = (splitId: number, name: string): void => {
   });
 };
 
+const deleteCustomSplitRowsSync = (db: SQLiteDatabase, splitId: number): void => {
+  db.runSync(
+    "UPDATE profile SET active_split_id = NULL, program_mode = 'none' WHERE active_split_id = ?",
+    splitId
+  );
+  db.runSync(
+    `DELETE FROM custom_split_workout_exercises
+     WHERE workout_id IN (
+       SELECT id FROM custom_split_workouts WHERE split_id = ?
+     )`,
+    splitId
+  );
+  db.runSync('DELETE FROM custom_split_workouts WHERE split_id = ?', splitId);
+  db.runSync('DELETE FROM custom_splits WHERE id = ?', splitId);
+};
+
 export const deleteCustomSplitSync = (splitId: number): void => {
   const db = getDatabase();
   db.withTransactionSync(() => {
     requireCustomSplitSync(db, splitId);
-    db.runSync(
-      'UPDATE profile SET active_split_id = NULL WHERE active_split_id = ?',
-      splitId
-    );
-    db.runSync(
-      `DELETE FROM custom_split_workout_exercises
-       WHERE workout_id IN (
-         SELECT id FROM custom_split_workouts WHERE split_id = ?
-       )`,
-      splitId
-    );
-    db.runSync('DELETE FROM custom_split_workouts WHERE split_id = ?', splitId);
-    db.runSync('DELETE FROM custom_splits WHERE id = ?', splitId);
+    deleteCustomSplitRowsSync(db, splitId);
+  });
+};
+
+/**
+ * Accepting a newly generated Stack's plan replaces the edited one, in the same
+ * transaction as the profile write so a failure keeps both. History stays.
+ */
+export const writeProfileReplacingStackPlanSync = (profile: UserProfile): void => {
+  const db = getDatabase();
+  db.withTransactionSync(() => {
+    const row = db.getFirstSync<ExerciseIdRow>('SELECT id FROM custom_splits WHERE is_stack_plan = 1');
+    if (row) deleteCustomSplitRowsSync(db, row.id);
+    writeProfile(profile);
   });
 };
 
@@ -1880,12 +2280,14 @@ export const getCustomSplitsAsync = async (): Promise<CustomSplitSummary[]> => {
       cs.name,
       cs.created_at,
       cs.updated_at,
+      cs.is_stack_plan,
       COUNT(DISTINCT csw.id) AS workout_count,
-      COUNT(cswe.id) AS exercise_count
+      COUNT(cswe.id) AS exercise_count,
+      EXISTS(SELECT 1 FROM imported_routines ir JOIN custom_split_workouts iw ON iw.id = ir.workout_id WHERE iw.split_id = cs.id) AS has_hevy_details
     FROM custom_splits cs
     LEFT JOIN custom_split_workouts csw ON csw.split_id = cs.id
     LEFT JOIN custom_split_workout_exercises cswe ON cswe.workout_id = csw.id
-    GROUP BY cs.id, cs.name, cs.created_at, cs.updated_at
+    GROUP BY cs.id, cs.name, cs.created_at, cs.updated_at, cs.is_stack_plan
     ORDER BY cs.updated_at DESC, cs.id DESC
   `);
 
@@ -1896,6 +2298,8 @@ export const getCustomSplitsAsync = async (): Promise<CustomSplitSummary[]> => {
     updatedAt: row.updated_at,
     workoutCount: row.workout_count,
     exerciseCount: row.exercise_count,
+    ...(row.has_hevy_details ? { hasHevyDetails: true } : {}),
+    ...(row.is_stack_plan ? { isStackPlan: true } : {}),
   }));
 };
 
@@ -1904,7 +2308,7 @@ export const getCustomSplitDetailAsync = async (
 ): Promise<CustomSplit | null> => {
   const db = await initializeWorkoutDatabase();
   const split = await db.getFirstAsync<CustomSplitRow>(
-    `SELECT id, name, created_at, updated_at
+    `SELECT id, name, created_at, updated_at, is_stack_plan
      FROM custom_splits
      WHERE id = ?`,
     splitId
@@ -1916,6 +2320,7 @@ export const getCustomSplitDetailAsync = async (
        csw.id AS workout_id,
        csw.split_id,
        csw.name AS workout_name,
+       csw.color,
        csw.position AS workout_position,
        cswe.id AS workout_exercise_id,
        e.id AS exercise_id,
@@ -1923,6 +2328,7 @@ export const getCustomSplitDetailAsync = async (
        e.primary_muscle,
        e.equipment,
        e.load_type,
+       e.metric,
        e.workout_type,
        e.is_custom,
        cswe.position AS exercise_position
@@ -1943,6 +2349,7 @@ export const getCustomSplitDetailAsync = async (
         id: row.workout_id,
         splitId: row.split_id,
         name: row.workout_name,
+        color: isDayColor(row.color) ? row.color : null,
         position: row.workout_position,
         exercises: [],
       };
@@ -1968,6 +2375,7 @@ export const getCustomSplitDetailAsync = async (
       primaryMuscle: row.primary_muscle,
       equipment: row.equipment,
       loadType: row.load_type ?? 'external_weight',
+      metric: row.metric ?? 'reps',
       workoutType: row.workout_type,
       isCustom: Boolean(row.is_custom),
       position: row.exercise_position,
@@ -1980,6 +2388,7 @@ export const getCustomSplitDetailAsync = async (
     name: split.name,
     createdAt: split.created_at,
     updatedAt: split.updated_at,
+    ...(split.is_stack_plan ? { isStackPlan: true } : {}),
     workouts,
   };
 };
@@ -2083,8 +2492,9 @@ export const duplicateWorkoutSync = (workoutId: number): number => {
     const source = db.getFirstSync<{
       split_id: number;
       name: string;
+      color: string | null;
     }>(
-      'SELECT split_id, name FROM custom_split_workouts WHERE id = ?',
+      'SELECT split_id, name, color FROM custom_split_workouts WHERE id = ?',
       workoutId
     );
     if (!source) throw new Error('Custom split workout not found.');
@@ -2096,11 +2506,12 @@ export const duplicateWorkoutSync = (workoutId: number): number => {
       source.split_id
     )?.next_position ?? 0;
     duplicateId = db.runSync(
-      `INSERT INTO custom_split_workouts (split_id, name, position)
-       VALUES (?, ?, ?)`,
+      `INSERT INTO custom_split_workouts (split_id, name, position, color)
+       VALUES (?, ?, ?, ?)`,
       source.split_id,
       `${source.name} copy`.trim(),
-      position
+      position,
+      source.color
     ).lastInsertRowId;
 
     const exercises = db.getAllSync<{ exercise_id: number; position: number }>(
@@ -2189,26 +2600,37 @@ export const removeExerciseFromWorkoutSync = (
   });
 };
 
+/**
+ * Measurement is chosen once, here. No edit path changes it afterwards, and
+ * session snapshots keep any logged history in its original measurement.
+ */
 export const createCustomExerciseSync = (
   name: string,
   workoutType: WorkoutType,
   primaryMuscle: string,
-  equipment: string
+  equipment: string | null,
+  loadType: ExerciseLoadType = 'external_weight',
+  metric: ExerciseMetric = 'reps'
 ): number => {
   const normalizedName = name.trim();
   if (!normalizedName) throw new Error('Exercise name cannot be empty.');
+  if (loadType !== 'external_weight' && loadType !== 'bodyweight') throw new Error('Invalid load type.');
+  if (metric !== 'reps' && metric !== 'duration') throw new Error('Invalid exercise metric.');
   return getDatabase().runSync(
     `INSERT INTO exercises
-      (name, workout_type, primary_muscle, secondary_muscle, is_custom, equipment, load_type)
-     VALUES (?, ?, ?, NULL, 1, ?, 'external_weight')`,
+      (name, workout_type, primary_muscle, secondary_muscle, is_custom, equipment, load_type, metric)
+     VALUES (?, ?, ?, NULL, 1, ?, ?, ?)`,
     normalizedName,
     workoutType,
     primaryMuscle,
-    equipment
+    equipment,
+    loadType,
+    metric
   ).lastInsertRowId;
 };
 
 export interface CustomSplitDraftWorkoutInput {
+  color?: DayColor | null;
   name: string;
   exerciseIds: number[];
   /**
@@ -2220,9 +2642,35 @@ export interface CustomSplitDraftWorkoutInput {
 }
 
 export interface SaveCustomSplitDraftOptions {
+  activate?: boolean;
   /** Set when the split is being created as the last step of onboarding. */
   completeOnboarding?: boolean;
+  /** Saves the first edit of Stack's plan. It never appears in Your routines. */
+  stackPlan?: boolean;
 }
+
+/** Save structure only. Source provenance, profile and rotation are never written. */
+export const saveAdhocRoutineSync = (sessionId: string, name: string): number => {
+  const normalizedName = name.trim();
+  if (!normalizedName) throw new Error('Routine name cannot be empty.');
+  const db = getDatabase();
+  let splitId = 0;
+  db.withTransactionSync(() => {
+    const source = db.getFirstSync("SELECT id FROM sessions WHERE id = ? AND completed = 1 AND origin = 'adhoc'", sessionId);
+    if (!source) throw new Error('Only completed ad-hoc workouts can be saved as routines.');
+    const exercises = db.getAllSync<{ exercise_id: number }>(`SELECT se.exercise_id FROM session_exercises se
+      WHERE se.session_id = ? AND EXISTS (SELECT 1 FROM sets st WHERE st.session_exercise_id = se.id
+        AND st.completed = 1 AND st.skipped <> 1) ORDER BY se.position, se.id`, sessionId);
+    if (!exercises.length) throw new Error('Log at least one non-skipped set before saving a routine.');
+    const timestamp = customSplitTimestamp();
+    splitId = db.runSync('INSERT INTO custom_splits (name, created_at, updated_at) VALUES (?, ?, ?)', normalizedName, timestamp, timestamp).lastInsertRowId;
+    const workoutId = db.runSync('INSERT INTO custom_split_workouts (split_id, name, position) VALUES (?, ?, 0)', splitId, normalizedName).lastInsertRowId;
+    exercises.forEach(({ exercise_id }, position) => {
+      db.runSync('INSERT INTO custom_split_workout_exercises (workout_id, exercise_id, position) VALUES (?, ?, ?)', workoutId, exercise_id, position);
+    });
+  });
+  return splitId;
+};
 
 /**
  * Persists an entire custom split draft — split, workouts, exercises — plus the
@@ -2247,22 +2695,28 @@ export const saveCustomSplitDraftSync = (
   const db = getDatabase();
   let splitId = 0;
   db.withTransactionSync(() => {
+    // Later edits update the one Stack's plan in place.
+    if (options.stackPlan && db.getFirstSync('SELECT id FROM custom_splits WHERE is_stack_plan = 1')) {
+      throw new Error('Stack’s plan has already been edited.');
+    }
     const timestamp = customSplitTimestamp();
     splitId = db.runSync(
-      `INSERT INTO custom_splits (name, created_at, updated_at)
-       VALUES (?, ?, ?)`,
+      `INSERT INTO custom_splits (name, created_at, updated_at, is_stack_plan)
+       VALUES (?, ?, ?, ?)`,
       normalizedName,
       timestamp,
-      timestamp
+      timestamp,
+      options.stackPlan ? 1 : 0
     ).lastInsertRowId;
 
     workouts.forEach((workout, workoutPosition) => {
       const workoutId = db.runSync(
-        `INSERT INTO custom_split_workouts (split_id, name, position)
-         VALUES (?, ?, ?)`,
+        `INSERT INTO custom_split_workouts (split_id, name, position, color)
+         VALUES (?, ?, ?, ?)`,
         splitId,
         workout.name.trim(),
-        workoutPosition
+        workoutPosition,
+        isDayColor(workout.color) ? workout.color : null
       ).lastInsertRowId;
 
       workout.exerciseIds.forEach((exerciseId, exercisePosition) => {
@@ -2287,12 +2741,15 @@ export const saveCustomSplitDraftSync = (
 
     // Activation (and onboarding completion) shares the transaction so a retry
     // after a failed profile write can never leave an orphaned saved split.
-    db.runSync(
-      options.completeOnboarding
-        ? 'UPDATE profile SET active_split_id = ?, onboarding_completed = 1 WHERE id = 1'
-        : 'UPDATE profile SET active_split_id = ? WHERE id = 1',
-      splitId
-    );
+    if (options.activate !== false || options.completeOnboarding) {
+      const result = db.runSync(
+        options.completeOnboarding
+          ? "UPDATE profile SET active_split_id = ?, program_mode = 'custom', onboarding_completed = 1 WHERE id = 1"
+          : "UPDATE profile SET active_split_id = ?, program_mode = 'custom' WHERE id = 1",
+        splitId
+      );
+      if (result.changes !== 1) throw new Error('A profile is required to select a program.');
+    }
   });
 
   return splitId;
@@ -2367,18 +2824,20 @@ export const updateCustomSplitDraftSync = (
       const id =
         workoutId ??
         db.runSync(
-          `INSERT INTO custom_split_workouts (split_id, name, position)
-           VALUES (?, ?, ?)`,
+          `INSERT INTO custom_split_workouts (split_id, name, position, color)
+           VALUES (?, ?, ?, ?)`,
           splitId,
           workoutName,
-          position
+          position,
+          isDayColor(workout.color) ? workout.color : null
         ).lastInsertRowId;
 
       if (workoutId !== null) {
         db.runSync(
-          'UPDATE custom_split_workouts SET name = ?, position = ? WHERE id = ?',
+          'UPDATE custom_split_workouts SET name = ?, position = ?, color = ? WHERE id = ?',
           workoutName,
           position,
+          isDayColor(workout.color) ? workout.color : null,
           workoutId
         );
         db.runSync(
@@ -2414,7 +2873,14 @@ export const updateCustomSplitDraftSync = (
 export const setActiveSplitSync = (splitId: number | null): void => {
   const db = getDatabase();
   if (splitId !== null) requireCustomSplitSync(db, splitId);
-  db.runSync('UPDATE profile SET active_split_id = ? WHERE id = 1', splitId);
+  const result = db.runSync('UPDATE profile SET active_split_id = ?, program_mode = ? WHERE id = 1', splitId, splitId === null ? 'stack' : 'custom');
+  if (result.changes !== 1) throw new Error('A profile is required to select a program.');
+};
+
+/** Unlike setActiveSplit(null), this explicitly turns the automatic queue off. */
+export const chooseNoProgramSync = (): void => {
+  const result = getDatabase().runSync("UPDATE profile SET active_split_id = NULL, program_mode = 'none' WHERE id = 1");
+  if (result.changes !== 1) throw new Error('A profile is required to select a program.');
 };
 
 const deleteIncompleteSessionsSync = (db: SQLiteDatabase): void => {
@@ -2476,35 +2942,58 @@ const insertSessionExerciseSync = (
   db: SQLiteDatabase,
   sessionId: number,
   position: number,
-  exercise: Exercise
+  exercise: SessionExercise
 ): void => {
   const exerciseId = requireExerciseIdSync(db, exercise.name);
   const result = db.runSync(
-    `INSERT INTO session_exercises (session_id, exercise_id, position)
-     VALUES (?, ?, ?)`,
+    `INSERT INTO session_exercises (session_id, exercise_id, position, entry_unit, load_type, metric)
+     VALUES (?, ?, ?, ?, ?, ?)`,
     sessionId,
     exerciseId,
-    position
+    position,
+    exercise.entryUnit,
+    exercise.loadType ?? 'external_weight',
+    getExerciseMetric(exercise)
   );
   const sessionExerciseId = result.lastInsertRowId;
+  if (position === 0) {
+    db.runSync('UPDATE sessions SET focus_session_exercise_id = ? WHERE id = ? AND completed = 0', sessionExerciseId, sessionId);
+  }
 
   exercise.sets.forEach((set, setIndex) => {
-    db.runSync(
-      `INSERT INTO sets
-        (session_exercise_id, set_index, reps, weight, target_reps,
-         target_weight, completed, skipped, bonus_type)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      sessionExerciseId,
-      setIndex,
-      set.reps,
-      set.weight,
-      set.targetReps ?? null,
-      set.targetWeight ?? null,
-      set.completed ? 1 : 0,
-      set.skipped ? 1 : 0,
-      set.type ?? null
-    );
+    insertSetSync(db, sessionExerciseId, setIndex, exercise, set);
   });
+};
+
+// Timed sets store integer seconds and a neutral reps = 0 (the legacy column
+// is NOT NULL); rep sets never carry a duration.
+const insertSetSync = (
+  db: SQLiteDatabase,
+  sessionExerciseId: number,
+  setIndex: number,
+  exercise: Pick<Exercise, 'metric'>,
+  set: ExerciseSet
+): void => {
+  const duration = exercise.metric === 'duration';
+  db.runSync(
+    `INSERT INTO sets
+      (session_exercise_id, set_index, reps, weight, target_reps,
+       target_weight, completed, skipped, bonus_type, value_origin,
+       duration_s, target_duration_s)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    sessionExerciseId,
+    setIndex,
+    duration ? 0 : set.reps,
+    set.weight,
+    duration ? null : set.targetReps ?? null,
+    set.targetWeight ?? null,
+    set.completed ? 1 : 0,
+    set.skipped ? 1 : 0,
+    set.type ?? null,
+    set.valueOrigin ?? 'user',
+    duration ? set.durationS ?? DEFAULT_DURATION_S : null,
+    duration ? set.targetDurationS ?? null : null
+  );
 };
 
 /**
@@ -2519,10 +3008,12 @@ const customWorkoutTemplateExerciseSync = (
 ): Exercise => {
   const row = db.getFirstSync<{
     load_type: ExerciseLoadType;
+    metric: ExerciseMetric;
     target_reps: number | null;
     target_weight: number | null;
+    target_duration_s: number | null;
   }>(
-    `SELECT e.load_type, st.target_reps, st.target_weight
+    `SELECT e.load_type, e.metric, st.target_reps, st.target_weight, st.target_duration_s
      FROM exercises e
      LEFT JOIN split_templates st ON st.exercise_id = e.id
      WHERE e.name = ?
@@ -2532,18 +3023,30 @@ const customWorkoutTemplateExerciseSync = (
   );
   if (!row) return makeDefaultExercise(name);
   if (row.target_reps === null || row.target_weight === null) {
-    return makeDefaultExercise(name, row.load_type);
+    return makeDefaultExercise(name, row.load_type, row.metric);
   }
-  const targetReps = row.target_reps;
-  const targetWeight = row.target_weight;
-  return {
+  return templateExerciseFromRow({
     name,
-    loadType: row.load_type,
-    sets: Array.from({ length: 3 }, () => ({
-      reps: targetReps,
-      weight: targetWeight,
-    })),
-  };
+    load_type: row.load_type,
+    metric: row.metric,
+    target_reps: row.target_reps,
+    target_weight: row.target_weight,
+    target_duration_s: row.target_duration_s,
+  });
+};
+
+/** Empty starts never replace an existing live workout. */
+export const startEmptyWorkout = (): WorkoutSession => {
+  const db = getDatabase();
+  let sessionId = 0;
+  db.withTransactionSync(() => {
+    if (!readProfileSync()) throw new Error('A profile is required to start a workout');
+    const active = db.getFirstSync<{ id: number }>('SELECT id FROM sessions WHERE completed = 0');
+    sessionId = active?.id ?? db.runSync(
+      "INSERT INTO sessions (date, origin) VALUES (?, 'adhoc')", new Date().toISOString()
+    ).lastInsertRowId;
+  });
+  return sessionsFromRows(db.getAllSync<SessionJoinRow>(sessionJoinSql('WHERE s.id = ?'), sessionId))[0];
 };
 
 export const replaceCurrentSession = (session: WorkoutSession): WorkoutSession => {
@@ -2555,9 +3058,9 @@ export const replaceCurrentSession = (session: WorkoutSession): WorkoutSession =
     deleteIncompleteSessionsSync(db);
     sessionId = db.runSync(
       `INSERT INTO sessions
-        (date, archetype, secondary_archetype, archetype_variant,
+        (date, origin, archetype, secondary_archetype, archetype_variant,
          secondary_archetype_variant, intensity, completed, retroactive)
-       VALUES (?, NULL, NULL, NULL, NULL, NULL, 0, 0)`,
+       VALUES (?, 'legacy', NULL, NULL, NULL, NULL, NULL, 0, 0)`,
       session.date
     ).lastInsertRowId;
     workoutTypes.forEach((workoutType, position) => {
@@ -2575,7 +3078,9 @@ export const replaceCurrentSession = (session: WorkoutSession): WorkoutSession =
   });
   return {
     ...session,
+    origin: 'legacy',
     id: String(sessionId),
+    completedAt: null,
     archetype: null,
     secondaryArchetype: null,
     archetypeVariant: null,
@@ -2607,10 +3112,11 @@ export const startWorkoutFromCustomWorkout = (
 
   // Saved order is the session order; exercises resolve through their real
   // catalog IDs rather than by name.
-  const savedExercises = db.getAllSync<{ name: string }>(
-    `SELECT e.name
+  const savedExercises = db.getAllSync<{ name: string; imported_targets: string | null }>(
+    `SELECT e.name, ire.data AS imported_targets
      FROM custom_split_workout_exercises cswe
      JOIN exercises e ON e.id = cswe.exercise_id
+     LEFT JOIN imported_routine_exercises ire ON ire.workout_exercise_id = cswe.id
      WHERE cswe.workout_id = ?
      ORDER BY cswe.position ASC, cswe.id ASC`,
     workoutId
@@ -2622,13 +3128,34 @@ export const startWorkoutFromCustomWorkout = (
   const date = new Date().toISOString();
   const profile = readProfileSync();
   if (!profile) throw new Error('A profile is required to start a workout');
-  const exercises = savedExercises.map((row) =>
-    createSessionExercise(
-      customWorkoutTemplateExerciseSync(db, row.name),
-      readLastExerciseHistorySync(row.name),
-      profile
-    )
-  );
+  const exercises = savedExercises.map((row) => {
+    let template = customWorkoutTemplateExerciseSync(db, row.name);
+    let importedTargets: ImportExercise['sets'] | undefined;
+    if (row.imported_targets) {
+      const source = JSON.parse(row.imported_targets) as ImportExercise & { template: ImportTemplate };
+      const measurement = templateMeasurement(source.template);
+      if (!measurement.compatible) throw Error('This workout uses measurements Stack cannot log yet. Edit those exercises in Your routines first.');
+      importedTargets = routineWorkingSets(source.sets);
+      if (importedTargets.some(set => unsupportedRoutineTarget(source.template, set))) throw Error('This workout has targets Stack cannot log yet. Edit it in Your routines first.');
+      template = { name: row.name, loadType: measurement.loadType, metric: measurement.metric,
+        sets: importedTargets.map(set => ({
+          reps: measurement.metric === 'duration' ? 0 : set.repRange?.start ?? set.reps ?? 8,
+          weight: set.weightKg ?? 0,
+          ...(measurement.metric === 'duration' ? { durationS: Math.round(set.durationS ?? DEFAULT_DURATION_S) } : {}),
+        })) };
+      if (template.sets.length === 0) throw Error('This workout has no working-set targets. Edit it in Your routines first.');
+    }
+    const exercise = createSessionExercise(template, readLastExerciseHistorySync(row.name), profile);
+    // Previous performance can prefill the logger without rewriting the routine's explicit prescription.
+    importedTargets?.forEach((target, index) => {
+      const set = exercise.sets[index];
+      if (target.weightKg !== null) set.targetWeight = target.weightKg;
+      const reps = target.repRange?.start ?? target.reps;
+      if (exercise.metric !== 'duration' && reps !== null) set.targetReps = reps;
+      if (exercise.metric === 'duration' && target.durationS !== null) set.targetDurationS = Math.round(target.durationS);
+    });
+    return exercise;
+  });
   const workoutTypes = workoutTypesForExercisesSync(db, exercises);
   let sessionId = 0;
 
@@ -2636,10 +3163,10 @@ export const startWorkoutFromCustomWorkout = (
     deleteIncompleteSessionsSync(db);
     sessionId = db.runSync(
       `INSERT INTO sessions
-        (date, archetype, secondary_archetype, archetype_variant,
+        (date, origin, archetype, secondary_archetype, archetype_variant,
          secondary_archetype_variant, intensity, completed, retroactive,
          custom_split_id, custom_split_workout_id)
-       VALUES (?, NULL, NULL, NULL, NULL, NULL, 0, 0, ?, ?)`,
+       VALUES (?, 'custom', NULL, NULL, NULL, NULL, NULL, 0, 0, ?, ?)`,
       date,
       splitId,
       workoutId
@@ -2660,7 +3187,9 @@ export const startWorkoutFromCustomWorkout = (
 
   return {
     id: String(sessionId),
+    origin: 'custom',
     date,
+    completedAt: null,
     archetype: null,
     secondaryArchetype: null,
     archetypeVariant: null,
@@ -2675,7 +3204,8 @@ export const startWorkoutFromCustomWorkout = (
 };
 
 export const startWorkoutFromArchetype = (
-  archetypes: Archetype[]
+  archetypes: Archetype[],
+  variants?: string[]
 ): WorkoutSession => {
   if (archetypes.length < 1 || archetypes.length > 2) {
     throw new Error('An archetype workout must have one or two archetypes');
@@ -2685,7 +3215,9 @@ export const startWorkoutFromArchetype = (
   const date = new Date().toISOString();
   const profile = readProfileSync();
   if (!profile) throw new Error('A profile is required to start a workout');
-  const selections = selectNextArchetypeVariantsSync(archetypes);
+  if (variants && (variants.length !== archetypes.length || variants.some((variant, index) =>
+    !readArchetypeVariantsSync(archetypes[index]).includes(variant)))) throw Error('Could not load the selected workout variant.');
+  const selections = variants ? archetypes.map((archetype, index) => ({ archetype, variant: variants[index] })) : selectNextArchetypeVariantsSync(archetypes);
   const exercises = combineArchetypeTemplatesSync(selections).map(
     (templateExercise) =>
       createSessionExercise(
@@ -2705,9 +3237,9 @@ export const startWorkoutFromArchetype = (
     deleteIncompleteSessionsSync(db);
     sessionId = db.runSync(
       `INSERT INTO sessions
-        (date, archetype, secondary_archetype, archetype_variant,
+        (date, origin, archetype, secondary_archetype, archetype_variant,
          secondary_archetype_variant, intensity, completed, retroactive)
-       VALUES (?, ?, ?, ?, ?, NULL, 0, 0)`,
+       VALUES (?, 'archetype', ?, ?, ?, ?, NULL, 0, 0)`,
       date,
       primaryArchetype,
       secondaryArchetype,
@@ -2730,7 +3262,9 @@ export const startWorkoutFromArchetype = (
 
   return {
     id: String(sessionId),
+    origin: 'archetype',
     date,
+    completedAt: null,
     archetype: primaryArchetype,
     secondaryArchetype,
     archetypeVariant: primaryVariant,
@@ -2756,7 +3290,7 @@ export const logArchetypeCompletedRetroactively = (
   const primaryArchetype = archetypes[0];
   const secondaryArchetype = archetypes[1] ?? null;
   let sessionId = 0;
-  let exercises: Exercise[] = [];
+  let exercises: SessionExercise[] = [];
   let workoutTypes: WorkoutType[] = [];
   let selections: SelectedArchetypeVariant[] = [];
 
@@ -2765,15 +3299,16 @@ export const logArchetypeCompletedRetroactively = (
     exercises = combineArchetypeTemplatesSync(selections).map((templateExercise) =>
       createCompletedSessionExercise(
         templateExercise,
-        readLastExerciseHistorySync(templateExercise.name)
+        readLastExerciseHistorySync(templateExercise.name),
+        readProfileSync()?.weightUnit ?? DEFAULT_WEIGHT_UNIT
       )
     );
     workoutTypes = workoutTypesForExercisesSync(db, exercises);
     sessionId = db.runSync(
       `INSERT INTO sessions
-        (date, archetype, secondary_archetype, archetype_variant,
+        (date, origin, archetype, secondary_archetype, archetype_variant,
          secondary_archetype_variant, intensity, completed, retroactive)
-       VALUES (?, ?, ?, ?, ?, NULL, 1, 1)`,
+       VALUES (?, 'archetype', ?, ?, ?, ?, NULL, 1, 1)`,
       date,
       primaryArchetype,
       secondaryArchetype,
@@ -2796,7 +3331,9 @@ export const logArchetypeCompletedRetroactively = (
 
   return {
     id: String(sessionId),
+    origin: 'archetype',
     date,
+    completedAt: null,
     archetype: primaryArchetype,
     secondaryArchetype,
     archetypeVariant: selections[0].variant,
@@ -2829,24 +3366,29 @@ const currentSetIdSync = (
 export const updateCurrentSet = (
   exerciseIndex: number,
   setIndex: number,
-  updates: Pick<ExerciseSet, 'reps' | 'weight' | 'completed' | 'skipped'>
+  updates: Pick<ExerciseSet, 'reps' | 'weight' | 'completed' | 'skipped' | 'valueOrigin' | 'durationS'>
 ): void => {
   const db = getDatabase();
   const id = currentSetIdSync(db, exerciseIndex, setIndex);
   if (id === null) throw new Error('The current set no longer exists');
+  // The session snapshot decides which column is meaningful for this row.
   db.runSync(
     `UPDATE sets
-     SET reps = ?, weight = ?, completed = ?, skipped = ?
+     SET reps = CASE WHEN (SELECT metric FROM session_exercises WHERE id = sets.session_exercise_id) = 'duration' THEN 0 ELSE ? END,
+         weight = ?, completed = ?, skipped = ?, value_origin = ?,
+         duration_s = CASE WHEN (SELECT metric FROM session_exercises WHERE id = sets.session_exercise_id) = 'duration' THEN ? ELSE NULL END
      WHERE id = ?`,
     updates.reps,
     updates.weight,
     updates.completed ? 1 : 0,
     updates.skipped ? 1 : 0,
+    updates.valueOrigin ?? 'user',
+    updates.durationS ?? null,
     id
   );
 };
 
-// No schema change: expose the existing persisted identities for external actions.
+// Existing SQLite identities validate edits from every surface.
 export const readCurrentSetTarget = (exerciseIndex: number, setIndex: number) => {
   const row = getDatabase().getFirstSync<{
     workoutId: number; workoutStartedAt: string; exerciseId: number; setId: number; exerciseName: string;
@@ -2863,32 +3405,69 @@ export const readCurrentSetTarget = (exerciseIndex: number, setIndex: number) =>
   } : null;
 };
 
+/** Focus refers to a session exercise row, independent of catalog identity/order. */
+export const readCurrentWorkoutFocusSync = (): WorkoutFocus | null => {
+  const row = getDatabase().getFirstSync<{ workout_id: number; exercise_id: number; exercise_index: number }>(
+    `SELECT s.id AS workout_id, se.id AS exercise_id, se.position AS exercise_index
+     FROM sessions s JOIN session_exercises se ON se.id = s.focus_session_exercise_id AND se.session_id = s.id
+     WHERE s.completed = 0 LIMIT 1`
+  );
+  return row ? { workoutId: String(row.workout_id), exerciseId: String(row.exercise_id), exerciseIndex: row.exercise_index } : null;
+};
+
+export const writeCurrentWorkoutFocus = (workoutId: string, exerciseIndex: number): WorkoutFocus => {
+  const db = getDatabase();
+  const row = db.getFirstSync<{ id: number }>(
+    `SELECT se.id FROM session_exercises se JOIN sessions s ON s.id = se.session_id
+     WHERE s.completed = 0 AND s.id = ? AND se.position = ?`, Number(workoutId), exerciseIndex
+  );
+  if (!row) throw new Error('The current exercise no longer exists');
+  db.runSync('UPDATE sessions SET focus_session_exercise_id = ? WHERE id = ? AND completed = 0', row.id, Number(workoutId));
+  return { workoutId, exerciseId: String(row.id), exerciseIndex };
+};
+
+export const writeExerciseEntryUnit = (target: WorkoutSetTarget, unit: WeightUnit): void => {
+  const actual = readCurrentSetTarget(target.exerciseIndex, target.setIndex);
+  if (!actual || !sameSetTarget(actual, target)) throw new Error('The exercise no longer exists');
+  if (unit !== 'kg' && unit !== 'lbs') throw new Error('Invalid exercise entry unit');
+  const result = getDatabase().runSync(
+    `UPDATE session_exercises SET entry_unit = ? WHERE id = ? AND session_id = ?`,
+    unit, Number(target.exerciseId), Number(target.workoutId)
+  );
+  if (result.changes !== 1) throw new Error('The exercise unit could not be saved');
+};
+
 // Completion and Increase Between Sets must either both commit or both roll back.
 export const updateCurrentSets = (
   exerciseIndex: number,
-  updates: { setIndex: number; set: ExerciseSet }[]
+  updates: { setIndex: number; set: ExerciseSet }[],
+  nextFocus?: { workoutId: string; exerciseIndex: number }
 ) => {
+  let focus: WorkoutFocus | undefined;
   getDatabase().withTransactionSync(() => {
     for (const update of updates) {
       updateCurrentSet(exerciseIndex, update.setIndex, update.set);
       const id = currentSetIdSync(getDatabase(), exerciseIndex, update.setIndex);
       getDatabase().runSync(
-        'UPDATE sets SET target_reps = ?, target_weight = ? WHERE id = ?',
-        update.set.targetReps ?? null, update.set.targetWeight ?? null, id
+        'UPDATE sets SET target_reps = ?, target_weight = ?, target_duration_s = ? WHERE id = ?',
+        update.set.targetReps ?? null, update.set.targetWeight ?? null, update.set.targetDurationS ?? null, id
       );
     }
+    if (nextFocus) focus = writeCurrentWorkoutFocus(nextFocus.workoutId, nextFocus.exerciseIndex);
   });
+  return focus;
 };
 
 export const appendCurrentBonusSet = (
   exerciseIndex: number,
   type: BonusSetType,
   reps: number,
-  weight: number
+  weight: number,
+  durationS?: number
 ): void => {
   const db = getDatabase();
-  const sessionExercise = db.getFirstSync<ExerciseIdRow>(
-    `SELECT se.id
+  const sessionExercise = db.getFirstSync<ExerciseIdRow & { metric: ExerciseMetric }>(
+    `SELECT se.id, se.metric
      FROM session_exercises se
      JOIN sessions s ON s.id = se.session_id
      WHERE s.completed = 0 AND se.position = ?`,
@@ -2902,22 +3481,14 @@ export const appendCurrentBonusSet = (
     sessionExercise.id
   )?.next_index ?? 0;
 
-  db.runSync(
-    `INSERT INTO sets
-      (session_exercise_id, set_index, reps, weight, target_reps,
-       target_weight, completed, skipped, bonus_type)
-     VALUES (?, ?, ?, ?, NULL, NULL, 1, 0, ?)`,
-    sessionExercise.id,
-    nextIndex,
-    reps,
-    weight,
-    type
-  );
+  insertSetSync(db, sessionExercise.id, nextIndex, sessionExercise, {
+    reps, weight, durationS, type, completed: true, skipped: false, valueOrigin: 'user',
+  });
 };
 
 export const replaceCurrentSessionExercise = (
   exerciseIndex: number,
-  exercise: Exercise
+  exercise: SessionExercise
 ): void => {
   const db = getDatabase();
   db.withTransactionSync(() => {
@@ -2933,26 +3504,15 @@ export const replaceCurrentSessionExercise = (
     const exerciseId = requireExerciseIdSync(db, exercise.name);
     db.runSync('DELETE FROM sets WHERE session_exercise_id = ?', sessionExercise.id);
     db.runSync(
-      'UPDATE session_exercises SET exercise_id = ? WHERE id = ?',
+      'UPDATE session_exercises SET exercise_id = ?, entry_unit = ?, load_type = ?, metric = ? WHERE id = ?',
       exerciseId,
+      exercise.entryUnit,
+      exercise.loadType ?? 'external_weight',
+      getExerciseMetric(exercise),
       sessionExercise.id
     );
     exercise.sets.forEach((set, setIndex) => {
-      db.runSync(
-        `INSERT INTO sets
-          (session_exercise_id, set_index, reps, weight, target_reps,
-           target_weight, completed, skipped, bonus_type)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        sessionExercise.id,
-        setIndex,
-        set.reps,
-        set.weight,
-        set.targetReps ?? null,
-        set.targetWeight ?? null,
-        set.completed ? 1 : 0,
-        set.skipped ? 1 : 0,
-        set.type ?? null
-      );
+      insertSetSync(db, sessionExercise.id, setIndex, exercise, set);
     });
   });
 };
@@ -2963,13 +3523,21 @@ export const replaceCurrentSessionExercise = (
  * by the active-workout "Add Exercise" flow to add an exercise alongside the
  * ones already scheduled, rather than substituting one of them.
  */
-export const appendCurrentSessionExercise = (exercise: Exercise): void => {
+export const appendCurrentSessionExercise = (
+  exercise: SessionExercise, expectedSessionId?: string, focusAdded = false
+): void => {
   const db = getDatabase();
   db.withTransactionSync(() => {
     const session = db.getFirstSync<{ id: number }>(
       'SELECT id FROM sessions WHERE completed = 0'
     );
-    if (!session) return;
+    if (!session || (expectedSessionId && String(session.id) !== expectedSessionId)) {
+      throw new Error('This workout is no longer active.');
+    }
+    if (db.getFirstSync(`SELECT se.id FROM session_exercises se JOIN exercises e ON e.id = se.exercise_id
+      WHERE se.session_id = ? AND e.name = ?`, session.id, exercise.name)) {
+      throw new Error('This exercise is already in your workout.');
+    }
 
     const nextPosition = db.getFirstSync<{ next_position: number }>(
       `SELECT COALESCE(MAX(position) + 1, 0) AS next_position
@@ -2977,6 +3545,9 @@ export const appendCurrentSessionExercise = (exercise: Exercise): void => {
       session.id
     )?.next_position ?? 0;
     insertSessionExerciseSync(db, session.id, nextPosition, exercise);
+    if (focusAdded) db.runSync(`UPDATE sessions SET focus_session_exercise_id =
+      (SELECT id FROM session_exercises WHERE session_id = ? AND position = ?)
+      WHERE id = ?`, session.id, nextPosition, session.id);
 
     const workoutType = db.getFirstSync<{ workout_type: WorkoutType }>(
       'SELECT workout_type FROM exercises WHERE name = ?',
@@ -3006,11 +3577,17 @@ export const appendCurrentSessionExercise = (exercise: Exercise): void => {
   });
 };
 
-export const completeCurrentSession = (intensity: IntensityLevel): void => {
-  getDatabase().runSync(
-    'UPDATE sessions SET intensity = ?, completed = 1 WHERE completed = 0',
-    intensity
+export const completeCurrentSession = (intensity: IntensityLevel): string => {
+  const completedAt = new Date().toISOString();
+  const result = getDatabase().runSync(
+    `UPDATE sessions SET intensity = ?, completed = 1, completed_at = ? WHERE completed = 0
+     AND EXISTS (SELECT 1 FROM session_exercises se JOIN sets st ON st.session_exercise_id = se.id
+       WHERE se.session_id = sessions.id AND st.completed = 1 AND st.skipped <> 1)`,
+    intensity,
+    completedAt
   );
+  if (result.changes !== 1) throw new Error('Log at least one non-skipped set before finishing your workout.');
+  return completedAt;
 };
 
 export const discardCurrentSession = (): void => {
@@ -3023,7 +3600,7 @@ export const readExercisesForWorkoutTypeSync = (
 ): ExerciseCatalogItem[] =>
   getDatabase()
     .getAllSync<ExerciseCatalogRow>(
-      `SELECT id, name, workout_type, primary_muscle, is_custom, equipment, load_type
+      `SELECT id, name, workout_type, primary_muscle, is_custom, equipment, load_type, metric
        FROM exercises
        WHERE workout_type = ?
        ORDER BY id`,
@@ -3037,13 +3614,14 @@ export const readExercisesForWorkoutTypeSync = (
       isCustom: Boolean(row.is_custom),
       equipment: row.equipment,
       loadType: row.load_type,
+      metric: row.metric,
     }));
 
 /** Read-only catalog used by the Custom Split draft builder. */
 export const readExerciseCatalogSync = (): ExerciseCatalogItem[] =>
   getDatabase()
     .getAllSync<ExerciseCatalogRow>(
-      `SELECT id, name, workout_type, primary_muscle, is_custom, equipment, load_type
+      `SELECT id, name, workout_type, primary_muscle, is_custom, equipment, load_type, metric
        FROM exercises
        ORDER BY id`
     )
@@ -3055,6 +3633,7 @@ export const readExerciseCatalogSync = (): ExerciseCatalogItem[] =>
       isCustom: Boolean(row.is_custom),
       equipment: row.equipment,
       loadType: row.load_type,
+      metric: row.metric,
     }));
 
 export const readExerciseWorkoutTypeSync = (name: string): WorkoutType | undefined =>
@@ -3070,6 +3649,17 @@ export const readExerciseLoadTypeSync = (
     'SELECT load_type FROM exercises WHERE name = ?',
     name
   )?.load_type ?? 'external_weight';
+
+/** Catalog measurement for an exercise entering a NEW session. */
+export const readExerciseMeasurementSync = (
+  name: string
+): Pick<Exercise, 'loadType' | 'metric'> => {
+  const row = getDatabase().getFirstSync<{ load_type: ExerciseLoadType; metric: ExerciseMetric }>(
+    'SELECT load_type, metric FROM exercises WHERE name = ?',
+    name
+  );
+  return { loadType: row?.load_type ?? 'external_weight', metric: row?.metric ?? 'reps' };
+};
 
 export const readPrimaryMusclesForWorkoutTypeSync = (type: WorkoutType): string[] => {
   const primaryMuscles = getDatabase()
@@ -3190,19 +3780,6 @@ const ensureExerciseSync = (
   ).lastInsertRowId;
 };
 
-const activeSessionForWorkoutTypeSync = (
-  db: SQLiteDatabase,
-  type: WorkoutType
-): { id: number } | null =>
-  db.getFirstSync<{ id: number }>(
-    `SELECT s.id
-     FROM sessions s
-     JOIN session_workout_types swt ON swt.session_id = s.id
-     WHERE s.completed = 0 AND swt.workout_type = ?
-     LIMIT 1`,
-    type
-  );
-
 export const addExerciseToSplitRecords = (
   type: WorkoutType,
   name: string,
@@ -3216,13 +3793,18 @@ export const addExerciseToSplitRecords = (
        FROM split_templates WHERE workout_type = ?`,
       type
     )?.next_position ?? 0;
+    const timed = db.getFirstSync<{ metric: ExerciseMetric }>(
+      'SELECT metric FROM exercises WHERE id = ?', exerciseId
+    )?.metric === 'duration';
     db.runSync(
       `INSERT INTO split_templates
-        (workout_type, exercise_id, position, target_reps, target_weight)
-       VALUES (?, ?, ?, 8, 0)`,
+        (workout_type, exercise_id, position, target_reps, target_weight, target_duration_s)
+       VALUES (?, ?, ?, ?, 0, ?)`,
       type,
       exerciseId,
-      position
+      position,
+      timed ? 0 : 8,
+      timed ? DEFAULT_DURATION_S : null
     );
   });
 };
@@ -3241,46 +3823,6 @@ const renumberPositionsSync = (
   });
 };
 
-export const removeExerciseFromSplitRecords = (
-  type: WorkoutType,
-  exerciseIndex: number
-): void => {
-  const db = getDatabase();
-  db.withTransactionSync(() => {
-    const templates = db.getAllSync<PositionedIdRow>(
-      `SELECT id, position FROM split_templates
-       WHERE workout_type = ? ORDER BY position`,
-      type
-    );
-    const target = templates[exerciseIndex];
-    if (!target) return;
-    db.runSync('DELETE FROM split_templates WHERE id = ?', target.id);
-    renumberPositionsSync(
-      db,
-      'split_templates',
-      templates.filter((row) => row.id !== target.id)
-    );
-
-    const active = activeSessionForWorkoutTypeSync(db, type);
-    if (!active) return;
-
-    const sessionExercises = db.getAllSync<PositionedIdRow>(
-      `SELECT id, position FROM session_exercises
-       WHERE session_id = ? ORDER BY position`,
-      active.id
-    );
-    const sessionTarget = sessionExercises[exerciseIndex];
-    if (!sessionTarget) return;
-    db.runSync('DELETE FROM sets WHERE session_exercise_id = ?', sessionTarget.id);
-    db.runSync('DELETE FROM session_exercises WHERE id = ?', sessionTarget.id);
-    renumberPositionsSync(
-      db,
-      'session_exercises',
-      sessionExercises.filter((row) => row.id !== sessionTarget.id)
-    );
-  });
-};
-
 const movePositionedRowsSync = (
   db: SQLiteDatabase,
   table: 'split_templates' | 'session_exercises' | 'custom_split_workouts',
@@ -3292,37 +3834,6 @@ const movePositionedRowsSync = (
   const [moved] = reordered.splice(fromIndex, 1);
   reordered.splice(toIndex, 0, moved);
   renumberPositionsSync(db, table, reordered);
-};
-
-export const moveExerciseInSplitRecords = (
-  type: WorkoutType,
-  fromIndex: number,
-  toIndex: number
-): void => {
-  const db = getDatabase();
-  db.withTransactionSync(() => {
-    const templates = db.getAllSync<PositionedIdRow>(
-      `SELECT id, position FROM split_templates
-       WHERE workout_type = ? ORDER BY position`,
-      type
-    );
-    movePositionedRowsSync(db, 'split_templates', templates, fromIndex, toIndex);
-
-    const active = activeSessionForWorkoutTypeSync(db, type);
-    if (!active) return;
-    const sessionExercises = db.getAllSync<PositionedIdRow>(
-      `SELECT id, position FROM session_exercises
-       WHERE session_id = ? ORDER BY position`,
-      active.id
-    );
-    movePositionedRowsSync(
-      db,
-      'session_exercises',
-      sessionExercises,
-      fromIndex,
-      toIndex
-    );
-  });
 };
 
 export const readMostOverdueTypeSync = (): WorkoutType => {
@@ -3439,30 +3950,34 @@ export const readLastExerciseSync = (
 };
 
 export const readLastExerciseHistorySync = (name: string): Exercise | undefined => {
-  const row = getDatabase().getFirstSync<{ session_id: number }>(
-    `SELECT se.session_id
+  const rows = getDatabase().getAllSync<{ session_id: number }>(
+    `SELECT DISTINCT se.session_id
      FROM session_exercises se
      JOIN sessions s ON s.id = se.session_id
      WHERE s.completed = 1
        AND s.retroactive = 0
        AND se.exercise_id = (SELECT id FROM exercises WHERE name = ?)
-     ORDER BY s.date DESC, s.id ASC
-     LIMIT 1`,
+     ORDER BY s.date DESC, s.id ASC`,
     name
   );
-  return row
-    ? readSessionByIdSync(row.session_id)?.exercises.find((exercise) => exercise.name === name)
-    : undefined;
+  for (const row of rows) {
+    const session = readSessionByIdSync(row.session_id);
+    const exercise = session?.exercises.find(item => item.name === name);
+    if (!session?.imported || exercise?.sets.some(set => set.completed && !set.skipped && set.sourceKind !== 'warmup' && !set.type)) return exercise;
+  }
+  return undefined;
 };
 
 export const resetWorkoutDatabase = (): WorkoutDatabaseSnapshot => {
   const db = getDatabase();
   db.withTransactionSync(() => {
+    db.runSync('DELETE FROM exercise_notes');
     db.runSync('DELETE FROM sets');
     db.runSync('DELETE FROM session_exercises');
     db.runSync('DELETE FROM session_workout_types');
     db.runSync('DELETE FROM sessions');
-    db.runSync('UPDATE profile SET active_split_id = NULL');
+    db.runSync("UPDATE profile SET active_split_id = NULL, program_mode = 'none'");
+    db.runSync('DELETE FROM shared_split_import_receipts');
     db.runSync('DELETE FROM custom_split_workout_exercises');
     db.runSync('DELETE FROM custom_split_workouts');
     db.runSync('DELETE FROM custom_splits');
@@ -3479,6 +3994,7 @@ export const resetWorkoutDatabase = (): WorkoutDatabaseSnapshot => {
          'sessions',
          'session_exercises',
          'sets',
+         'exercise_notes',
          'custom_splits',
          'custom_split_workouts',
          'custom_split_workout_exercises'
@@ -3492,6 +4008,7 @@ export const resetWorkoutDatabase = (): WorkoutDatabaseSnapshot => {
     profile: null,
     sessions: [],
     currentSession: null,
+    workoutFocus: null,
     splitTemplates: readSplitTemplatesSync(),
     customSplits: [],
   };
@@ -3516,4 +4033,27 @@ export const readSeedCountsSync = (): {
         'SELECT COUNT(*) AS count FROM archetype_templates'
       )?.count ?? 0,
   };
+};
+
+/** Catalog identity keeps notes available across workout occurrences and renames. */
+export const readExerciseNotesSync = (exerciseId: number): ExerciseNote[] =>
+  getDatabase().getAllSync<ExerciseNoteRow>(
+    'SELECT * FROM exercise_notes WHERE exercise_id = ? ORDER BY created_at DESC, id DESC',
+    exerciseId
+  ).map(noteFromRow);
+
+export const addExerciseNoteSync = (workoutId: string, exerciseId: number, value: string): void => {
+  const text = normalizeExerciseNote(value);
+  const db = getDatabase();
+  const target = db.getFirstSync<{ id: number }>(
+    `SELECT se.id FROM session_exercises se JOIN sessions s ON s.id = se.session_id
+     WHERE s.id = ? AND s.completed = 0 AND se.exercise_id = ?`, Number(workoutId), exerciseId
+  );
+  if (!target) throw new Error('This exercise is no longer in the active workout.');
+  db.runSync('INSERT INTO exercise_notes (exercise_id, session_id, text, created_at) VALUES (?, ?, ?, ?)',
+    exerciseId, Number(workoutId), text, new Date().toISOString());
+};
+
+export const deleteExerciseNoteSync = (exerciseId: number, noteId: number): void => {
+  getDatabase().runSync('DELETE FROM exercise_notes WHERE id = ? AND exercise_id = ?', noteId, exerciseId);
 };

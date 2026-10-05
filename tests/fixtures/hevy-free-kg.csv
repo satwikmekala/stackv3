@@ -1,0 +1,12 @@
+"title","start_time","end_time","description","exercise_title","superset_id","exercise_notes","set_index","set_type","weight_kg","reps","distance_km","duration_seconds","rpe"
+"Upper, Thursday","3 Sep 2026, 10:00","3 Sep 2026, 11:00","Felt good,
+kept control.","Bench Press (Barbell)",,"Pause, then ""press""",0,"warmup",999,3,,0,6
+"Upper, Thursday","3 Sep 2026, 10:00","3 Sep 2026, 11:00","Felt good,
+kept control.","Bench Press (Barbell)",,"Pause, then ""press""",1,"normal",70,8,,0,8
+"Upper, Thursday","3 Sep 2026, 10:00","3 Sep 2026, 11:00","Felt good,
+kept control.","Bench Press (Barbell)",,"Pause, then ""press""",2,"drop_set",40,6,,0,
+"Upper, Thursday","3 Sep 2026, 10:00","3 Sep 2026, 11:00","Felt good,
+kept control.","Plank",0,"",0,"normal",,,0,45,
+"Upper, Thursday","3 Sep 2026, 10:00","3 Sep 2026, 11:00","Felt good,
+kept control.","Mystery press",,"Keep steady.",0,"normal",12.5,10,,,7
+"Upper, Tuesday","1 Sep 2026, 10:00","1 Sep 2026, 11:00","","Bench Press (Barbell)",,"",0,"normal",60,8,,0,

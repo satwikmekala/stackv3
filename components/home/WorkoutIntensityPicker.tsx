@@ -7,14 +7,13 @@ import {
   Text,
   View,
 } from 'react-native';
-import * as Haptics from 'expo-haptics';
-import type { WorkoutType } from '@/store/workoutStore';
-import { workoutMeta } from '@/constants/workouts';
+import * as Haptics from '@/services/haptics';
 import { redesignColors, redesignFonts } from '@/constants/theme';
 
 type WorkoutIntensityPickerProps = {
   visible: boolean;
-  type: WorkoutType;
+  workoutLabel: string;
+  accent: string;
   levels?: readonly IntensityLevelOption[];
   prompt?: string;
   subtext?: string;
@@ -44,7 +43,8 @@ function rgba(hex: string, opacity: number) {
 
 export function WorkoutIntensityPicker({
   visible,
-  type,
+  workoutLabel,
+  accent,
   levels = DEFAULT_LEVELS,
   prompt = 'How hard do you want to go?',
   subtext,
@@ -57,7 +57,6 @@ export function WorkoutIntensityPicker({
   const [value, setValue] = useState(0.5);
   const valueRef = useRef(0.5);
   const committedRef = useRef(false);
-  const meta = workoutMeta[type];
   const nearestLevel = levels.reduce((closest, level) =>
     Math.abs(level.value - value) < Math.abs(closest.value - value) ? level : closest
   );
@@ -72,7 +71,7 @@ export function WorkoutIntensityPicker({
       valueRef.current = 0.5;
       committedRef.current = false;
     }
-  }, [visible, type]);
+  }, [visible, workoutLabel]);
 
   const updateValue = (nextValue: number) => {
     const clamped = Math.max(0, Math.min(1, nextValue));
@@ -129,9 +128,9 @@ export function WorkoutIntensityPicker({
           style={styles.backdrop}
           onPress={onClose}
         />
-        <View style={[styles.card, { borderColor: rgba(meta.color, 0.55) }]}>
+        <View style={[styles.card, { borderColor: rgba(accent, 0.55) }]}>
           <View style={styles.handle} />
-          <Text style={[styles.eyebrow, { color: meta.color }]}>{meta.label.toUpperCase()}</Text>
+          <Text style={[styles.eyebrow, { color: accent }]}>{workoutLabel.toUpperCase()}</Text>
           <Text style={styles.title}>{prompt}</Text>
           {subtext ? <Text style={styles.subtext}>{subtext}</Text> : null}
 
@@ -158,7 +157,7 @@ export function WorkoutIntensityPicker({
               {...panResponder.panHandlers}
             >
               <View style={styles.track}>
-                <View style={[styles.trackFill, { width: `${value * 100}%`, backgroundColor: meta.color }]} />
+                <View style={[styles.trackFill, { width: `${value * 100}%`, backgroundColor: accent }]} />
                 {levels.map((level) => (
                   <View
                     key={level.label}
@@ -176,8 +175,8 @@ export function WorkoutIntensityPicker({
                     styles.thumb,
                     {
                       left: `${value * 100}%`,
-                      borderColor: meta.color,
-                      shadowColor: meta.color,
+                      borderColor: accent,
+                      shadowColor: accent,
                     },
                   ]}
                 />
@@ -197,7 +196,7 @@ export function WorkoutIntensityPicker({
                       styles.levelLabel,
                       index === 1 && styles.levelLabelCenter,
                       index === 2 && styles.levelLabelEnd,
-                      Math.abs(level.value - value) < 0.14 && { color: meta.color },
+                      Math.abs(level.value - value) < 0.14 && { color: accent },
                     ]}
                   >
                     {level.label}

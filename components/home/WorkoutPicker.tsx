@@ -1,3 +1,4 @@
+import { useMuscleColors } from '@/store/muscleColors';
 import { memo, useEffect, useState } from 'react';
 import {
   Modal,
@@ -8,7 +9,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/services/haptics';
 import Animated, {
   runOnJS,
   useAnimatedStyle,
@@ -147,7 +148,7 @@ export function WorkoutPicker({
   visible,
   selected,
   options,
-  eyebrow = 'CHOOSE A SPLIT',
+  eyebrow = 'CHOOSE A ROUTINE',
   title,
   onSelect,
   onClose,
@@ -156,6 +157,7 @@ export function WorkoutPicker({
   selectedCustomId,
   onSelectCustom,
 }: WorkoutPickerProps) {
+  useMuscleColors(state => state.preferences);
   const { height: screenHeight } = useWindowDimensions();
   const [isMounted, setIsMounted] = useState(visible);
   const progress = useSharedValue(visible ? 1 : 0);
@@ -250,7 +252,7 @@ export function WorkoutPicker({
               </View>
             ) : (
               <Text style={styles.completeMessage}>
-                THIS SPLIT HAS NO WORKOUTS YET
+                THIS ROUTINE HAS NO WORKOUTS YET
               </Text>
             )
           ) : archetypes.length > 0 ? (

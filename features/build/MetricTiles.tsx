@@ -1,11 +1,12 @@
+import { spokenTrainingCopy } from '@/utils/content';
 import { StyleSheet, Text, View } from 'react-native';
 import { redesignColors as c, redesignFonts as f } from '../../constants/theme';
 
 export type MetricTile = { value: string; label: string };
 
-/** The row of stat tiles shared by Your Stack's Overview and an unpacked week. */
+/** The row of stat tiles shared by My Stack's Overview and an unpacked week. */
 export function MetricTiles({ tiles }: { tiles: readonly MetricTile[] }) {
-  return <View style={s.row}>{tiles.map((tile) => <View key={tile.label} accessible accessibilityLabel={`${tile.value} ${tile.label.toLowerCase()}`} style={s.tile}>
+  return <View style={s.row}>{tiles.map((tile) => <View key={tile.label} accessible accessibilityLabel={spokenTrainingCopy(`${tile.value} ${tile.label.toLowerCase()}`)} style={s.tile}>
     <Text maxFontSizeMultiplier={1.5} adjustsFontSizeToFit numberOfLines={1} style={s.value}>{tile.value}</Text>
     <Text style={s.label}>{tile.label}</Text>
   </View>)}</View>;

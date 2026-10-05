@@ -25,59 +25,59 @@ const pages = load('features/build/introPages.ts');
 const { createBuildIntroduction, BUILD_INTRO_KEY } = load('features/build/introduction.ts');
 const home = (seen, weeksBuilt, piecesThisWeek) => { const { kicker, title, detail } = homeModuleCopy({ seen, weeksBuilt, piecesThisWeek }); return [kicker, title, detail]; };
 
-test('Home: seen intro with weeks built, pieces this week (plural and singular)', () => {
-  assert.deepEqual(home(true, 11, 2), ['YOUR STACK', '11 weeks built', '2 pieces this week']);
-  assert.deepEqual(home(true, 1, 1), ['YOUR STACK', '1 week built', '1 piece this week']);
+test("Home: seen intro with layers built, blocks this week (plural and singular)", () => {
+  assert.deepEqual(home(true, 11, 2), ['MY STACK', "11 layers built", "2 blocks this week"]);
+  assert.deepEqual(home(true, 1, 1), ['MY STACK', "1 layer built", "1 block this week"]);
 });
 
-test('Home: seen intro, 0 pieces this week', () => {
-  assert.deepEqual(home(true, 4, 0), ['YOUR STACK', '4 weeks built', 'This week is open']);
-  assert.deepEqual(home(true, 1, 0), ['YOUR STACK', '1 week built', 'This week is open']);
+test("Home: seen intro, 0 blocks this week", () => {
+  assert.deepEqual(home(true, 4, 0), ['MY STACK', "4 layers built", 'This week is open']);
+  assert.deepEqual(home(true, 1, 0), ['MY STACK', "1 layer built", 'This week is open']);
 });
 
-test('Home: seen intro, 0 weeks built but pieces this week never says "0 weeks built"', () => {
-  assert.deepEqual(home(true, 0, 3), ['YOUR STACK', '3 pieces this week', null]);
-  assert.deepEqual(home(true, 0, 1), ['YOUR STACK', '1 piece this week', null]);
+test("Home: seen intro, 0 layers built but blocks this week never says \"0 layers built\"", () => {
+  assert.deepEqual(home(true, 0, 3), ['MY STACK', "3 blocks this week", null]);
+  assert.deepEqual(home(true, 0, 1), ['MY STACK', "1 block this week", null]);
 });
 
-test('Home: not seen intro, weeks built (singular spelled out)', () => {
-  assert.deepEqual(home(false, 7, 2), ['YOUR STACK', "You've already built 7 weeks.", 'See it']);
-  assert.deepEqual(home(false, 1, 0), ['YOUR STACK', "You've already built one week.", 'See it']);
+test("Home: not seen intro, layers built (singular spelled out)", () => {
+  assert.deepEqual(home(false, 7, 2), ['MY STACK', "You’ve already built 7 layers.", 'See it']);
+  assert.deepEqual(home(false, 1, 0), ['MY STACK', "You’ve already built one layer.", 'See it']);
 });
 
-test('Home: not seen intro, 0 weeks built, pieces this week', () => {
-  assert.deepEqual(home(false, 0, 3), ['YOUR STACK', 'Your first pieces are in.', 'See it']);
-  assert.deepEqual(home(false, 0, 1), ['YOUR STACK', 'Your first piece is in.', 'See it']);
+test("Home: not seen intro, 0 layers built, blocks this week", () => {
+  assert.deepEqual(home(false, 0, 3), ['MY STACK', "Your first blocks are in.", 'See it']);
+  assert.deepEqual(home(false, 0, 1), ['MY STACK', "Your first block is in.", 'See it']);
 });
 
 test('Home: no history, seen or not', () => {
-  assert.deepEqual(home(false, 0, 0), ['YOUR STACK', 'Starts with your next workout.', null]);
-  assert.deepEqual(home(true, 0, 0), ['YOUR STACK', 'Starts with your next workout.', null]);
+  assert.deepEqual(home(false, 0, 0), ['MY STACK', 'Starts with your next workout.', null]);
+  assert.deepEqual(home(true, 0, 0), ['MY STACK', 'Starts with your next workout.', null]);
 });
 
-test('Home: "0 weeks built" never renders, and the spoken label reads as sentences', () => {
+test("Home: \"0 layers built\" never renders, and the spoken label reads as sentences", () => {
   for (const seen of [true, false]) for (const weeks of [0, 1, 2, 12]) for (const pieces of [0, 1, 2]) {
     const copy = homeModuleCopy({ seen, weeksBuilt: weeks, piecesThisWeek: pieces });
     assert.ok(![copy.title, copy.detail, copy.a11y].some((text) => text && /\b0 weeks?\b/.test(text)), `${seen}/${weeks}/${pieces}`);
   }
-  assert.equal(homeModuleCopy({ seen: true, weeksBuilt: 11, piecesThisWeek: 2 }).a11y, 'Your Stack. 11 weeks built. 2 pieces this week.');
-  assert.equal(homeModuleCopy({ seen: false, weeksBuilt: 1, piecesThisWeek: 0 }).a11y, "Your Stack. You've already built one week. See it.");
+  assert.equal(homeModuleCopy({ seen: true, weeksBuilt: 11, piecesThisWeek: 2 }).a11y, "My Stack. 11 layers built. 2 blocks this week.");
+  assert.equal(homeModuleCopy({ seen: false, weeksBuilt: 1, piecesThisWeek: 0 }).a11y, "My Stack. You’ve already built one layer. See it.");
 });
 
 test('intro copy: four pages, exact strings, position, CTA with and without history', () => {
-  assert.deepEqual(intro.INTRO_PAGES.map((page) => page.title), ['Every workout\nstacks up.', 'Progress\nshows.', 'Every week\nbecomes a layer.', "Don't slack.\nJust stack."]);
+  assert.deepEqual(intro.INTRO_PAGES.map((page) => page.title), ["Every workout\nstacks up.", 'Progress\nshows.', 'Every week\nbecomes a layer.', "Built one set\nat a time."]);
   assert.deepEqual(intro.INTRO_PAGES.map((page) => page.body), [
-    'Finish a session and it becomes a piece of your Stack. Stay consistent and it keeps building.',
-    'Beat your last numbers and the piece grows thicker. Hit a PR and it lands with a line of gold.',
-    'When the week ends, its pieces press into one block. Look back and see exactly where you pushed, and where you eased off.',
-    'Get to the gym as often as you can. Every session you finish goes up.',
+    "Every completed workout adds a block to My Stack.",
+    "More improved exercises make a thicker block. An earned personal record (PR) adds a line of gold.",
+    "When the week ends, its blocks combine into a layer.",
+    'Layers build My Stack over time.',
   ]);
   assert.equal(intro.introPosition(1), '2 / 4');
-  assert.equal(intro.introAnnouncement(3), "Introduction 4 of 4. Don't slack. Just stack.");
+  assert.equal(intro.introAnnouncement(3), "Introduction 4 of 4. Built one set at a time.");
   assert.equal(intro.introNextLabel(0), 'Continue to introduction 2 of 4');
-  assert.equal(intro.introCta(true, true), 'See your Stack');
+  assert.equal(intro.introCta(true, true), 'See My Stack');
   assert.equal(intro.introCta(true, false), 'Start building');
-  assert.equal(intro.introCta(false, true), 'Loading your Stack…');
+  assert.equal(intro.introCta(false, true), 'Loading My Stack…');
 });
 
 test('introPages: played = finished or visited', () => {

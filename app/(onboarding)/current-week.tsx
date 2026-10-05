@@ -8,7 +8,7 @@ import Animated, {
   useAnimatedStyle,
   useSharedValue,
 } from 'react-native-reanimated';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/services/haptics';
 import {
   OnboardingBackButton,
   OnboardingNextButton,
@@ -149,7 +149,7 @@ export default function CurrentWeek() {
       experienceLevel: params.experienceLevel ?? 'intermediate',
       trainingDays: [...selectedDays].sort((a, b) => a - b),
       onboardingCompleted: false,
-      autoIncreaseWeight: true,
+      autoIncreaseWeight: false,
       weightIncrement: NEW_PROFILE_WEIGHT_INCREMENT,
       weightUnit: DEFAULT_WEIGHT_UNIT,
       weightIncrementLbs: DEFAULT_WEIGHT_INCREMENT_LBS,

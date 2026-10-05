@@ -20,7 +20,7 @@ function load(file) {
 const model = load('features/build/model.ts');
 const { createSlabGeometry } = load('features/build/geometry.ts');
 
-test('Build requires iOS and explicit opt-in; demo controls require development', () => {
+test('Build supports iOS development or explicit signed-build opt-in; demo controls require development', () => {
   const js = ts.transpileModule(fs.readFileSync(path.resolve(__dirname, '../features/build/config.ts'), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS },
   }).outputText;
@@ -28,8 +28,8 @@ test('Build requires iOS and explicit opt-in; demo controls require development'
     const exports = {};
     new Function('exports', 'require', '__DEV__', 'process', js)(exports,
       () => ({ Platform: { OS: platform } }), dev, { env: { EXPO_PUBLIC_BUILD_SANDBOX: flag } });
-    assert.equal(exports.BUILD_SANDBOX_ENABLED, platform === 'ios' && flag === '1');
-    assert.equal(exports.BUILD_DEMO_ENABLED, dev && platform === 'ios' && flag === '1');
+    assert.equal(exports.BUILD_SANDBOX_ENABLED, platform === 'ios' && (dev || flag === '1'));
+    assert.equal(exports.BUILD_DEMO_ENABLED, dev && platform === 'ios');
   }
   const profiles = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../eas.json'), 'utf8')).build;
   assert.equal(profiles.preview.env.EXPO_PUBLIC_BUILD_SANDBOX, '1');

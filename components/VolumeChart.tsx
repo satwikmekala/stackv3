@@ -78,7 +78,7 @@ export function VolumeChart({ data }: VolumeChartProps) {
                 textAlign: 'center',
               }}
             >
-              Complete workouts to see your{'\n'}volume build week over week
+              Complete workouts to see your{'\n'}weight moved each week
             </Text>
           </View>
         )}

@@ -1,12 +1,11 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { SplitPressable as Pressable } from '@/components/custom-split/SplitPressable';
+import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { ChevronRight } from 'lucide-react-native';
 import { redesignColors, redesignFonts } from '@/constants/theme';
 import { DEFAULT_WEIGHT_UNIT } from '@/store/workoutDatabase';
 import { formatSummaryDate, deriveWorkoutSummary } from '@/store/workoutSummary';
 import { useWorkoutStore, type WorkoutSession } from '@/store/workoutStore';
 import { formatWeight, unitLabel, type WeightUnit } from '@/store/weightUnits';
-
-const CARD_BORDER = 'rgba(169, 159, 145, 0.22)';
 
 // Keep display-unit selection aligned with records.tsx. Stored volume remains
 // kg-canonical; only the value rendered in this row is converted.
@@ -15,8 +14,7 @@ const useWeightUnit = (): WeightUnit =>
 
 function shortSummaryDate(date: Date): string {
   return formatSummaryDate(date)
-    .replace(/^([A-Za-z]{3})[A-Za-z]*,/, '$1,')
-    .toUpperCase();
+    .replace(/^([A-Za-z]{3})[A-Za-z]*,/, '$1,');
 }
 
 function groupFormattedWeight(value: string): string {
@@ -35,39 +33,29 @@ export function HistoryWorkoutRow({
   onPress,
 }: HistoryWorkoutRowProps) {
   const weightUnit = useWeightUnit();
+  const { width, fontScale } = useWindowDimensions();
+  const stacked = width < 360 || fontScale > 1.3;
   const summary = deriveWorkoutSummary(session);
   const volume = groupFormattedWeight(formatWeight(summary.volumeKg, weightUnit));
 
   return (
     <Pressable
       accessibilityHint="Opens the full workout recap"
-      accessibilityLabel={`${summary.title}, ${shortSummaryDate(summary.date)}, ${volume} ${unitLabel(weightUnit)}`}
+      accessibilityLabel={`${summary.title}, ${shortSummaryDate(summary.date)}, ${volume} ${unitLabel(weightUnit)} moved`}
       accessibilityRole="button"
       onPress={onPress}
-      style={styles.row}
+      style={({ pressed }) => [styles.row, pressed && styles.pressed]}
     >
-      <View style={styles.identity}>
-        <Text
-          adjustsFontSizeToFit
-          minimumFontScale={0.8}
-          numberOfLines={1}
-          style={styles.title}
-        >
-          {summary.title}
-        </Text>
-        <Text style={styles.date}>{shortSummaryDate(summary.date)}</Text>
-      </View>
+      <View style={[styles.content, stacked && styles.stackedContent]}>
+        <View style={[styles.identity, stacked && styles.stackedIdentity]}>
+          <Text style={styles.title}>{summary.title}</Text>
+          <Text style={styles.date}>{shortSummaryDate(summary.date)}</Text>
+        </View>
 
-      <View style={styles.volume}>
-        <Text
-          adjustsFontSizeToFit
-          minimumFontScale={0.72}
-          numberOfLines={1}
-          style={styles.volumeValue}
-        >
-          {volume}
-        </Text>
-        <Text style={styles.volumeUnit}>{unitLabel(weightUnit).toUpperCase()}</Text>
+        <View style={[styles.volume, stacked && styles.stackedVolume]}>
+          <Text style={styles.volumeValue}>{volume}</Text>
+          <Text style={styles.volumeUnit}>{unitLabel(weightUnit)} moved</Text>
+        </View>
       </View>
 
       <ChevronRight
@@ -83,55 +71,71 @@ export function HistoryWorkoutRow({
 const styles = StyleSheet.create({
   row: {
     width: '100%',
-    minHeight: 90,
-    paddingHorizontal: 17,
-    paddingVertical: 15,
-    borderRadius: 23,
+    minHeight: 92,
+    paddingHorizontal: 18,
+    paddingVertical: 18,
+    borderRadius: 20,
     borderCurve: 'continuous',
-    borderWidth: 1,
-    borderColor: CARD_BORDER,
     backgroundColor: redesignColors.surface,
     flexDirection: 'row',
     alignItems: 'center',
     overflow: 'hidden',
   },
+  pressed: {
+    backgroundColor: redesignColors.raised,
+  },
+  content: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  stackedContent: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: 14,
+  },
   identity: {
     flex: 1,
     minWidth: 0,
   },
+  stackedIdentity: {
+    flex: 0,
+  },
   title: {
     fontFamily: redesignFonts.uiBold,
-    fontSize: 17,
-    lineHeight: 21,
+    fontSize: 19,
+    lineHeight: 25,
     color: redesignColors.bone,
   },
   date: {
     marginTop: 4,
-    fontFamily: redesignFonts.mono,
-    fontSize: 11,
-    lineHeight: 15,
-    letterSpacing: 0.6,
+    fontFamily: redesignFonts.ui,
+    fontSize: 14,
+    lineHeight: 20,
     color: redesignColors.ash,
   },
   volume: {
-    width: 86,
     minWidth: 0,
-    marginLeft: 10,
     alignItems: 'flex-end',
     flexShrink: 0,
   },
+  stackedVolume: {
+    alignItems: 'flex-start',
+  },
   volumeValue: {
-    fontFamily: redesignFonts.monoBold,
+    fontFamily: redesignFonts.mono,
+    fontVariant: ['tabular-nums'],
     fontSize: 17,
     lineHeight: 22,
     color: redesignColors.bone,
   },
   volumeUnit: {
     marginTop: 3,
-    fontFamily: redesignFonts.mono,
-    fontSize: 10,
-    lineHeight: 13,
-    letterSpacing: 1.4,
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: redesignFonts.ui,
     color: redesignColors.ash,
   },
   chevron: {

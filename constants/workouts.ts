@@ -1,5 +1,5 @@
 import type { WorkoutType } from '@/store/workoutStore';
-import { splitColors } from '@/constants/theme';
+import { getMuscleColor } from '@/constants/muscleColors';
 
 export const WORKOUT_ORDER: WorkoutType[] = [
   'chest',
@@ -15,39 +15,39 @@ export const workoutMeta: Record<
   { label: string; shortLabel: string; group: string; color: string }
 > = {
   chest: {
-    label: 'Chest Day',
+    label: 'Chest',
     shortLabel: 'Chest',
     group: 'Push',
-    color: splitColors.chest,
+    get color() { return getMuscleColor('chest'); },
   },
   back: {
-    label: 'Back Day',
+    label: 'Back',
     shortLabel: 'Back',
     group: 'Pull',
-    color: splitColors.back,
+    get color() { return getMuscleColor('back'); },
   },
   shoulders: {
-    label: 'Shoulders Day',
+    label: 'Shoulders',
     shortLabel: 'Shoulders',
     group: 'Push',
-    color: splitColors.shoulders,
+    get color() { return getMuscleColor('shoulders'); },
   },
   arms: {
-    label: 'Arms Day',
+    label: 'Arms',
     shortLabel: 'Arms',
     group: 'Upper',
-    color: splitColors.arms,
+    get color() { return getMuscleColor('arms'); },
   },
   legs: {
-    label: 'Legs Day',
+    label: 'Legs',
     shortLabel: 'Legs',
     group: 'Lower',
-    color: splitColors.legs,
+    get color() { return getMuscleColor('legs'); },
   },
   core: {
-    label: 'Core Day',
+    label: 'Core',
     shortLabel: 'Core',
     group: 'Core',
-    color: splitColors.core,
+    get color() { return getMuscleColor('core'); },
   },
 };

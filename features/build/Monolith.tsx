@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AccessibilityInfo, AppState, FlatList, ScrollView, Switch, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState, type ComponentProps } from 'react';
+import { AccessibilityInfo, Alert, AppState, FlatList, ScrollView, Switch, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useIsFocused, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView as NativeSafeAreaView } from 'react-native-screens/experimental';
 import Animated, { FadeIn, LayoutAnimationConfig } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
-import { ChevronLeft, ChevronRight, Dumbbell, LayoutGrid, Maximize, Minimize, X } from 'lucide-react-native';
+import { ONBOARDING_PREVIEW_ENABLED } from '@/features/onboarding/config';
+import { HelpCircle, ChevronLeft, ChevronRight, Dumbbell, LayoutGrid, Maximize, Minimize, X } from 'lucide-react-native';
 import { redesignColors as c, redesignFonts as f } from '../../constants/theme';
 import { useWorkoutStore } from '../../store/workoutStore';
 import { getStartOfWeek, toLocalCalendarDate } from '../../store/workoutCalendar';
@@ -45,10 +47,14 @@ const sources: { value: Source; title: string; detail: string }[] = [
   { value: 12, title: 'Demo · three months', detail: 'Mixed workouts, records and a quiet week' },
   { value: 104, title: 'Demo · two years', detail: '104 calendar weeks with training gaps' },
   { value: 260, title: 'Demo · five years', detail: '260 calendar weeks with training gaps' },
-  { value: 0, title: 'Demo · nothing built', detail: 'No stacks yet' },
+  { value: 0, title: 'Demo · nothing built', detail: 'No blocks yet' },
 ];
 
-export default function Monolith() {
+function TabSafeArea(props: ComponentProps<typeof NativeSafeAreaView>) {
+  return <NativeSafeAreaView {...props} edges={{ top: true, bottom: true, left: true, right: true }} />;
+}
+
+export default function Monolith({ isTab = false }: { isTab?: boolean }) {
   const accessibility = useBuildAccessibility();
   const router = useRouter();
   const focused = useIsFocused();
@@ -118,13 +124,13 @@ export default function Monolith() {
   const firstPieceDate = history.state.pieces[0]?.date;
   const weeksBuilt = history.state.sealedWeeks.length;
   const headerMetrics = [
-    countLabel(history.state.metrics.workouts, 'stack', 'stacks').toUpperCase(),
-    movedSegment(history.state.metrics.volumeKg, unit)?.toUpperCase() ?? null,
+    countLabel(history.state.metrics.workouts, 'block', 'blocks'),
+    movedSegment(history.state.metrics.volumeKg, unit) ?? null,
     history.state.metrics.records ? recordLabel(history.state.metrics.records) : null,
   ].filter((value): value is string => Boolean(value)).join(' · ');
   const selectedWeekA11y = week.sealed
     ? weekAccessibilityLabel(week)
-    : `This week, open, ${current.pieces.length ? countLabel(current.pieces.length, 'stack', 'stacks') : 'nothing yet'}${current.metrics.records ? `, ${recordLabel(current.metrics.records)}` : ''}`;
+    : `This week, open, ${current.pieces.length ? countLabel(current.pieces.length, 'block', 'blocks') : 'nothing yet'}${current.metrics.records ? `, ${countLabel(current.metrics.records, 'personal record')}` : ''}`;
   const markers = useMemo(() => entries.flatMap((entry) => entry.bottom === null || entry.top === null ? [] : [{ id: entry.week.id, y: (entry.bottom + entry.top) / 2 }]), [entries]);
   const focusRange = useMemo(() => selected.bottom === null || selected.top === null ? undefined : { bottom: selected.bottom, top: selected.top }, [selected]);
   const selectWeek = useCallback((id: string) => { setSelectedId(id); setOverview(false); }, []);
@@ -142,21 +148,22 @@ export default function Monolith() {
   const markerLabels = pickRulerMarkers(weekTicks, selected.week.id);
   const close = () => setSheet(null);
 
-  return <SafeAreaView style={styles.screen}>
+  const ScreenSafeArea = isTab ? TabSafeArea : SafeAreaView;
+  return <ScreenSafeArea style={styles.screen}>
     <View style={styles.header}>
-      <Pressable accessibilityRole="button" accessibilityLabel="Back to Your Stack" hitSlop={8} onPress={() => router.canGoBack() ? router.back() : router.replace('/')} style={styles.backButton}><ChevronLeft size={23} color={c.bone} /></Pressable>
-      <Text maxFontSizeMultiplier={1.4} style={styles.brand}>YOUR STACK</Text>
-      <View style={styles.headerSpacer} />
+      {isTab ? <View style={styles.headerSpacer} /> : <Pressable accessibilityRole="button" accessibilityLabel="Back to My Stack" hitSlop={8} onPress={() => router.canGoBack() ? router.back() : router.replace('/')} style={styles.backButton}><ChevronLeft size={23} color={c.bone} /></Pressable>}
+      <Text maxFontSizeMultiplier={1.4} style={styles.brand}>MY STACK</Text>
+      {ONBOARDING_PREVIEW_ENABLED ? <Pressable accessibilityRole="button" accessibilityLabel="How My Stack grows" onPress={() => router.push('/stack-help')} style={styles.icon}><HelpCircle size={21} color={c.bone} /></Pressable> : <View style={styles.headerSpacer} />}
     </View>
     <ScrollView scrollEnabled={accessibility.largeText} contentContainerStyle={{ flexGrow: 1 }}>
     {/* Overview gives everything above the metrics to the tower. */}
     {!overview && <View style={styles.intro}>
-        <Text maxFontSizeMultiplier={2} style={styles.title}>{empty ? 'Nothing built yet.' : weeksBuilt ? countLabel(weeksBuilt, 'week built', 'weeks built') : 'Your Stack is taking shape.'}</Text>
-        {empty ? <Text style={styles.caption}>Your first session lays your first stack.</Text> : Boolean(headerMetrics) && <Text style={styles.caption}>{headerMetrics}</Text>}
+        <Text maxFontSizeMultiplier={2} style={styles.title}>{empty ? 'Nothing built yet.' : weeksBuilt ? countLabel(weeksBuilt, 'layer built', 'layers built') : 'My Stack is taking shape.'}</Text>
+        {empty ? <Text style={styles.caption}>Your first workout adds the first block.</Text> : Boolean(headerMetrics) && <Text style={styles.caption}>{headerMetrics}</Text>}
     </View>}
     <View style={[styles.stage, accessibility.largeText && { flex: 0, height: 280 }]}>
       <LinearGradient colors={['#13110E', '#2C1D12', '#13110E']} style={StyleSheet.absoluteFill} />
-      {active && focused && accessibility.ready && !fusionSnapshot && <View style={StyleSheet.absoluteFill} accessible accessibilityLabel={empty ? 'Your Stack. Nothing built yet. Your first session lays your first stack.' : `${accessibility.reduceEffects ? 'Static preview of recent layers. ' : ''}${overview ? `Your Stack overview, since ${fullDateLabel(firstPieceDate!)}.` : selectedWeekA11y}.`}>
+      {active && focused && accessibility.ready && !fusionSnapshot && <View style={StyleSheet.absoluteFill} accessible accessibilityLabel={empty ? 'My Stack. Nothing built yet. Your first workout adds the first block.' : `${overview ? `My Stack overview, since ${fullDateLabel(firstPieceDate!)}.` : selectedWeekA11y.replace(/\.$/, '')}.`}>
         {accessibility.reduceEffects ? <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><BuildPreview slabs={overview ? history.slabs : history.slabs.filter((slab) => selected.slabIds.includes(slab.id))} width={230} height={220} /></View> : <BuildScene slabs={history.slabs} tuning={DEFAULT_TUNING} lamination="strata" paused={sheet !== null} overview={overview} focusRange={focusRange} reducedMotion={reducedMotion || accessibility.reducedMotion} markers={rulerMarkers} onMarkers={setProjected} onSelectSlab={selectSlab} benchmark={0} onStats={ignoreStats} />}
       </View>}
       {/* Focus crops the tower at the stage edges; fade it into the background instead of a hard cut. */}
@@ -171,7 +178,7 @@ export default function Monolith() {
         })}
       </View>}
       <View style={styles.cameraControls}>
-        <Pressable accessibilityRole="button" accessibilityLabel={overview ? 'Show Focus' : 'Show Overview'} onPress={toggleOverview} style={styles.icon}>{overview ? <Minimize size={19} color={c.bone} /> : <Maximize size={19} color={c.bone} />}</Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={overview ? 'Show focus' : 'Show overview'} onPress={toggleOverview} style={styles.icon}>{overview ? <Minimize size={19} color={c.bone} /> : <Maximize size={19} color={c.bone} />}</Pressable>
         <Text style={styles.cameraLabel}>{overview ? 'OVERVIEW' : 'FOCUS'}</Text>
       </View>
     </View>
@@ -179,25 +186,25 @@ export default function Monolith() {
       <View style={[styles.cardSlot, { minHeight: cardHeight }]}><LayoutAnimationConfig skipEntering>
       {overview ? <Animated.View key="metrics" entering={FadeIn.duration(220)}>
         <MetricTiles tiles={[
-          ...(history.state.metrics.workouts > 0 ? [{ value: String(history.state.metrics.workouts), label: history.state.metrics.workouts === 1 ? 'STACK' : 'STACKS' }] : []),
-          ...(weeksBuilt > 0 ? [{ value: String(weeksBuilt), label: weeksBuilt === 1 ? 'WEEK BUILT' : 'WEEKS BUILT' }] : []),
-          ...(history.state.metrics.records > 0 ? [{ value: String(history.state.metrics.records), label: history.state.metrics.records === 1 ? 'PR' : 'PRS' }] : []),
+          ...(history.state.metrics.workouts > 0 ? [{ value: String(history.state.metrics.workouts), label: history.state.metrics.workouts === 1 ? 'BLOCK' : 'BLOCKS' }] : []),
+          ...(weeksBuilt > 0 ? [{ value: String(weeksBuilt), label: weeksBuilt === 1 ? 'LAYER BUILT' : 'LAYERS BUILT' }] : []),
+          ...(history.state.metrics.records > 0 ? [{ value: String(history.state.metrics.records), label: history.state.metrics.records === 1 ? 'PR' : 'PRs' }] : []),
         ]} />
       </Animated.View> : <Animated.View key="week" entering={FadeIn.duration(220)} onLayout={(event) => measureCard(event.nativeEvent.layout.height)}>
         {/* The whole card opens the week: sealed weeks unpack, this week opens its sheet. */}
-        <Pressable accessibilityRole="button" accessibilityLabel={week.sealed ? `Unpack ${selectedWeekA11y}` : `Open this week, ${selectedWeekA11y}`} onPress={() => week.sealed ? performBuildIntent(router, buildIntents.unpackWeek(week.weekStart, String(source))) : setSheet('current')} style={styles.weekCard}>
+        <Pressable accessibilityRole="button" accessibilityLabel={week.sealed ? `Open ${selectedWeekA11y}` : `Open this week, ${selectedWeekA11y}`} onPress={() => week.sealed ? performBuildIntent(router, buildIntents.unpackWeek(week.weekStart, String(source))) : setSheet('current')} style={styles.weekCard}>
           <View style={styles.weekCardTop}><Text style={styles.eyebrow}>{week.sealed ? weekRangeLabel(week.weekStart, week.weekEnd) : 'THIS WEEK'}</Text><ChevronRight size={17} color={c.ash} /></View>
           <Text maxFontSizeMultiplier={2} style={styles.weekTitle}>{week.pieces.length
-            ? `${countLabel(week.pieces.length, 'stack', 'stacks')}${week.metrics.records ? ` · ${recordLabel(week.metrics.records)}` : ''}`
+            ? `${countLabel(week.pieces.length, 'block', 'blocks')}${week.metrics.records ? ` · ${recordLabel(week.metrics.records)}` : ''}`
             : 'Nothing yet.'}</Text>
           {week.pieces.length > 0 && <View style={styles.strata}>{week.pieces.map((piece) => <View key={piece.id} style={[styles.stripe, { backgroundColor: piece.color }]} />)}</View>}
           {week.pieces.length > 0 && Boolean(movedSegment(week.metrics.volumeKg, unit)) && <Text style={styles.caption}>{movedSegment(week.metrics.volumeKg, unit)}</Text>}
         </Pressable>
       </Animated.View>}
       </LayoutAnimationConfig></View>
-      <Pressable accessibilityRole="button" accessibilityLabel={empty ? 'Start a workout' : 'Open the Case'} onPress={() => performBuildIntent(router, empty ? buildIntents.startWorkout() : buildIntents.openCase(String(source)))} style={styles.caseButton}>
+      <Pressable accessibilityRole="button" accessibilityLabel={empty ? 'Start a workout' : 'Past weeks'} onPress={() => empty && isTab ? router.navigate('/(tabs)') : performBuildIntent(router, empty ? buildIntents.startWorkout() : buildIntents.openCase(String(source)))} style={styles.caseButton}>
         {empty ? <Dumbbell size={18} color={c.bone} /> : <LayoutGrid size={18} color={c.bone} />}
-        <Text style={[styles.link, { flex: 1 }]}>{empty ? 'Start a workout' : 'Open the Case'}</Text>
+        <Text style={[styles.link, { flex: 1 }]}>{empty ? 'Start a workout' : 'Past weeks'}</Text>
         <ChevronRight size={17} color={c.ash} />
       </Pressable>
       <View style={styles.navigation}>
@@ -210,20 +217,20 @@ export default function Monolith() {
     {fusionSnapshot && <FusionPresentation snapshot={fusionSnapshot} unit={unit} onFinish={finishFusion} onCommit={commitFusion} onRelease={releaseFusion} />}
     <Modal visible={sheet !== null} animationType={reducedMotion || accessibility.reducedMotion ? 'none' : 'slide'} presentationStyle="pageSheet" onRequestClose={close}>
       <SafeAreaView style={styles.screen}>
-        <View style={styles.sheetHeader}><Text maxFontSizeMultiplier={2} style={styles.sheetTitle}>{sheet === 'source' ? 'Your Stack options' : sheet === 'weeks' ? 'Your weeks' : 'This week'}</Text><Pressable accessibilityRole="button" accessibilityLabel="Close Your Stack sheet" onPress={close} style={styles.icon}><X size={20} color={c.bone} /></Pressable></View>
-        {sheet === 'source' ? <FlatList data={sources} keyExtractor={(item) => String(item.value)} contentContainerStyle={styles.list} ListHeaderComponent={<View style={{ gap: 12 }}><View style={styles.detailButton}><Text style={styles.link}>Reduce effects</Text><Switch accessibilityLabel="Reduce Your Stack effects" value={accessibility.reduceEffects} disabled={!accessibility.ready} onValueChange={(value) => { void buildPreferences.setReduceEffects(value); }} /></View><Text style={styles.note}>Use static previews and skip reward animations. All workouts and records stay available.</Text><Text style={styles.note}>Demo sessions are illustrative and never saved to your workout history.</Text></View>} renderItem={({ item }) => <Pressable accessibilityRole="button" accessibilityState={{ selected: source === item.value }} onPress={() => { setSource(item.value); setSelectedId(null); setProjected([]); close(); }} style={[styles.listRow, source === item.value && styles.selected]}><Text style={styles.rowTitle}>{item.title}</Text><Text style={styles.note}>{item.detail}</Text></Pressable>} />
+        <View style={styles.sheetHeader}><Text maxFontSizeMultiplier={2} style={styles.sheetTitle}>{sheet === 'source' ? 'My Stack options' : sheet === 'weeks' ? 'Your weeks' : 'This week'}</Text><Pressable accessibilityRole="button" accessibilityLabel="Close My Stack sheet" onPress={close} style={styles.icon}><X size={20} color={c.bone} /></Pressable></View>
+        {sheet === 'source' ? <FlatList data={sources} keyExtractor={(item) => String(item.value)} contentContainerStyle={styles.list} ListHeaderComponent={<View style={{ gap: 12 }}><View style={styles.detailButton}><Text style={styles.link}>Reduce effects</Text><Switch accessibilityLabel="Reduce My Stack effects" value={accessibility.reduceEffects} disabled={!accessibility.ready} onValueChange={(value) => { void buildPreferences.setReduceEffects(value).catch(() => { Alert.alert('Couldn’t save preference', 'Try again.'); }); }} /></View><Text style={styles.note}>Use static previews and skip reward animations. All workouts and records stay available.</Text><Text style={styles.note}>Example workouts are never saved to your history.</Text></View>} renderItem={({ item }) => <Pressable accessibilityRole="button" accessibilityState={{ selected: source === item.value }} onPress={() => { setSource(item.value); setSelectedId(null); setProjected([]); close(); }} style={[styles.listRow, source === item.value && styles.selected]}><Text style={styles.rowTitle}>{item.title}</Text><Text style={styles.note}>{item.detail}</Text></Pressable>} />
           : sheet === 'weeks' ? <FlatList data={[...entries].reverse()} keyExtractor={(item) => item.week.id} contentContainerStyle={styles.list} initialNumToRender={12} renderItem={({ item }) => {
             const rowMetrics = [
-              item.week.pieces.length ? countLabel(item.week.pieces.length, 'stack', 'stacks') : 'Nothing yet.',
+              item.week.pieces.length ? countLabel(item.week.pieces.length, 'block', 'blocks') : 'Nothing yet.',
               movedSegment(item.week.metrics.volumeKg, unit),
               item.week.metrics.records ? recordLabel(item.week.metrics.records) : null,
             ].filter((value): value is string => Boolean(value)).join(' · ');
             const label = item.week.sealed
               ? weekAccessibilityLabel(item.week)
-              : `This week, open${item.week.pieces.length ? `, ${countLabel(item.week.pieces.length, 'stack', 'stacks')}` : ', nothing yet'}${item.week.metrics.records ? `, ${recordLabel(item.week.metrics.records)}` : ''}`;
+              : `This week, open${item.week.pieces.length ? `, ${countLabel(item.week.pieces.length, 'block', 'blocks')}` : ', nothing yet'}${item.week.metrics.records ? `, ${countLabel(item.week.metrics.records, 'personal record')}` : ''}`;
             return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ selected: item.week.id === week.id }} onPress={() => { selectWeek(item.week.id); close(); }} style={[styles.listRow, item.week.id === week.id && styles.selected]}><Text style={styles.rowTitle}>{item.week.sealed ? weekRangeLabel(item.week.weekStart, item.week.weekEnd) : 'THIS WEEK · OPEN'}</Text><View style={styles.strata}>{item.week.pieces.map((piece) => <View key={piece.id} style={[styles.stripe, { backgroundColor: piece.color }]} />)}</View><Text style={styles.note}>{rowMetrics}</Text></Pressable>;
           }} />
-            : <FlatList data={current.pieces} keyExtractor={(piece) => piece.id} contentContainerStyle={styles.list} ListHeaderComponent={current.pieces.length > 0 ? <View style={styles.pill}><Text style={styles.pillText}>{countLabel(current.pieces.length, 'stack', 'stacks').toUpperCase()}</Text></View> : null} ListEmptyComponent={<View style={{ gap: 5, marginTop: 20 }}><Text maxFontSizeMultiplier={2} style={styles.empty}>Nothing yet.</Text><Text style={styles.note}>Your next session starts it.</Text></View>} renderItem={({ item: piece }) => {
+            : <FlatList data={current.pieces} keyExtractor={(piece) => piece.id} contentContainerStyle={styles.list} ListHeaderComponent={current.pieces.length > 0 ? <View style={styles.pill}><Text style={styles.pillText}>{countLabel(current.pieces.length, 'block', 'blocks').toUpperCase()}</Text></View> : null} ListEmptyComponent={<View style={{ gap: 5, marginTop: 20 }}><Text maxFontSizeMultiplier={2} style={styles.empty}>Nothing yet.</Text><Text style={styles.note}>Your next workout starts it.</Text></View>} renderItem={({ item: piece }) => {
               // Same row as an unpacked week: the workout's name, what it moved and any PRs.
               const copy = pieceCardCopy(piece, piece.label, unit);
               return <Pressable accessibilityRole="button" accessibilityLabel={copy.a11y} onPress={() => { close(); performBuildIntent(router, buildIntents.viewWorkout(piece.sessionId, source === 'saved' ? undefined : Number(source))); }} style={styles.listRow}>
@@ -233,7 +240,7 @@ export default function Monolith() {
             }} />}
       </SafeAreaView>
     </Modal>
-  </SafeAreaView>;
+  </ScreenSafeArea>;
 }
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: c.ink },

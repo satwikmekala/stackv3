@@ -86,6 +86,9 @@ export const WorkoutLiveActivityLayout = (state: WorkoutLiveActivityDisplayState
       const value = kg * factor;
       return Number.isInteger(value) ? String(value) : value.toFixed(1).replace(/\.0$/, '');
     };
+    // m:ss, identical to the app's formatDuration for integer seconds.
+    const clock = (seconds: number) =>
+      Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');
     if (action === 'completeSet') {
       const next = model.next;
       const display = next || state;
@@ -94,24 +97,35 @@ export const WorkoutLiveActivityLayout = (state: WorkoutLiveActivityDisplayState
         interaction: display.interaction ? { ...display.interaction, next: undefined } : undefined,
       };
     }
+    const timed = state.metric === 'duration';
     let weightKg = model.weightKg;
     let reps = Number(state.reps);
+    let durationS = Number(model.durationS);
     if (action === 'increaseWeight') weightKg += model.weightStepKg;
     if (action === 'decreaseWeight') weightKg = Math.max(0, weightKg - model.weightStepKg);
     if (action === 'increaseReps') reps += 1;
     if (action === 'decreaseReps') reps = Math.max(1, reps - 1);
-    if (!Number.isFinite(weightKg) || !Number.isInteger(reps)) return state;
+    // Same bounds as the store's clampDuration: 0:01 … 99:59.
+    if (action === 'increaseDuration') durationS = Math.min(5999, durationS + Number(model.durationStepS));
+    if (action === 'decreaseDuration') durationS = Math.max(1, durationS - Number(model.durationStepS));
+    if (!Number.isFinite(weightKg) || !Number.isInteger(timed ? durationS : reps)) return state;
     let next = model.next;
     if (next?.interaction) {
       const nextKg = model.nextWeightOffsetKg !== undefined ? weightKg + model.nextWeightOffsetKg : next.interaction.weightKg;
       next = { ...next,
         weight: next.unit ? format(nextKg, next.interaction.displayFactor) : '—',
-        reps: model.nextRepsFromCurrent ? reps : next.reps,
         interaction: { ...next.interaction, weightKg: nextKg },
       };
+      if (timed && model.nextDurationFromCurrent) {
+        next.duration = clock(durationS);
+        next.interaction = { ...next.interaction!, durationS };
+      } else if (!timed) {
+        next.reps = model.nextRepsFromCurrent ? reps : next.reps;
+      }
     }
-    return { ...state, weight: state.unit ? format(weightKg, model.displayFactor) : '—', reps,
-      interaction: { ...model, weightKg, next },
+    const measured = timed ? { duration: clock(durationS) } : { reps };
+    return { ...state, weight: state.unit ? format(weightKg, model.displayFactor) : '—', ...measured,
+      interaction: timed ? { ...model, weightKg, durationS, next } : { ...model, weightKg, next },
     };
   };
 
@@ -127,27 +141,32 @@ export const WorkoutLiveActivityLayout = (state: WorkoutLiveActivityDisplayState
     ) : content
   );
 
-  const valueGroup = (value: number | string, unit: string, expanded: boolean, weight: boolean) => (
+  // One group per measured quantity; each maps to its own validated actions.
+  const valueGroup = (value: number | string | undefined, unit: string, expanded: boolean, kind: 'weight' | 'reps' | 'duration') => (
     // Baseline alignment centres −/+ on the number, not on the number+unit
     // stack. Each control keeps a 20pt tap width with its slack facing the
     // number, so the visible gap is the same on both sides at any digit count.
     <HStack alignment="firstTextBaseline" spacing={2}>
-      {control(weight ? state.actions?.decreaseWeight : state.actions?.decreaseReps, weight ? 'Decrease weight' : 'Decrease reps',
+      {control(
+        kind === 'weight' ? state.actions?.decreaseWeight : kind === 'duration' ? state.actions?.decreaseDuration : state.actions?.decreaseReps,
+        kind === 'weight' ? 'Decrease weight' : kind === 'duration' ? 'Decrease time' : 'Decrease reps',
         <Text modifiers={[frame({ width: 20, alignment: 'leading' }), font({ size: 22 }), foregroundStyle('#8E8D87')]}>−</Text>
       )}
       {/* Unit sits under the value so three-digit weights get the full width.
           The minimum width keeps −/+ still for common values; longer ones push out. */}
-      <VStack spacing={1} modifiers={[frame({ minWidth: weight ? 52 : 36 })]}>
+      <VStack spacing={1} modifiers={[frame({ minWidth: kind === 'reps' ? 36 : 52 })]}>
         {/* ActivityKit animates each update; numericText rolls the changed
             digits like the in-app counter instead of swapping the whole value. */}
         <Text modifiers={[font({ size: expanded ? 24 : 26, weight: 'bold' }), monospacedDigit(), contentTransition('numericText'), lineLimit(1), minimumScaleFactor(0.5)]}>
-          {value}
+          {value ?? '—'}
         </Text>
         <Text modifiers={[font({ size: 10, weight: 'medium' }), foregroundStyle(muted), fixedSize()]}>
           {unit}
         </Text>
       </VStack>
-      {control(weight ? state.actions?.increaseWeight : state.actions?.increaseReps, weight ? 'Increase weight' : 'Increase reps',
+      {control(
+        kind === 'weight' ? state.actions?.increaseWeight : kind === 'duration' ? state.actions?.increaseDuration : state.actions?.increaseReps,
+        kind === 'weight' ? 'Increase weight' : kind === 'duration' ? 'Increase time' : 'Increase reps',
         <Text modifiers={[frame({ width: 20, alignment: 'trailing' }), font({ size: 22 }), foregroundStyle('#8E8D87')]}>+</Text>
       )}
     </HStack>
@@ -224,15 +243,20 @@ export const WorkoutLiveActivityLayout = (state: WorkoutLiveActivityDisplayState
 
       {/* Temporary tap presentation is reconciled by the authoritative store.
           Equal flexible spacers keep the divider centred between the groups. */}
+      {/* Bodyweight (unit '') shows only its measured value: no fake weight. */}
       <HStack spacing={0}>
-        {valueGroup(state.weight, state.unit, expanded, true)}
-        <Spacer minLength={10} />
-        <RoundedRectangle
-          cornerRadius={0.5}
-          modifiers={[frame({ width: 1, height: 32 }), foregroundStyle('#282725')]}
-        />
-        <Spacer minLength={10} />
-        {valueGroup(state.reps, 'reps', expanded, false)}
+        {state.unit ? valueGroup(state.weight, state.unit, expanded, 'weight') : null}
+        {state.unit ? <Spacer minLength={10} /> : null}
+        {state.unit ? (
+          <RoundedRectangle
+            cornerRadius={0.5}
+            modifiers={[frame({ width: 1, height: 32 }), foregroundStyle('#282725')]}
+          />
+        ) : null}
+        {state.unit ? <Spacer minLength={10} /> : null}
+        {state.metric === 'duration'
+          ? valueGroup(state.duration, 'time', expanded, 'duration')
+          : valueGroup(state.reps, 'reps', expanded, 'reps')}
         <Spacer minLength={10} />
         {control(state.actions?.completeSet, 'Complete set', done(expanded ? 50 : 52))}
       </HStack>

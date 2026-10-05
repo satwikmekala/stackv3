@@ -1,0 +1,32 @@
+{
+  "name": "stack-launch-film",
+  "private": true,
+  "description": "Stack launch film: a Remotion project built from the app's own tokens and Build geometry. Isolated from the app runtime.",
+  "scripts": {
+    "assets": "node scripts/assets.mjs",
+    "prestudio": "node scripts/assets.mjs && node scripts/sfx.mjs",
+    "studio": "remotion studio src/index.ts",
+    "prerender": "node scripts/assets.mjs && node scripts/sfx.mjs",
+    "render": "remotion render src/index.ts StackLaunch out/stack-launch-9x16.mp4",
+    "render:16x9": "node scripts/assets.mjs && node scripts/sfx.mjs && remotion render src/index.ts StackLaunchLandscape out/stack-launch-16x9.mp4",
+    "still": "node scripts/assets.mjs && remotion still src/index.ts StackLaunch out/still.png",
+    "sfx": "node scripts/sfx.mjs",
+    "typecheck": "tsc --noEmit",
+    "stills": "node scripts/assets.mjs && node scripts/sfx.mjs && node scripts/stills.mjs",
+    "render:silent": "node scripts/assets.mjs && remotion render src/index.ts StackLaunch out/stack-launch-9x16-silent.mp4 --props='{\"format\":\"vertical\",\"sfx\":false}'"
+  },
+  "dependencies": {
+    "@react-three/fiber": "9.7.0",
+    "@remotion/cli": "4.0.530",
+    "@remotion/three": "4.0.530",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "remotion": "4.0.530",
+    "three": "0.185.0"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.10",
+    "@types/three": "0.185.0",
+    "typescript": "~6.0.3"
+  }
+}

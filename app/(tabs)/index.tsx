@@ -1,7 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { longContentDate } from '@/utils/content';
+import { getProgramFrequency } from '@/store/trainingPreferences';
+import { useMuscleColors } from '@/store/muscleColors';
+import { resolveDayColor } from '@/features/custom-split/colors';
+import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import {
+  AppState,
   Platform,
-  Pressable,
+  TouchableOpacity,
   ScrollView,
   StyleSheet,
   Text,
@@ -9,15 +14,18 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useIsFocused } from 'expo-router/react-navigation';
 import { LinearGradient } from 'expo-linear-gradient';
-import * as Haptics from 'expo-haptics';
-import { ArrowLeftRight } from 'lucide-react-native';
+import * as Haptics from '@/services/haptics';
+import { Plus, ChevronRight } from 'lucide-react-native';
 import Animated, {
   FadeInDown,
+  cancelAnimation,
   ReduceMotion,
+  useSharedValue,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { HomeDeparture, useHomeDepartureStyle } from '@/components/home/HomeDeparture';
+import { HomeTabBarDeparture } from '@/components/home/HomeTabBarDeparture';
 import { WorkoutHeroCard } from '@/components/home/WorkoutHeroCard';
 import { YourSplitCard } from '@/components/home/YourSplitCard';
 import { EMPTY_CUSTOM_WORKOUT_MESSAGE } from '@/store/customSplits';
@@ -25,7 +33,7 @@ import {
   WorkoutPicker,
   type CustomWorkoutOption,
 } from '@/components/home/WorkoutPicker';
-import type { Archetype } from '@/constants/archetypes';
+import { getSessionWorkoutDisplay, type Archetype } from '@/constants/archetypes';
 import { motionDuration, motionEasing } from '@/constants/motion';
 import { redesignColors, redesignFonts } from '@/constants/theme';
 import { getWeeklyQueueState } from '@/store/weeklyQueueEngine';
@@ -34,47 +42,17 @@ import {
   readArchetypeTemplateSync,
 } from '@/store/workoutDatabase';
 import {
-  MUSCLE_GROUP_COLORS,
-  getMuscleGroupForExercise,
   getWorkoutLetter,
 } from '@/store/customSplitDraft';
 import type { CustomSplitWorkout } from '@/store/customSplits';
 import { resolveNextCustomWorkoutIndex } from '@/store/customSplitRotation';
 import { toLocalCalendarDate, useWorkoutStore } from '@/store/workoutStore';
-import { resumeWorkout } from '@/utils/workoutResume';
 import type { WorkoutLaunchOrigin } from '@/utils/workoutLaunch';
-import { BUILD_SANDBOX_ENABLED } from '@/features/build/config';
+import { ONBOARDING_PREVIEW_ENABLED } from '@/features/onboarding/config';
+import { useWorkoutLaunch, workoutLaunch } from '@/store/workoutLaunch';
+import { navigateWorkoutLaunch } from '@/features/workout-launch/navigation';
+import type { WorkoutIntent } from '@/features/workout-launch/coordinator';
 import '@/global.css';
-
-// Keep experimental Build and its dependencies off the normal Home startup path.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const BuildHome = BUILD_SANDBOX_ENABLED ? require('@/features/build/BuildHome').default : null;
-
-const DAY_LABELS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
-const MONTH_LABELS = [
-  'JAN',
-  'FEB',
-  'MAR',
-  'APR',
-  'MAY',
-  'JUN',
-  'JUL',
-  'AUG',
-  'SEP',
-  'OCT',
-  'NOV',
-  'DEC',
-];
-
-const FULL_DAY_LABELS = [
-  'MONDAY',
-  'TUESDAY',
-  'WEDNESDAY',
-  'THURSDAY',
-  'FRIDAY',
-  'SATURDAY',
-  'SUNDAY',
-];
 
 const EMPTY_CUSTOM_WORKOUTS: CustomSplitWorkout[] = [];
 
@@ -91,11 +69,7 @@ function buildHomeEnter(delay: number) {
 
 const HEADER_ENTER = buildHomeEnter(0);
 const HERO_ENTER = buildHomeEnter(80);
-const CHANGE_BUTTON_ENTER = buildHomeEnter(150);
-// Build's card sits between the change button and the split card in the entrance sequence.
-const BUILD_CARD_DELAY = 195;
-const BUILD_CARD_ENTER = buildHomeEnter(BUILD_CARD_DELAY);
-const SPLIT_CARD_ENTER = buildHomeEnter(240);
+const SPLIT_CARD_ENTER = buildHomeEnter(160);
 
 // The 6.1-inch and 6.3-inch phones are close in width but have meaningfully
 // different vertical room. Keep the Home hierarchy intact while tightening it
@@ -115,79 +89,75 @@ function blend(roomy: number, compact: number, compactness: number) {
   return roomy + (compact - roomy) * compactness;
 }
 
-/** Eyebrow for the hero card: which day the queued workout actually belongs to. */
-function scheduleEyebrow(nextUpDate: string | null) {
-  if (!nextUpDate) return 'NEXT UP';
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  if (nextUpDate === toLocalCalendarDate(today)) return 'TODAY';
-
-  const tomorrow = new Date(today);
-  tomorrow.setDate(today.getDate() + 1);
-  if (nextUpDate === toLocalCalendarDate(tomorrow)) return 'TOMORROW';
-
-  const [year, month, day] = nextUpDate.split('-').map(Number);
-  const target = new Date(year, month - 1, day);
-  return FULL_DAY_LABELS[(target.getDay() + 6) % 7];
-}
-
 /** Saved workouts carry their resolved name; the letter is the last resort. */
 function customWorkoutTitle(workout: CustomSplitWorkout, index: number) {
   return workout.name.trim() || `Workout ${getWorkoutLetter(index)}`;
 }
 
 function customWorkoutAccent(workout: CustomSplitWorkout) {
-  const exercise = workout.exercises[0];
-  return exercise
-    ? MUSCLE_GROUP_COLORS[getMuscleGroupForExercise(exercise)]
-    : redesignColors.ash;
+  return resolveDayColor(workout);
 }
 
 function plural(count: number, noun: string) {
   return `${noun}${count === 1 ? '' : 's'}`;
 }
 
-function todayLabel() {
-  const today = new Date();
-  const day = DAY_LABELS[(today.getDay() + 6) % 7];
-  return `${day} · ${MONTH_LABELS[today.getMonth()]} ${today.getDate()}`;
+function todayLabel(today: Date) {
+  return longContentDate(today);
 }
 
 export default function Home() {
+  const departure = useSharedValue(0);
+  useFocusEffect(useCallback(() => { departure.set(0); }, [departure]));
+  return <HomeDeparture.Provider value={departure}><HomeContent /><HomeTabBarDeparture /></HomeDeparture.Provider>;
+}
+
+function HomeContent() {
+  useMuscleColors(state => state.preferences);
+  const headerDeparture = useHomeDepartureStyle(0, 0.7, 8);
+  const secondaryDeparture = useHomeDepartureStyle(0.02, 0.76, -12);
+  const backgroundDeparture = useHomeDepartureStyle(0, 1, 0);
   const router = useRouter();
-  const isFocused = useIsFocused();
+  const [now, setNow] = useState(() => new Date());
+  useFocusEffect(useCallback(() => {
+    setNow(new Date());
+    const timer = setInterval(() => setNow(new Date()), 60_000);
+    const subscription = AppState.addEventListener('change', state => {
+      if (state === 'active') setNow(new Date());
+    });
+    return () => { clearInterval(timer); subscription.remove(); };
+  }, []));
   const insets = useSafeAreaInsets();
-  const { height: windowHeight } = useWindowDimensions();
+  const { height: windowHeight, fontScale } = useWindowDimensions();
   const compactness = compactnessForHeight(windowHeight);
   const profile = useWorkoutStore((state) => state.profile);
   useWorkoutStore((state) => state.sessions);
-  const currentSession = useWorkoutStore((state) => state.currentSession);
-  const startWorkoutFromArchetype = useWorkoutStore(
-    (state) => state.startWorkoutFromArchetype
-  );
+  const liveSession = useWorkoutStore((state) => state.currentSession);
+  const [departing, setDeparting] = useState(false);
+  const departure = useContext(HomeDeparture);
+  const [launchRevision, setLaunchRevision] = useState(0);
+  const launchError = useWorkoutLaunch(state => state.intent ? null : state.error);
+  // Keep the source handle mounted while session creation updates the store.
+  const currentSession = departing ? null : liveSession;
   const currentCustomSplit = useWorkoutStore((state) => state.currentCustomSplit);
   const customSplits = useWorkoutStore((state) => state.customSplits);
   const loadCustomSplit = useWorkoutStore((state) => state.loadCustomSplit);
-  const setActiveSplit = useWorkoutStore((state) => state.setActiveSplit);
-  const startWorkoutFromCustomWorkout = useWorkoutStore(
-    (state) => state.startWorkoutFromCustomWorkout
-  );
   const getLastCompletedCustomWorkoutId = useWorkoutStore(
     (state) => state.getLastCompletedCustomWorkoutId
   );
 
-  // profile.activeSplitId is the single source of truth for which program Home
-  // presents: null means Stack's automatic program, anything else means the
-  // saved Custom Split with that ID.
-  const activeSplitId = profile?.activeSplitId ?? null;
+  const programMode = profile?.programMode ?? 'none';
+  const isNoProgramMode = programMode === 'none';
+  const isCustomMode = programMode === 'custom';
+  const activeSplitId = isCustomMode ? profile?.activeSplitId ?? null : null;
 
   // The selectors above make queue state refresh whenever profile or completed
   // sessions change; the engine itself remains the single source of truth.
   const queueState = getWeeklyQueueState();
   const [selectedArchetype, setSelectedArchetype] = useState<Archetype | null>(null);
-  const nextUp = selectedArchetype ? [selectedArchetype] : queueState.nextUp;
-  const heroEyebrow = selectedArchetype ? 'NEXT UP' : scheduleEyebrow(queueState.nextUpDate);
+  const nextUp = programMode === 'stack' ? selectedArchetype ? [selectedArchetype] : queueState.nextUp : [];
+  const heroEyebrow =
+    queueState.nextUpDate === toLocalCalendarDate(now) ? 'TODAY' : 'NEXT UP';
   const exerciseCount = nextUp.reduce(
     (count, archetype) =>
       count +
@@ -198,55 +168,26 @@ export default function Home() {
   const [selectedCustomWorkoutId, setSelectedCustomWorkoutId] = useState<number | null>(
     null
   );
-  const [activeSplitMissing, setActiveSplitMissing] = useState(false);
   // Commit preview changes after the picker finishes its exit animation.
   const selectedArchetypeAfterPickerExitRef = useRef<Archetype | null>(null);
   const selectedCustomWorkoutAfterPickerExitRef = useRef<number | null>(null);
-  const hasAnimatedHomeRef = useRef(false);
   const startingWorkoutRef = useRef(false);
 
   useFocusEffect(useCallback(() => {
-    startingWorkoutRef.current = false;
-  }, []));
-
-  const shouldAnimateHomeEntrance = Boolean(profile) && !hasAnimatedHomeRef.current;
-
-  useEffect(() => {
-    if (profile) {
-      hasAnimatedHomeRef.current = true;
+    if (startingWorkoutRef.current || workoutLaunch.didHandOff()) {
+      setSelectedArchetype(null);
+      setSelectedCustomWorkoutId(null);
     }
-  }, [profile]);
+    startingWorkoutRef.current = false;
+    workoutLaunch.resetAfterNavigation();
+    setDeparting(false);
+  }, [setSelectedArchetype, setSelectedCustomWorkoutId]));
 
-  // Load the active split's persistent detail whenever Home is focused or the
-  // active program changes, so activating a split in Your Splits shows up here
-  // without an app restart.
-  useFocusEffect(
-    useCallback(() => {
-      if (activeSplitId === null) {
-        setActiveSplitMissing(false);
-        return;
-      }
-      let cancelled = false;
-      void (async () => {
-        const loaded = await loadCustomSplit(activeSplitId);
-        if (cancelled) return;
-        // undefined means the read itself failed and was already surfaced;
-        // null means the split genuinely no longer exists.
-        if (loaded === null) {
-          console.warn(
-            `[home] active split ${activeSplitId} could not be loaded; falling back to Stack`
-          );
-          setActiveSplitMissing(true);
-          setActiveSplit(null);
-        } else if (loaded) {
-          setActiveSplitMissing(false);
-        }
-      })();
-      return () => {
-        cancelled = true;
-      };
-    }, [activeSplitId, loadCustomSplit, setActiveSplit])
-  );
+  // A failed read keeps the selection and offers Retry; a proven missing
+  // routine is reconciled to no-program mode by the store.
+  useFocusEffect(useCallback(() => {
+    if (activeSplitId !== null) void loadCustomSplit(activeSplitId);
+  }, [activeSplitId, loadCustomSplit]));
 
   const customSplit =
     activeSplitId !== null && currentCustomSplit?.id === activeSplitId
@@ -255,7 +196,6 @@ export default function Home() {
   const activeSplitSummary = activeSplitId === null
     ? null
     : customSplits.find((split) => split.id === activeSplitId) ?? null;
-  const isCustomMode = activeSplitId !== null && !activeSplitMissing;
   const customWorkouts = customSplit?.workouts ?? EMPTY_CUSTOM_WORKOUTS;
   // Durable position: derived from this split's own completed session history
   // every render, so it survives relaunch, split switching and manual detours
@@ -297,26 +237,23 @@ export default function Home() {
       customSplit &&
       (customWorkouts.length === 0 || !customWorkoutReady)
   );
-  const customOptions = useMemo<CustomWorkoutOption[]>(
-    () =>
-      customWorkouts.map((workout, index) => ({
-        id: workout.id,
-        letter: getWorkoutLetter(index),
-        name: customWorkoutTitle(workout, index),
-        color: customWorkoutAccent(workout),
-        exerciseCount: workout.exercises.length,
-      })),
-    [customWorkouts]
-  );
+  const customOptions: CustomWorkoutOption[] = customWorkouts.map((workout, index) => ({
+    id: workout.id,
+    letter: getWorkoutLetter(index),
+    name: customWorkoutTitle(workout, index),
+    color: customWorkoutAccent(workout),
+    exerciseCount: workout.exercises.length,
+  }));
 
   // Each split owns its own rotation, so a pick made under one split must not
   // leak into another.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Reset a manual preview when its owning split changes.
     setSelectedCustomWorkoutId(null);
     setSelectedArchetype(null);
     selectedArchetypeAfterPickerExitRef.current = null;
     selectedCustomWorkoutAfterPickerExitRef.current = null;
-  }, [activeSplitId]);
+  }, [activeSplitId, programMode]);
 
   useEffect(() => {
     if (customSplitBroken) {
@@ -332,51 +269,34 @@ export default function Home() {
     }
   };
 
-  const handleStartWorkout = (origin?: WorkoutLaunchOrigin) => {
+  const handleStartWorkout = (origin?: WorkoutLaunchOrigin, empty = false) => {
     if (startingWorkoutRef.current) return;
     startingWorkoutRef.current = true;
     tapFeedback();
-    // An already-created session resumes through the existing mechanism,
-    // whatever program produced it.
-    if (currentSession) {
-      resumeWorkout(router);
-      return;
-    }
-    const openWorkout = () => router.push({
-      pathname: '/workout',
-      params: origin ? { launchOrigin: JSON.stringify(origin) } : {},
-    });
-    if (isCustomMode) {
-      if (activeSplitId === null || !selectedCustomWorkout || !customWorkoutReady ||
-        !startWorkoutFromCustomWorkout(activeSplitId, selectedCustomWorkout.id)) {
-        startingWorkoutRef.current = false;
-        return;
-      }
-      // Hand Home back to durable resolution: completing this session advances
-      // the rotation, and abandoning it leaves the durable position untouched.
-      setSelectedCustomWorkoutId(null);
-      openWorkout();
-      return;
-    }
-    if (nextUp.length === 0) {
+    let intent: WorkoutIntent;
+    // A stale callback still resumes a session that arrived after render.
+    if (useWorkoutStore.getState().currentSession || empty || isNoProgramMode) intent = { kind: 'empty', origin };
+    else if (isCustomMode && activeSplitId !== null && selectedCustomWorkout && customWorkoutReady)
+      intent = { kind: 'custom', splitId: activeSplitId, workoutId: selectedCustomWorkout.id, origin };
+    else if (!isCustomMode && nextUp.length) intent = { kind: 'stack', archetypes: [...nextUp], variants: nextUp.map(getNextArchetypeVariant), origin };
+    else { startingWorkoutRef.current = false; return; }
+    setDeparting(true);
+    const result = workoutLaunch.request(intent);
+    if (result.kind !== 'started' && result.kind !== 'resume') {
       startingWorkoutRef.current = false;
-      return;
+      setDeparting(false);
+      if (departure) { cancelAnimation(departure); departure.set(0); }
+      setLaunchRevision(value => value + 1);
     }
-    startWorkoutFromArchetype(nextUp);
-    if (!useWorkoutStore.getState().currentSession) {
-      startingWorkoutRef.current = false;
-      return;
-    }
-    setSelectedArchetype(null);
-    openWorkout();
+    navigateWorkoutLaunch(router, result);
   };
 
   // Selection only changes what Home previews: the saved split, its ordering
   // and the archetype queue are all left untouched.
-  const handleSelectCustomWorkout = useCallback((workoutId: number) => {
+  const handleSelectCustomWorkout = (workoutId: number) => {
     selectedCustomWorkoutAfterPickerExitRef.current = workoutId;
     setWorkoutPickerVisible(false);
-  }, []);
+  };
 
   const handleSelectWorkout = (archetype: Archetype) => {
     selectedArchetypeAfterPickerExitRef.current = archetype;
@@ -388,7 +308,7 @@ export default function Home() {
     setWorkoutPickerVisible(true);
   };
 
-  const handleWorkoutPickerExited = useCallback(() => {
+  const handleWorkoutPickerExited = () => {
     // Both programs only update the preview; Start launches the selected workout.
     if (isCustomMode) {
       const workoutId = selectedCustomWorkoutAfterPickerExitRef.current;
@@ -403,7 +323,7 @@ export default function Home() {
     if (archetype !== null) {
       setSelectedArchetype(archetype);
     }
-  }, [isCustomMode]);
+  };
 
   if (!profile) {
     return null;
@@ -412,80 +332,89 @@ export default function Home() {
   // Summary and detail hydrate independently. The summary is enough to keep a
   // real program identity on screen until its workout rows arrive.
   const customSplitName =
-    customSplit?.name ?? activeSplitSummary?.name ?? currentCustomSplit?.name ?? 'Your split';
-  // The card names the program Home is actually running: an unloadable active
-  // split has already fallen back to Stack above, and a split whose detail is
-  // still in flight shows its family without inventing a count.
-  const splitCardName = isCustomMode ? customSplitName : "Stack's split";
+    customSplit?.name ?? activeSplitSummary?.name ?? 'Your routine';
+  // A loading program keeps its identity without inventing a workout count.
+  // An edited Stack's plan runs like a routine but keeps Stack's identity.
+  const isEditedStackPlan = Boolean(customSplit?.isStackPlan ?? activeSplitSummary?.isStackPlan);
+  const splitCardName = isCustomMode ? customSplitName : 'Stack’s plan';
+  const customMetaLabel = isEditedStackPlan ? 'Edited' : 'Custom';
   const splitCardMeta = isCustomMode
     ? customSplit
-      ? `Custom · ${customWorkouts.length} ${plural(customWorkouts.length, 'workout')}`
+      ? `${customMetaLabel} · ${customWorkouts.length} ${plural(customWorkouts.length, 'workout')}`
       : activeSplitSummary
-        ? `Custom · ${activeSplitSummary.workoutCount} ${plural(activeSplitSummary.workoutCount, 'workout')}`
-        : 'Custom'
-    : `Auto-generated · ${profile.weeklyGoal} ${plural(profile.weeklyGoal, 'workout')}`;
-  const splitCardLabel = isCustomMode
-    ? `Open Your Splits. Active split: ${splitCardName}.`
-    : "Open Your Splits. Stack's split is active.";
-  const customHeroEyebrow = queueState.completedToday ? 'NEXT UP' : 'TODAY';
-  const firstName = profile.name?.trim().split(/\s+/)[0] || 'there';
-  const hour = new Date().getHours();
+        ? `${customMetaLabel} · ${activeSplitSummary.workoutCount} ${plural(activeSplitSummary.workoutCount, 'workout')}`
+        : customMetaLabel
+    : `Auto-generated · ${getProgramFrequency(profile)} ${plural(getProgramFrequency(profile), 'workout')}`;
+  const splitCardLabel = isCustomMode && !isEditedStackPlan
+    ? `Open Your routines. Active routine: ${splitCardName}.`
+    : 'Open Your routines. Stack’s plan is active.';
+  const hasEditedStackPlan = customSplits.some((split) => split.isStackPlan);
+  const customHeroEyebrow = 'NEXT UP';
+  const firstName = profile.name?.trim().split(/\s+/)[0];
+  const hour = now.getHours();
   const greeting = hour < 12 ? 'Morning' : hour < 18 ? 'Afternoon' : 'Evening';
 
 
   return (
     <View style={styles.screen}>
-      <LinearGradient
+      <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, backgroundDeparture]}><LinearGradient
         pointerEvents="none"
         colors={['#17130F', redesignColors.ink, '#100E0C']}
         locations={[0, 0.55, 1]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={StyleSheet.absoluteFill}
-      />
+      /></Animated.View>
 
       <ScrollView
-        // Build adds secondary content below the existing workout controls.
-        // Allow it to scroll clear of the floating tabs when enabled.
-        scrollEnabled={BUILD_SANDBOX_ENABLED}
-        bounces={false}
+        contentInsetAdjustmentBehavior="never"
         contentContainerStyle={[
           styles.scrollContent,
           {
-            paddingTop: insets.top + blend(24, 20, compactness),
-            paddingBottom: insets.bottom + 128,
+            paddingTop: insets.top + blend(28, 24, compactness),
+            paddingBottom: insets.bottom + (currentSession ? 220 : 100),
           },
         ]}
         showsVerticalScrollIndicator={false}
       >
         <Animated.View
-          entering={shouldAnimateHomeEntrance ? HEADER_ENTER : undefined}
-          style={styles.header}
+          entering={HEADER_ENTER}
+          style={[styles.header, headerDeparture]}
         >
-          <View style={styles.greetingColumn}>
-            <Text style={[styles.date, { marginBottom: blend(16, 12, compactness) }]}>
-              {todayLabel()}
+          <View key={`greeting:${fontScale}`} style={styles.greetingColumn}>
+            <Text style={[styles.date, { marginBottom: 10 }]}>
+              {todayLabel(now)}
             </Text>
             <Text
-              adjustsFontSizeToFit
-              minimumFontScale={0.72}
-              numberOfLines={1}
+              maxFontSizeMultiplier={1.5}
               style={styles.greeting}
             >
-              {greeting}, {firstName}
+              {firstName ? `${greeting}, ${firstName}` : `Good ${greeting.toLowerCase()}`}
             </Text>
           </View>
         </Animated.View>
 
         <Animated.View
-          entering={shouldAnimateHomeEntrance ? HERO_ENTER : undefined}
-          style={{ marginTop: blend(16, 12, compactness) }}
+          entering={HERO_ENTER}
+          style={{ marginTop: 24 }}
         >
-          {isCustomMode ? (
+          {currentSession ? (
+            <WorkoutHeroCard resetKey={launchRevision} title={getSessionWorkoutDisplay(currentSession).label} groupLabel={currentSession.origin === 'adhoc' ? 'Workout' : 'In progress'}
+              exerciseCount={currentSession.exercises.length} accentColor={getSessionWorkoutDisplay(currentSession).color}
+              whenLabel="IN PROGRESS" actionLabel="Resume workout" onPress={handleStartWorkout} />
+          ) : isNoProgramMode ? (
+            <WorkoutHeroCard resetKey={launchRevision} title="Ready when you are."
+              description="Start a workout and add exercises as you go."
+              whenLabel="YOUR TRAINING" exerciseCount={0} accentColor={redesignColors.accent}
+              showStackMark startWorkoutName="empty workout" onPress={handleStartWorkout} />
+          ) : isCustomMode ? (
             <WorkoutHeroCard
-              hideStartButton={!isFocused && startingWorkoutRef.current}
+              resetKey={launchRevision}
               exerciseCount={selectedCustomWorkout?.exercises.length ?? 0}
               whenLabel={customHeroEyebrow}
+              onChangeWorkout={handleOpenWorkoutPicker}
+              loading={!customSplit}
+              actionLabel={customSplitBroken ? 'Edit your routine' : undefined}
               title={
                 customSplitBroken
                   ? 'Nothing to train yet'
@@ -505,7 +434,6 @@ export default function Home() {
                   ? customWorkoutAccent(selectedCustomWorkout)
                   : redesignColors.ash
               }
-              verticalCompactness={compactness}
               onPress={
                 customSplitBroken
                   ? () => router.push('/your-splits')
@@ -516,12 +444,12 @@ export default function Home() {
             />
           ) : (
             <WorkoutHeroCard
-              hideStartButton={!isFocused && startingWorkoutRef.current}
+              resetKey={launchRevision}
               archetypes={nextUp}
               exerciseCount={exerciseCount}
               whenLabel={heroEyebrow}
+              onChangeWorkout={handleOpenWorkoutPicker}
               completed={nextUp.length === 0}
-              verticalCompactness={compactness}
               onPress={nextUp.length > 0 ? handleStartWorkout : handleOpenWorkoutPicker}
             />
           )}
@@ -530,57 +458,47 @@ export default function Home() {
               {EMPTY_CUSTOM_WORKOUT_MESSAGE}
             </Text>
           ) : null}
+          {launchError && <Text accessibilityRole="alert" style={styles.emptyWorkoutMessage}>{launchError}</Text>}
         </Animated.View>
 
         <Animated.View
-          entering={shouldAnimateHomeEntrance ? CHANGE_BUTTON_ENTER : undefined}
+          entering={SPLIT_CARD_ENTER}
+          style={[styles.secondary, secondaryDeparture]}
         >
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Change workout"
-            onPress={handleOpenWorkoutPicker}
-            style={[
-              styles.changeButton,
-              {
-                marginTop: blend(10, 8, compactness),
-                minHeight: blend(58, 54, compactness),
-                paddingVertical: blend(15, 13, compactness),
-              },
-            ]}
-          >
-            <ArrowLeftRight color={redesignColors.ash} size={18} strokeWidth={2} />
-            <Text
-              adjustsFontSizeToFit
-              minimumFontScale={0.9}
-              numberOfLines={1}
-              style={styles.changeButtonText}
-            >
-              Change workout
-            </Text>
-          </Pressable>
-        </Animated.View>
-
-        {BuildHome && (
-          <BuildHome
-            entering={shouldAnimateHomeEntrance ? BUILD_CARD_ENTER : undefined}
-            previewDelayMs={shouldAnimateHomeEntrance ? BUILD_CARD_DELAY + motionDuration.entrance : 0}
-          />
-        )}
-
-        <Animated.View
-          entering={shouldAnimateHomeEntrance ? SPLIT_CARD_ENTER : undefined}
-          // When there is spare height, marginTop: 'auto' holds this card at a
-          // consistent, intentional distance above the floating tab control.
-          // On a compact screen the hero tightens first, then the page remains
-          // scrollable rather than letting the controls overlap.
-          style={[styles.splitCardWrap, { paddingTop: blend(20, 16, compactness) }]}
-        >
-          <YourSplitCard
+          {!currentSession && !isNoProgramMode && <TouchableOpacity key={`empty-action:${fontScale}`} activeOpacity={0.65} accessibilityRole="button" accessibilityLabel="Start empty workout"
+            accessibilityHint="Build as you go. Add exercises after starting."
+            onPress={() => handleStartWorkout(undefined, true)} style={styles.emptyAction}>
+            <Plus color={redesignColors.accent} size={22} />
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text style={styles.secondaryTitle}>Start empty workout</Text>
+              <Text style={styles.secondaryDetail}>Build as you go</Text>
+            </View>
+            <ChevronRight color={redesignColors.accent} size={18} />
+          </TouchableOpacity>}
+          {isNoProgramMode ? <>
+            <TouchableOpacity key={`program-action:${fontScale}`} activeOpacity={0.65} accessibilityRole="button" accessibilityLabel="Get Stack’s plan"
+              accessibilityHint="Preview Stack’s plan."
+              onPress={() => router.push(ONBOARDING_PREVIEW_ENABLED && !hasEditedStackPlan
+                ? { pathname: '/program-setup', params: { source: 'train' } }
+                : { pathname: '/your-splits', params: { focus: 'stack' } })} style={styles.discoveryAction}>
+              <View style={{ flex: 1, gap: 4 }}><Text style={styles.secondaryTitle}>Get Stack’s plan</Text>
+                <Text style={styles.secondaryDetail}>Preview your weekly workouts</Text></View>
+              <ChevronRight color={redesignColors.ash} size={20} />
+            </TouchableOpacity>
+            <TouchableOpacity key={`routines-action:${fontScale}`} activeOpacity={0.65} accessibilityRole="button" accessibilityLabel="Your routines"
+              accessibilityHint="Open Your routines."
+              onPress={() => router.push({ pathname: '/your-splits', params: { focus: 'library' } })} style={styles.discoveryAction}>
+              <View style={{ flex: 1, gap: 4 }}><Text style={styles.secondaryTitle}>Your routines</Text>
+                <Text style={styles.secondaryDetail}>Keep your favorites ready for later</Text></View>
+              <ChevronRight color={redesignColors.ash} size={20} />
+            </TouchableOpacity>
+          </> : <YourSplitCard key={`program-summary:${fontScale}`}
             accessibilityLabel={splitCardLabel}
             meta={splitCardMeta}
             name={splitCardName}
             onPress={() => router.push('/your-splits')}
-          />
+          />}
+
         </Animated.View>
       </ScrollView>
 
@@ -633,44 +551,22 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   date: {
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 12,
-    letterSpacing: 2.4,
-    textAlign: 'center',
-    color: redesignColors.ashDim,
-  },
-  greeting: {
-    fontFamily: redesignFonts.display,
-    fontSize: 34,
-    lineHeight: 42,
-    textAlign: 'center',
-    letterSpacing: -1.6,
-    color: redesignColors.bone,
-  },
-  changeButton: {
-    alignSelf: 'center',
-    width: '60%',
-    minWidth: 190,
-    maxWidth: 240,
-    // The hero includes 10 points below the visible start button.
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    borderColor: redesignColors.border,
-    backgroundColor: 'rgba(29, 25, 21, 0.65)',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-  },
-  changeButtonText: {
-    flexShrink: 1,
-    fontFamily: redesignFonts.uiSemiBold,
-    fontSize: 16,
+    fontFamily: redesignFonts.mono,
+    fontSize: 10,
+    letterSpacing: 1.4,
     color: redesignColors.ash,
   },
-  splitCardWrap: {
-    marginTop: 'auto',
+  greeting: {
+    fontFamily: redesignFonts.ui,
+    fontSize: 28,
+    lineHeight: 36,
+    letterSpacing: -0.6,
+    color: redesignColors.bone,
   },
+  secondary: { marginTop: 24, gap: 8 },
+  discoveryAction: { minHeight: 88, paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', gap: 16, borderRadius: 20 },
+  emptyAction: { minHeight: 88, paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', gap: 16,
+    borderRadius: 20, borderWidth: 1, borderColor: `${redesignColors.accent}40`, backgroundColor: `${redesignColors.accent}0D` },
+  secondaryTitle: { fontFamily: redesignFonts.uiSemiBold, fontSize: 17, color: redesignColors.bone },
+  secondaryDetail: { fontFamily: redesignFonts.ui, fontSize: 15, color: redesignColors.ash },
 });

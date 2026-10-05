@@ -1,7 +1,10 @@
 import { Platform } from 'react-native';
 
-// Build is included in signed iOS builds; demo controls stay in development.
+// Keep the Stack tower available in iOS development sessions, including a
+// standard Expo launch. The explicit flag also supports the isolated sandbox
+// app and signed iOS builds; demo controls stay development-only.
 export const BUILD_SANDBOX_ENABLED =
-  Platform.OS === 'ios' && process.env.EXPO_PUBLIC_BUILD_SANDBOX === '1';
+  Platform.OS === 'ios' &&
+  (__DEV__ || process.env.EXPO_PUBLIC_BUILD_SANDBOX === '1');
 
 export const BUILD_DEMO_ENABLED = __DEV__ && BUILD_SANDBOX_ENABLED;

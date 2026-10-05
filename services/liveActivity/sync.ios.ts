@@ -1,10 +1,12 @@
 import { AppState, Platform } from 'react-native';
 import { requireOptionalNativeModule } from 'expo';
 import { useWorkoutStore } from '@/store/workoutStore';
+import { useAppPreferences } from '@/store/appPreferences';
 import { createWorkoutLiveActivityCoordinator } from './coordinator';
 import { deriveWorkoutLiveActivityState } from './state';
 import { deriveInteractiveWorkoutPresentation } from './presentation';
 import { readCurrentSetTarget } from '@/store/workoutDatabase';
+import { markLiveActivityLatency } from './latency.ios';
 
 let detach: (() => void) | undefined;
 let users = 0;
@@ -28,12 +30,17 @@ export function startWorkoutLiveActivitySync(): () => void {
           for (const activity of testActivity.getInstances()) await activity.end('immediate');
         },
         onError: (error) => console.warn('[WorkoutLiveActivity] Synchronization failed', error),
+        onTrace: markLiveActivityLatency,
       });
       const reconcile = (recover = false, forceRedraw = false) => {
         const state = useWorkoutStore.getState();
         // Never interpret the pre-SQLite empty store as a discarded workout.
         if (!state.isHydrated || state.hydrationError) return;
-        let payload = deriveWorkoutLiveActivityState(state);
+        markLiveActivityLatency('rnPresentationDeriveBegin');
+        const preferences = useAppPreferences.getState();
+        // An unread preference never authorizes showing workout data outside the app.
+        if (!preferences.ready) return;
+        let payload = preferences.liveActivities ? deriveWorkoutLiveActivityState(state) : null;
         const native = requireOptionalNativeModule<{ stackLiveActivityInteractionVersion?: number; getStackLiveActivityRevision?: () => number }>('ExpoWidgets');
         if (payload && version >= 17 && native?.stackLiveActivityInteractionVersion === 2) {
           try {
@@ -44,6 +51,7 @@ export function startWorkoutLiveActivitySync(): () => void {
             // No guessed target or revision on failure. Native keeps pending presentation.
           }
         }
+        markLiveActivityLatency('rnPresentationDeriveEnd', '', `revision=${payload?.acknowledgedRevision ?? '?'}`);
         void coordinator!.sync(
           payload,
           AppState.currentState === 'active',
@@ -52,12 +60,14 @@ export function startWorkoutLiveActivitySync(): () => void {
         );
       };
       const unsubscribe = useWorkoutStore.subscribe(() => reconcile());
+      const unsubscribePreferences = useAppPreferences.subscribe(() => reconcile(true));
       refresh = () => reconcile(true, true);
       const appSubscription = AppState.addEventListener('change', (state) => {
         if (state === 'active') reconcile(true);
       });
       detach = () => {
         unsubscribe();
+        unsubscribePreferences();
         refresh = undefined;
         appSubscription.remove();
       };

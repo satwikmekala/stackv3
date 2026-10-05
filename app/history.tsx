@@ -1,21 +1,21 @@
+import { contentDateRange } from '@/utils/content';
+import { SplitPressable as Pressable } from '@/components/custom-split/SplitPressable';
 import { useMemo } from 'react';
 import {
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import * as Haptics from 'expo-haptics';
-import { ChevronLeft, ChevronRight } from 'lucide-react-native';
+import * as Haptics from '@/services/haptics';
+import { ChevronRight } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { HistoryWorkoutRow } from '@/components/HistoryWorkoutRow';
 import { redesignColors, redesignFonts } from '@/constants/theme';
 import { deriveHistoryGroups, type HistoryWeekGroup } from '@/store/workoutHistory';
-import { formatSummaryDate } from '@/store/workoutSummary';
 import {
   toLocalCalendarDate,
   useWorkoutStore,
@@ -23,19 +23,15 @@ import {
 } from '@/store/workoutStore';
 import '@/global.css';
 
-function formatWeekDate(date: Date): string {
-  return formatSummaryDate(date).replace(/^[^,]+,\s*/, '');
-}
-
 function formatWeekRange(weekStart: Date, weekEnd: Date): string {
-  return `${formatWeekDate(weekStart)} \u2013 ${formatWeekDate(weekEnd)}`;
+  return contentDateRange(weekStart, weekEnd);
 }
 
 function SectionHeader({ label, count }: { label: string; count?: number }) {
   return (
     <View style={styles.sectionHeader}>
-      <Text style={styles.sectionLabel}>{label}</Text>
-      <View style={styles.sectionDivider} />
+      <Text accessibilityRole="header" style={styles.sectionLabel}>{label}</Text>
+      <View style={styles.sectionSpacer} />
       {count !== undefined ? <Text style={styles.sectionCount}>{count}</Text> : null}
     </View>
   );
@@ -49,6 +45,8 @@ function EarlierWeekRow({
   onPress: () => void;
 }) {
   const workoutCount = group.sessions.length;
+  const { width, fontScale } = useWindowDimensions();
+  const stacked = width < 360 || fontScale > 1.3;
 
   return (
     <Pressable
@@ -56,16 +54,16 @@ function EarlierWeekRow({
       accessibilityLabel={`${formatWeekRange(group.weekStart, group.weekEnd)}, ${workoutCount} ${workoutCount === 1 ? 'workout' : 'workouts'}`}
       accessibilityRole="button"
       onPress={onPress}
-      style={styles.earlierRow}
+      style={({ pressed }) => [styles.earlierRow, pressed && styles.pressed]}
     >
-      <View style={styles.weekIdentity}>
-        <Text numberOfLines={1} style={styles.weekRange}>
+      <View style={[styles.weekIdentity, stacked && styles.stackedWeek]}>
+        <Text style={[styles.weekRange, stacked && styles.stackedWeekRange]}>
           {formatWeekRange(group.weekStart, group.weekEnd)}
         </Text>
+        <Text style={styles.workoutCount}>
+          {workoutCount} {workoutCount === 1 ? 'workout' : 'workouts'}
+        </Text>
       </View>
-      <Text style={styles.workoutCount}>
-        {workoutCount} {workoutCount === 1 ? 'workout' : 'workouts'}
-      </Text>
       <ChevronRight color={redesignColors.ash} size={20} strokeWidth={2.1} />
     </Pressable>
   );
@@ -102,8 +100,7 @@ export default function History() {
   const openWeek = (group: HistoryWeekGroup) => {
     tap(() =>
       router.push({
-        // Slice 4 owns this route; keep its calendar-date contract explicit.
-        pathname: '/history-week' as '/workout-summary',
+        pathname: '/history-week',
         params: { weekStart: toLocalCalendarDate(group.weekStart) },
       })
     );
@@ -111,70 +108,38 @@ export default function History() {
 
   return (
     <View style={styles.screen}>
-      <LinearGradient
-        pointerEvents="none"
-        colors={['#17130F', redesignColors.ink, '#100E0C']}
-        locations={[0, 0.55, 1]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={StyleSheet.absoluteFill}
-      />
-
       <ScrollView
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: insets.top + 25, paddingBottom: insets.bottom + 32 },
+          { paddingTop: 20, paddingBottom: insets.bottom + 32 },
         ]}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.header}>
-          <Pressable
-            accessibilityLabel="Back to progress"
-            accessibilityRole="button"
-            hitSlop={8}
-            onPress={() => tap(() => router.back())}
-            style={styles.backButton}
-          >
-            <ChevronLeft color={redesignColors.bone} size={29} strokeWidth={2.3} />
-          </Pressable>
-          <View style={styles.headerCopy}>
-            <Text
-              adjustsFontSizeToFit
-              minimumFontScale={0.85}
-              numberOfLines={1}
-              style={styles.title}
-            >
-              History
-            </Text>
-            <Text style={styles.subtitle}>
-              {totalWorkouts === 0
-                ? 'NO WORKOUTS LOGGED'
-                : `${totalWorkouts} WORKOUTS LOGGED`}
-            </Text>
-          </View>
-        </View>
+        <Text style={styles.subtitle}>
+          {totalWorkouts === 0
+            ? 'No workouts logged yet'
+            : `${totalWorkouts} ${totalWorkouts === 1 ? 'workout' : 'workouts'} logged`}
+        </Text>
 
         {totalWorkouts === 0 ? (
           <View style={styles.emptyState}>
-            <View style={styles.emptyRule} />
             <Text style={styles.emptyTitle}>Your log starts with the first set.</Text>
             <Text style={styles.emptyCopy}>
-              Every workout you finish lands here \u2014 volume, sets, and the full
-              recap, ready to reopen or share any time after.
+              Your completed workouts will show here.
             </Text>
             <Pressable
               accessibilityRole="button"
               onPress={() => tap(() => router.replace('/(tabs)'))}
-              style={styles.startButton}
+              style={({ pressed }) => [styles.startButton, pressed && styles.pressed]}
             >
-              <Text style={styles.startButtonText}>Start today&apos;s workout</Text>
+              <Text style={styles.startButtonText}>View today&apos;s workout</Text>
             </Pressable>
           </View>
         ) : (
           <View style={styles.historyContent}>
             {hasThisWeek ? (
               <View>
-                <SectionHeader label="THIS WEEK" count={groups.thisWeek.length} />
+                <SectionHeader label="This week" count={groups.thisWeek.length} />
                 <View style={styles.thisWeekList}>
                   {groups.thisWeek.map((session) => (
                     <HistoryWorkoutRow
@@ -189,7 +154,7 @@ export default function History() {
 
             {hasPastWeeks ? (
               <View style={hasThisWeek ? styles.earlierSection : undefined}>
-                <SectionHeader label="EARLIER" />
+                <SectionHeader label="Earlier" />
                 <View style={styles.earlierList}>
                   {groups.pastWeeks.map((group) => (
                     <EarlierWeekRow
@@ -217,60 +182,34 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingHorizontal: 24,
   },
-  header: {
-    minHeight: 58,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  backButton: {
-    width: 30,
-    height: 58,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerCopy: {
-    flex: 1,
-    minWidth: 0,
-    marginLeft: 20,
-  },
-  title: {
-    fontFamily: redesignFonts.display,
-    fontSize: 42,
-    lineHeight: 45,
-    letterSpacing: -1.4,
-    color: redesignColors.bone,
-  },
   subtitle: {
-    marginTop: 3,
-    fontFamily: redesignFonts.mono,
-    fontSize: 11,
-    lineHeight: 15,
-    letterSpacing: 2.2,
+    fontFamily: redesignFonts.ui,
+    fontSize: 15,
+    lineHeight: 21,
     color: redesignColors.ash,
   },
   historyContent: {
-    marginTop: 34,
+    marginTop: 28,
   },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   sectionLabel: {
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 12,
-    lineHeight: 16,
-    letterSpacing: 2.6,
+    flexShrink: 1,
+    fontFamily: redesignFonts.uiSemiBold,
+    fontSize: 15,
+    lineHeight: 21,
     color: redesignColors.ash,
   },
-  sectionDivider: {
+  sectionSpacer: {
     flex: 1,
-    height: StyleSheet.hairlineWidth,
-    marginHorizontal: 16,
-    backgroundColor: redesignColors.border,
+    minWidth: 12,
   },
   sectionCount: {
     fontFamily: redesignFonts.mono,
-    fontSize: 11,
+    fontVariant: ['tabular-nums'],
+    fontSize: 13,
     color: redesignColors.ash,
   },
   thisWeekList: {
@@ -295,31 +234,36 @@ const styles = StyleSheet.create({
   weekIdentity: {
     flex: 1,
     minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  stackedWeek: {
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: 4,
   },
   weekRange: {
-    flexShrink: 1,
-    fontFamily: redesignFonts.monoBold,
+    flex: 1,
+    fontFamily: redesignFonts.uiSemiBold,
     fontSize: 15,
     lineHeight: 20,
     color: redesignColors.bone,
   },
+  stackedWeekRange: {
+    flex: 0,
+  },
   workoutCount: {
-    marginLeft: 16,
-    marginRight: 13,
+    marginRight: 8,
     fontFamily: redesignFonts.ui,
     fontSize: 14,
     color: redesignColors.ash,
   },
   emptyState: {
     flex: 1,
-    minHeight: 500,
+    paddingTop: 48,
     justifyContent: 'center',
     paddingBottom: 48,
-  },
-  emptyRule: {
-    height: StyleSheet.hairlineWidth,
-    marginBottom: 35,
-    backgroundColor: redesignColors.border,
   },
   emptyTitle: {
     maxWidth: 350,
@@ -338,15 +282,19 @@ const styles = StyleSheet.create({
     color: redesignColors.ash,
   },
   startButton: {
-    minHeight: 58,
+    minHeight: 52,
     alignSelf: 'flex-start',
     marginTop: 32,
-    paddingHorizontal: 28,
+    paddingHorizontal: 24,
+    paddingVertical: 14,
     borderRadius: 18,
     borderCurve: 'continuous',
-    backgroundColor: redesignColors.accent,
+    backgroundColor: redesignColors.bone,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  pressed: {
+    opacity: 0.7,
   },
   startButtonText: {
     fontFamily: redesignFonts.uiBold,

@@ -64,5 +64,5 @@ test('lb profiles convert, and long sessions cap with a remainder', () => {
   const log = deriveLiftLog(today, [today], 'lbs');
   assert.equal(log.lines.length, LIFT_LOG_MAX_LINES);
   assert.equal(log.more, 2);
-  assert.deepEqual([log.lines[0].value, log.lines[0].unit], ['220.5', 'lbs']);
+  assert.deepEqual([log.lines[0].value, log.lines[0].unit], ['220.5', 'lb']);
 });

@@ -18,10 +18,10 @@ export function makeMonolithDemo(weeks: number): WorkoutSession[] {
       const date = getStartOfWeek(MONOLITH_DEMO_NOW);
       date.setDate(date.getDate() - (weeks - week) * 7 + session * 2);
       result.push({
-        id: `monolith-demo-${week}-${session}`, date: toLocalCalendarDate(date), completed: true, retroactive: false,
+        id: `monolith-demo-${week}-${session}`, date: toLocalCalendarDate(date), origin: 'archetype', completed: true, completedAt: null, retroactive: false,
         archetype: null, secondaryArchetype: null, archetypeVariant: null, secondaryArchetypeVariant: null,
         workoutTypes: [categories[category]],
-        exercises: [{ name: names[category], loadType: category === 5 ? 'bodyweight' : 'external_weight',
+        exercises: [{ name: names[category], entryUnit: 'kg', loadType: category === 5 ? 'bodyweight' : 'external_weight', metric: 'reps',
           sets: Array.from({ length: 3 }, () => ({ completed: true, weight: category === 5 ? 0 : 20 + category * 5 + Math.floor(week / 3) * 2.5, reps: 8 + week % 3 })),
         }],
       });

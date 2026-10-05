@@ -1,1680 +1,285 @@
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
-import {
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+/** @jsxImportSource react */
+import { useMemo } from 'react';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { GlassView, isGlassEffectAPIAvailable, isLiquidGlassAvailable } from 'expo-glass-effect';
+import { SymbolView } from 'expo-symbols';
 import { useRouter } from 'expo-router';
-import * as Haptics from 'expo-haptics';
-import {
-  Check,
-  ChevronRight,
-  History as HistoryIcon,
-  Settings,
-  SlidersHorizontal,
-  Trophy,
-  X,
-} from 'lucide-react-native';
+import * as Haptics from '@/services/haptics';
+import { Check, ChevronRight, History as HistoryIcon, Settings, Trophy } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, {
-  runOnJS,
-  useAnimatedStyle,
-  useSharedValue,
-} from 'react-native-reanimated';
-import { withMotionTiming } from '@/constants/motion';
 import { redesignColors, redesignFonts, splitColors } from '@/constants/theme';
-import {
-  deriveDefaultSlots,
-  getSessionLocalDate,
-  getStartOfWeek,
-  parseSessionDate,
-  toLocalCalendarDate,
-  useWorkoutStore,
-  type WorkoutSession,
-} from '@/store/workoutStore';
-import { formatWeight, unitLabel, type WeightUnit } from '@/store/weightUnits';
+import { useWorkoutStore } from '@/store/workoutStore';
 import { DEFAULT_WEIGHT_UNIT } from '@/store/workoutDatabase';
 import { derivePersonalRecords } from '@/store/personalRecords';
-import { getVerifiedSessions } from '@/store/verifiedSessions';
+import { deriveLiftProgress } from '@/store/liftProgress';
+import { loadLiftProgressPreferences, saveWatchedLifts, useLiftProgressPreferences } from '@/store/liftProgressPreferences';
+import { useWatchedLifts } from '@/hooks/useWatchedLifts';
+import { LiftProgressCard } from '@/components/LiftProgressCard';
+import { StackLogo } from '@/components/StackLogo';
+import { WorkoutCardSurface } from '@/components/home/WorkoutCardSurface';
 import '@/global.css';
 
-type StrengthMetric = {
-  key: string;
-  label: string;
-  color: string;
-  weight: number;
-  startWeight: number;
-  percentageGain: number;
-  periodWeeks: number;
-  weeklyPoints: StrengthWeekPoint[];
-};
-
-type StrengthRange = 4 | 8 | 12 | 16;
-
-type StrengthWeekPoint = {
-  week: number;
-  weight: number | null;
-  change: number;
-  recorded: boolean;
-};
-
-const SECTION_BORDER = 'rgba(169, 159, 145, 0.18)';
-const STREAK_ORANGE = splitColors.chest;
-const STRENGTH_RANGES: StrengthRange[] = [4, 8, 12, 16];
-
-// Display unit lives on the profile; this is a screen, so its cards read the
-// store directly rather than threading a prop the way the set components do.
-const useWeightUnit = (): WeightUnit =>
-  useWorkoutStore((state) => state.profile?.weightUnit ?? DEFAULT_WEIGHT_UNIT);
-
-const formatNumber = (value: number) =>
-  value.toLocaleString('en-US', { maximumFractionDigits: 1 });
-
-type StrengthHistoryEntry = { date: Date; weight: number };
-
-// Colour follows the exercise's muscle group (the same colours as the split
-// cards), so it carries meaning. Unknown exercises stay neutral.
-const getStrengthColor = (exerciseName: string) => {
-  const type = useWorkoutStore.getState().getExerciseWorkoutType(exerciseName);
-  return type ? splitColors[type] : redesignColors.ash;
-};
-
-function buildRecordedStrengthMetric(
-  label: string,
-  history: StrengthHistoryEntry[],
-  rangeWeeks: StrengthRange,
-  rangeStart: Date
-) {
-  const startWeight = history[0].weight;
-  const bestWeight = Math.max(...history.map((entry) => entry.weight));
-  let carriedWeight: number | null = null;
-  let previousWeight: number | null = null;
-
-  const weeklyPoints = Array.from({ length: rangeWeeks }, (_, index) => {
-    const weekStart = new Date(rangeStart);
-    weekStart.setDate(rangeStart.getDate() + index * 7);
-    const nextWeek = new Date(weekStart);
-    nextWeek.setDate(weekStart.getDate() + 7);
-    const entries = history.filter((entry) => entry.date >= weekStart && entry.date < nextWeek);
-    const recorded = entries.length > 0;
-
-    if (recorded) carriedWeight = Math.max(...entries.map((entry) => entry.weight));
-    const weight = carriedWeight;
-    const change = weight !== null && previousWeight !== null
-      ? weight - previousWeight
-      : 0;
-    if (weight !== null) previousWeight = weight;
-
-    return { week: index + 1, weight, change, recorded };
-  });
-
-  return {
-    key: label,
-    label,
-    color: getStrengthColor(label),
-    weight: bestWeight,
-    startWeight,
-    percentageGain: startWeight > 0 ? ((bestWeight - startWeight) / startWeight) * 100 : 0,
-    periodWeeks: rangeWeeks,
-    weeklyPoints,
-  };
-}
-
-function deriveStrengthMetrics(
-  completedSessions: WorkoutSession[],
-  rangeWeeks: StrengthRange
-) {
-  const currentWeek = getStartOfWeek(new Date());
-  const rangeStart = new Date(currentWeek);
-  rangeStart.setDate(rangeStart.getDate() - (rangeWeeks - 1) * 7);
-  const rangeEnd = new Date(currentWeek);
-  rangeEnd.setDate(rangeEnd.getDate() + 7);
-  const histories = new Map<string, StrengthHistoryEntry[]>();
-
-  completedSessions.forEach((session) => {
-    const date = parseSessionDate(session.date);
-    if (date < rangeStart || date >= rangeEnd) return;
-
-    session.exercises.forEach((exercise) => {
-      const completedSets = exercise.sets.filter((set) => set.completed);
-      const sets = completedSets.length > 0 ? completedSets : exercise.sets;
-      if (sets.length === 0) return;
-
-      const history = histories.get(exercise.name) ?? [];
-      history.push({ date, weight: Math.max(...sets.map((set) => set.weight)) });
-      histories.set(exercise.name, history);
-    });
-  });
-
-  return [...histories.entries()]
-    .map(([label, history]) => {
-      history.sort((a, b) => a.date.getTime() - b.date.getTime());
-      return buildRecordedStrengthMetric(label, history, rangeWeeks, rangeStart);
-    })
-    .sort(
-      (a, b) => b.percentageGain - a.percentageGain
-        || b.weight - a.weight
-        || a.label.localeCompare(b.label)
-    )
-    .slice(0, 4);
-}
-
-function SectionHeader({
-  label,
-  meta,
-  action,
-}: {
-  label: string;
-  meta?: string;
-  action?: ReactNode;
-}) {
-  return (
-    <View style={styles.sectionHeader}>
-      <Text numberOfLines={1} style={styles.sectionLabel}>{label}</Text>
-      {action ?? (meta ? <Text style={styles.sectionMeta}>{meta}</Text> : null)}
-    </View>
-  );
-}
-
-function StrengthRangeButton({
-  rangeWeeks,
-  onPress,
-}: {
-  rangeWeeks: StrengthRange;
-  onPress: () => void;
-}) {
-  return (
-    <View style={styles.strengthRangeControl}>
-      <Text style={styles.rangeButtonText}>{rangeWeeks} weeks</Text>
-      <Pressable
-        accessibilityHint="Change the strength progression time range"
-        accessibilityLabel={`Showing ${rangeWeeks} weeks. Adjust time range`}
-        accessibilityRole="button"
-        hitSlop={6}
-        onPress={onPress}
-        style={({ pressed }) => [styles.rangeButton, pressed && styles.rangeButtonPressed]}
-      >
-        <SlidersHorizontal color={STREAK_ORANGE} size={20} strokeWidth={2.2} />
-      </Pressable>
-    </View>
-  );
-}
-
-function StrengthRangePicker({
-  selectedRange,
-  onSelect,
-  onDismiss,
-}: {
-  selectedRange: StrengthRange;
-  onSelect: (range: StrengthRange) => void;
-  onDismiss: () => void;
-}) {
-  const progress = useSharedValue(0);
-
-  useEffect(() => {
-    progress.value = withMotionTiming(1);
-  }, [progress]);
-
-  const backdropStyle = useAnimatedStyle(() => ({ opacity: progress.value }));
-  const sheetStyle = useAnimatedStyle(() => ({
-    opacity: progress.value,
-    transform: [{ translateY: (1 - progress.value) * 34 }],
-  }));
-
-  const close = () => {
-    progress.value = withMotionTiming(
-      0,
-      { easing: 'accelerate' },
-      (finished) => {
-        'worklet';
-        if (finished) runOnJS(onDismiss)();
-      }
-    );
-  };
-
-  const selectRange = (range: StrengthRange) => {
-    if (Platform.OS !== 'web') void Haptics.selectionAsync();
-    onSelect(range);
-    close();
-  };
-
-  return (
-    <Modal transparent visible animationType="none" onRequestClose={close} statusBarTranslucent>
-      <View style={styles.rangeModal}>
-        <Animated.View style={[styles.detailBackdrop, backdropStyle]}>
-          <Pressable
-            accessibilityLabel="Close progress range selector"
-            onPress={close}
-            style={StyleSheet.absoluteFill}
-          />
-        </Animated.View>
-
-        <Animated.View
-          accessibilityLabel="Select strength progress range"
-          accessibilityViewIsModal
-          style={[styles.rangeSheet, sheetStyle]}
-        >
-          <View style={styles.rangeSheetHeader}>
-            <View style={styles.rangeSheetHeading}>
-              <Text style={styles.rangeSheetEyebrow}>STRENGTH PROGRESSION</Text>
-              <Text style={styles.rangeSheetTitle}>Adjust time range</Text>
-              <Text style={styles.rangeSheetCopy}>
-                Compare every lift across the same training window.
-              </Text>
-            </View>
-            <Pressable
-              accessibilityLabel="Close progress range selector"
-              accessibilityRole="button"
-              hitSlop={8}
-              onPress={close}
-              style={({ pressed }) => [styles.detailCloseButton, pressed && styles.buttonPressed]}
-            >
-              <X color={redesignColors.bone} size={21} strokeWidth={2} />
-            </Pressable>
-          </View>
-
-          <View style={styles.rangeOptionList}>
-            {[STRENGTH_RANGES.slice(0, 2), STRENGTH_RANGES.slice(2, 4)].map((row, rowIndex) => (
-              <View key={`range-row-${rowIndex}`} style={styles.rangeOptionRow}>
-                {row.map((range) => {
-                  const selected = range === selectedRange;
-                  return (
-                    <View key={range} style={styles.rangeOptionSlot}>
-                      <Pressable
-                        accessibilityLabel={`${range} weeks`}
-                        accessibilityRole="button"
-                        accessibilityState={{ selected }}
-                        onPress={() => selectRange(range)}
-                        style={({ pressed }) => [
-                          styles.rangeOption,
-                          selected && styles.rangeOptionSelected,
-                          pressed && styles.rangeOptionPressed,
-                        ]}
-                      >
-                        <View style={styles.rangeOptionContent}>
-                          <View style={[styles.rangeOptionCheck, selected && styles.rangeOptionCheckSelected]}>
-                            {selected ? <Check color={redesignColors.ink} size={14} strokeWidth={3} /> : null}
-                          </View>
-                          <Text
-                            numberOfLines={1}
-                            style={[styles.rangeOptionLabel, selected && styles.rangeOptionLabelSelected]}
-                          >
-                            {range} weeks
-                          </Text>
-                        </View>
-                      </Pressable>
-                    </View>
-                  );
-                })}
-              </View>
-            ))}
-          </View>
-        </Animated.View>
-      </View>
-    </Modal>
-  );
-}
-
-// Every card has the same fixed structure (two-line name slot, weight, gain),
-// so the grid lines up regardless of name length or number width.
-function StrengthCard({ metric, onPress }: { metric: StrengthMetric; onPress: () => void }) {
-  const weightUnit = useWeightUnit();
-  const formattedWeight = formatWeight(metric.weight, weightUnit);
-  const progressionLabel = metric.percentageGain > 0
-    ? `+${formatNumber(metric.percentageGain)}%`
-    : '±0%';
-
-  return (
-    <View style={styles.strengthCardSlot}>
-      <Pressable
-        accessibilityHint={`Shows the ${metric.periodWeeks}-week progression breakdown`}
-        accessibilityLabel={`${metric.label}, ${formattedWeight} ${unitLabel(weightUnit)}, ${progressionLabel} progress`}
-        accessibilityRole="button"
-        onPress={onPress}
-        style={({ pressed }) => [styles.strengthCardTapTarget, pressed && styles.strengthCardPressed]}
-      >
-        <View style={styles.strengthTile}>
-          <Text numberOfLines={2} style={styles.strengthTileName}>
-            {metric.label}
-          </Text>
-
-          <View style={styles.strengthTileWeightRow}>
-            <Text numberOfLines={1} style={styles.strengthTileWeight}>
-              {formattedWeight}
-            </Text>
-            <Text style={styles.strengthTileUnit}>{unitLabel(weightUnit)}</Text>
-          </View>
-
-          <Text numberOfLines={1} style={styles.strengthTileMeta}>
-            <Text style={{ color: metric.percentageGain > 0 ? metric.color : redesignColors.ash }}>
-              {progressionLabel}
-            </Text>
-            {` · ${metric.periodWeeks} WK`}
-          </Text>
-        </View>
-      </Pressable>
-    </View>
-  );
-}
-
-function StrengthProgressionDetail({
-  metric,
-  rangeWeeks,
-  bottomInset,
-  onRangeChange,
-  onDismiss,
-}: {
-  metric: StrengthMetric;
-  rangeWeeks: StrengthRange;
-  bottomInset: number;
-  onRangeChange: (range: StrengthRange) => void;
-  onDismiss: () => void;
-}) {
-  const progress = useSharedValue(0);
-  const weightUnit = useWeightUnit();
-  const formattedWeight = formatWeight(metric.weight, weightUnit);
-  const progressionLabel = metric.percentageGain > 0
-    ? `+${formatNumber(metric.percentageGain)}%`
-    : '±0%';
-  const firstDataIndex = metric.weeklyPoints.findIndex((point) => point.weight !== null);
-
-  useEffect(() => {
-    progress.value = withMotionTiming(1);
-  }, [progress]);
-
-  const backdropStyle = useAnimatedStyle(() => ({
-    opacity: progress.value,
-  }));
-  const cardStyle = useAnimatedStyle(() => ({
-    opacity: progress.value,
-    transform: [
-      { translateY: (1 - progress.value) * 44 },
-      { scale: 0.94 + progress.value * 0.06 },
-    ],
-  }));
-
-  const close = () => {
-    progress.value = withMotionTiming(
-      0,
-      { easing: 'accelerate' },
-      (finished) => {
-        'worklet';
-        if (finished) runOnJS(onDismiss)();
-      }
-    );
-  };
-
-  return (
-    <Modal transparent visible animationType="none" onRequestClose={close} statusBarTranslucent>
-      <View style={styles.detailModal}>
-        <Animated.View style={[styles.detailBackdrop, backdropStyle]}>
-          <Pressable
-            accessibilityLabel="Close strength progression"
-            onPress={close}
-            style={StyleSheet.absoluteFill}
-          />
-        </Animated.View>
-
-        <Animated.View
-          accessibilityLabel={`${metric.label} ${metric.periodWeeks}-week progression`}
-          accessibilityViewIsModal
-          style={[
-            styles.detailCard,
-            { marginBottom: Math.max(bottomInset, 12) },
-            cardStyle,
-          ]}
-        >
-          <View style={[styles.cardAccent, { height: 4, backgroundColor: metric.color }]} />
-          <View style={styles.detailHeader}>
-            <View style={styles.detailHeadingCopy}>
-              <View style={styles.detailEyebrowRow}>
-                <View style={[styles.exerciseDot, styles.detailDot, { backgroundColor: metric.color }]} />
-                <Text style={[styles.detailEyebrow, { color: metric.color }]}>
-                  {metric.periodWeeks}-WEEK PROGRESSION
-                </Text>
-              </View>
-              <Text numberOfLines={1} adjustsFontSizeToFit style={styles.detailTitle}>{metric.label}</Text>
-            </View>
-            <Pressable
-              accessibilityLabel="Close strength progression"
-              accessibilityRole="button"
-              hitSlop={8}
-              onPress={close}
-              style={({ pressed }) => [styles.detailCloseButton, pressed && styles.buttonPressed]}
-            >
-              <X color={redesignColors.bone} size={21} strokeWidth={2} />
-            </Pressable>
-          </View>
-
-          <View style={styles.detailSummary}>
-            <View>
-              <Text style={styles.detailSummaryLabel}>BEST WEIGHT</Text>
-              <View style={styles.detailWeightRow}>
-                <Text style={styles.detailWeight}>{formattedWeight}</Text>
-                <Text style={styles.detailWeightUnit}>{unitLabel(weightUnit)}</Text>
-              </View>
-            </View>
-            <View style={[styles.detailGainPill, { backgroundColor: `${metric.color}18` }]}>
-              <Text style={[styles.detailGainText, { color: metric.color }]}>{progressionLabel}</Text>
-            </View>
-          </View>
-
-          <View style={styles.detailRangeSelector}>
-            {STRENGTH_RANGES.map((range) => {
-              const selected = range === rangeWeeks;
-              return (
-                <View key={range} style={styles.detailRangeSlot}>
-                  <Pressable
-                    accessibilityLabel={`Show ${range} weeks`}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected }}
-                    onPress={() => {
-                      if (Platform.OS !== 'web') void Haptics.selectionAsync();
-                      onRangeChange(range);
-                    }}
-                    style={({ pressed }) => [
-                      styles.detailRangeOption,
-                      selected && {
-                        borderColor: metric.color,
-                        backgroundColor: `${metric.color}2B`,
-                      },
-                      pressed && styles.rangeOptionPressed,
-                    ]}
-                  >
-                    <View style={styles.detailRangeOptionContent}>
-                      <Text
-                        adjustsFontSizeToFit
-                        minimumFontScale={0.84}
-                        numberOfLines={1}
-                        style={[
-                          styles.detailRangeOptionText,
-                          selected && { color: metric.color },
-                        ]}
-                      >
-                        {range}W
-                      </Text>
-                    </View>
-                  </Pressable>
-                </View>
-              );
-            })}
-          </View>
-
-          <>
-            <View style={styles.breakdownHeader}>
-              <Text style={styles.breakdownTitle}>WEEKLY BREAKDOWN</Text>
-              <Text style={styles.breakdownMeta}>WEIGHT</Text>
-            </View>
-
-            <ScrollView
-              contentContainerStyle={styles.weekList}
-              nestedScrollEnabled
-              showsVerticalScrollIndicator={false}
-              style={styles.detailWeekScroll}
-            >
-              {metric.weeklyPoints.map((week, index) => {
-                const current = index === metric.weeklyPoints.length - 1;
-                const weeksAgo = metric.periodWeeks - index;
-                const caption = current
-                  ? week.recorded ? 'This week' : 'This week · no workout'
-                  : week.recorded
-                    ? `${weeksAgo} weeks ago`
-                    : 'No workout logged';
-                const changeColor = week.change > 0 ? metric.color : redesignColors.ashDim;
-
-                return (
-                  <View
-                    key={week.week}
-                    style={[styles.weekRow, current && { borderColor: `${metric.color}73` }]}
-                  >
-                    <View style={styles.weekMarkerColumn}>
-                      <View
-                        style={[
-                          styles.weekMarker,
-                          current && { backgroundColor: metric.color, borderColor: metric.color },
-                        ]}
-                      >
-                        {current ? (
-                          <Check color={redesignColors.ink} size={13} strokeWidth={3} />
-                        ) : (
-                          <Text style={styles.weekMarkerText}>{index + 1}</Text>
-                        )}
-                      </View>
-                      {index < metric.weeklyPoints.length - 1 ? <View style={styles.weekConnector} /> : null}
-                    </View>
-                    <View style={styles.weekCopy}>
-                      <Text style={[styles.weekLabel, current && { color: metric.color }]}>WEEK {week.week}</Text>
-                      <Text style={styles.weekCaption}>{caption}</Text>
-                    </View>
-                    <View style={styles.weekValueGroup}>
-                      {week.weight === null ? (
-                        <Text style={styles.weekStart}>NO DATA</Text>
-                      ) : week.change !== 0 ? (
-                        <Text style={[styles.weekIncrease, { color: changeColor }]}>
-                          {week.change > 0 ? '+' : ''}{formatWeight(week.change, weightUnit)}
-                        </Text>
-                      ) : index === firstDataIndex ? (
-                        <Text style={styles.weekStart}>START</Text>
-                      ) : (
-                        <Text style={styles.weekStart}>{week.recorded ? 'HELD' : '—'}</Text>
-                      )}
-                      <Text style={styles.weekValue}>
-                        {week.weight === null ? '—' : `${formatWeight(week.weight, weightUnit)} ${unitLabel(weightUnit)}`}
-                      </Text>
-                    </View>
-                  </View>
-                );
-              })}
-            </ScrollView>
-
-            <View style={[styles.detailInsight, { borderLeftColor: metric.color }]}>
-              <Text style={styles.detailInsightText}>
-                {metric.percentageGain > 0
-                  ? `Your best lift is ${progressionLabel} above your first logged weight in this ${metric.periodWeeks}-week range.`
-                  : `Your best lift matched your first logged weight in this ${metric.periodWeeks}-week range.`}
-              </Text>
-            </View>
-          </>
-        </Animated.View>
-      </View>
-    </Modal>
-  );
-}
-
-const WEEKDAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+const WEEKDAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 const WEEKDAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-// Consecutive weeks with at least `goal` workouts, ending with the current
-// week once it's met. Uses today's goal, since past goals aren't stored.
-function countGoalStreak(sessions: WorkoutSession[], goal: number) {
-  if (goal <= 0) return 0;
-  const perWeek = new Map<string, number>();
-  for (const session of sessions) {
-    if (!session.completed) continue;
-    const day = new Date(`${getSessionLocalDate(session.date)}T12:00:00`);
-    const week = toLocalCalendarDate(getStartOfWeek(day));
-    perWeek.set(week, (perWeek.get(week) ?? 0) + 1);
-  }
-  const currentWeek = getStartOfWeek(new Date());
-  let streak = 0;
-  for (let offset = 0; offset < 520; offset += 1) {
-    const week = new Date(currentWeek);
-    week.setDate(currentWeek.getDate() - offset * 7);
-    if ((perWeek.get(toLocalCalendarDate(week)) ?? 0) < goal) break;
-    streak += 1;
-  }
-  return streak;
-}
-
-function WeeklyGoalCard({ completed, goal }: { completed: number; goal: number }) {
+function WeeklySummary({ completed, goal }: { completed: number; goal: number }) {
+  const router = useRouter();
+  const { fontScale } = useWindowDimensions();
   const trainingDays = useWorkoutStore((state) => state.profile?.trainingDays);
-  const sessions = useWorkoutStore((state) => state.sessions);
   const days = useWorkoutStore((state) => state.getWeekStreak)();
-  const remaining = Math.max(goal - completed, 0);
-  const isComplete = remaining === 0;
-  const extra = Math.max(completed - goal, 0);
-
-  // Same planned days the weekly queue uses when none were picked.
-  const planned = new Set(trainingDays?.length ? trainingDays : deriveDefaultSlots(goal));
-  const todayIndex = (new Date().getDay() + 6) % 7;
-  const trainedToday = (days[todayIndex]?.workouts ?? 0) > 0;
-  let nextIndex: number | null = null;
-  for (let index = trainedToday ? todayIndex + 1 : todayIndex; index < 7; index += 1) {
-    if (planned.has(index) && (days[index]?.workouts ?? 0) === 0) {
-      nextIndex = index;
-      break;
-    }
-  }
-  const nextLabel = nextIndex === null
-    ? null
-    : nextIndex === todayIndex
-      ? 'Today'
-      : nextIndex === todayIndex + 1
-        ? 'Tomorrow'
-        : WEEKDAY_NAMES[nextIndex];
-  const streak = isComplete ? countGoalStreak(sessions, goal) : 0;
-
-  const headline = completed === 0 ? "Week's open" : isComplete ? 'Goal hit' : `${remaining} to go`;
-  const trainedNames = days
-    .map((day, index) => (day.workouts > 0 ? WEEKDAY_NAMES[index] : null))
-    .filter(Boolean)
-    .join(', ');
-
-  let caption: ReactNode;
-  if (!isComplete) {
-    caption = nextLabel
-      ? <>Next session: <Text style={styles.weeklyGoalCaptionStrong}>{nextLabel}</Text></>
-      // No planned day left, so point at the reset instead of a missing plan.
-      : 'Week resets Monday';
-  } else {
-    const streakText = streak >= 2
-      ? <><Text style={styles.weeklyGoalCaptionStrong}>{streak} weeks</Text> in a row</>
-      : 'First week on target';
-    caption = extra > 0
-      ? <>{extra} extra {extra === 1 ? 'session' : 'sessions'} · {streakText}</>
-      : streakText;
-  }
+  const planned = new Set(trainingDays ?? []);
+  const today = (new Date().getDay() + 6) % 7;
+  const remaining = Math.max(0, goal - completed);
+  const caption = goal <= 0 ? `${completed} ${completed === 1 ? 'day' : 'days'} trained`
+    : remaining > 0 ? `${remaining} to go`
+      : completed > goal ? `Goal met +${completed - goal}` : 'Goal met';
 
   return (
-    <View
-      accessible
-      accessibilityLabel={[
-        `This week, ${completed} of ${goal} workouts`,
-        trainedNames ? `trained ${trainedNames}` : null,
-        !isComplete && nextLabel ? `next session ${nextLabel}` : null,
-        isComplete && streak >= 2 ? `${streak} weeks in a row` : null,
-      ].filter(Boolean).join('. ')}
-      style={styles.weeklyGoalCard}
-    >
-      <LinearGradient
-        pointerEvents="none"
-        colors={['#6F3D25', '#452B1E', '#2C201A']}
-        locations={[0, 0.5, 1]}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 1 }}
-        style={styles.weeklyGoalBorder}
-      />
-      <LinearGradient
-        pointerEvents="none"
-        colors={['#3E281D', '#35241B', '#2B1F19', '#201B18', '#171716']}
-        locations={[0, 0.28, 0.56, 0.82, 1]}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 1 }}
-        style={styles.weeklyGoalFill}
-      />
-
-      <View style={styles.weeklyGoalTopRow}>
-        <View style={styles.weeklyGoalCopy}>
-          <Text style={styles.weeklyGoalEyebrow}>THIS WEEK</Text>
-          <Text numberOfLines={1} style={styles.weeklyGoalHeadline}>{headline}</Text>
+    <View style={styles.weeklySummary}>
+      <WorkoutCardSurface color={redesignColors.accent} radius={28} />
+      <Pressable accessibilityRole="button" accessibilityLabel={goal > 0 ? `This week. ${completed} of ${goal} training days. ${caption}. Edit weekly goal.` : `This week. ${caption}. Set a weekly goal.`}
+        onPress={() => router.push({ pathname: '/settings', params: { page: 'goal' } })}
+        style={[styles.weeklyHeading, fontScale > 1.6 && styles.weeklyHeadingLarge]}>
+        <View style={[styles.weeklyCopy, fontScale > 1.6 && styles.weeklyCopyLarge]}>
+          <Text style={styles.weeklyTitle}>This week</Text>
+          <Text style={[styles.weeklyCaption, goal <= 0 && styles.weeklyGoalPrompt]}>{caption}</Text>
         </View>
-        <View style={styles.weeklyGoalCount}>
-          <Text style={styles.weeklyGoalCompleted}>{completed}</Text>
-          <Text style={styles.weeklyGoalTotal}>/{goal}</Text>
-        </View>
-      </View>
-
-      {/* Mon-Sun: trained days filled, upcoming planned days outlined, rest dim. */}
-      <View style={styles.weeklyGoalDays}>
-        {WEEKDAY_LETTERS.map((letter, index) => {
-          const trained = (days[index]?.workouts ?? 0) > 0;
-          const upcomingPlan = !trained && planned.has(index) && index >= todayIndex;
+        <Text style={styles.weeklyCount}>{completed}{goal > 0 && <Text style={styles.weeklyTotal}>/{goal}</Text>}</Text>
+      </Pressable>
+      <View style={[styles.weekdays, fontScale > 1.6 && styles.weekdaysWrapped]}>
+        {WEEKDAYS.map((letter, index) => {
+          const workouts = days[index]?.workouts ?? 0;
+          const trained = workouts > 0;
+          const upcoming = !trained && planned.has(index) && index >= today;
           return (
-            <View
-              key={index}
-              style={[
-                styles.weeklyGoalDay,
-                trained && styles.weeklyGoalDayTrained,
-                upcomingPlan && styles.weeklyGoalDayPlanned,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.weeklyGoalDayLetter,
-                  upcomingPlan && styles.weeklyGoalDayLetterPlanned,
-                  index === todayIndex && !trained && styles.weeklyGoalDayLetterToday,
-                  trained && styles.weeklyGoalDayLetterTrained,
-                ]}
-              >
-                {letter}
-              </Text>
+            <View key={index} accessible
+              accessibilityLabel={`${WEEKDAY_NAMES[index]}${index === today ? ', today' : ''}. ${trained
+                ? `${workouts} ${workouts === 1 ? 'workout' : 'workouts'} completed`
+                : upcoming ? 'Planned training day' : 'No workouts logged'}.`}
+              style={[styles.day, fontScale > 1.6 && styles.dayLarge]}>
+              <View style={styles.dayLabel}>
+                <Text style={[styles.dayLetter, index === today && styles.todayLetter]}>{letter}</Text>
+                {index === today && <View style={styles.todayDot} />}
+              </View>
+              <View style={[styles.dayMark, trained && styles.dayTrained, upcoming && styles.dayPlanned]}>
+                {trained ? workouts > 1
+                  ? <Text style={styles.dayCount}>{workouts}</Text>
+                  : <Check color={redesignColors.ink} size={13} strokeWidth={3} />
+                  : <Text style={styles.dayDash}>{upcoming ? '○' : '–'}</Text>}
+              </View>
             </View>
           );
         })}
       </View>
-
-      <Text style={styles.weeklyGoalCaption}>{caption}</Text>
     </View>
+  );
+}
+
+function ProgressSettingsButton({ onPress }: { onPress: () => void }) {
+  const supportsGlass = Platform.OS === 'ios'
+    && isGlassEffectAPIAvailable()
+    && isLiquidGlassAvailable();
+  const icon = Platform.OS === 'ios' ? (
+    <SymbolView
+      name="gearshape"
+      size={22}
+      weight="medium"
+      tintColor={redesignColors.bone}
+      style={styles.settingsIcon}
+    />
+  ) : (
+    <Settings color={redesignColors.bone} size={22} strokeWidth={2} />
+  );
+
+  return (
+    <Pressable
+      accessibilityLabel="Open settings"
+      accessibilityRole="button"
+      hitSlop={8}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.settingsButton,
+        !supportsGlass && styles.settingsButtonFallback,
+        !supportsGlass && pressed && styles.buttonPressed,
+      ]}
+    >
+      {supportsGlass ? (
+        <GlassView
+          glassEffectStyle="regular"
+          colorScheme="dark"
+          isInteractive
+          style={styles.settingsGlass}
+        >
+          {icon}
+        </GlassView>
+      ) : icon}
+    </Pressable>
   );
 }
 
 export default function Progress() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const [strengthRange, setStrengthRange] = useState<StrengthRange>(4);
-  const [showStrengthRangePicker, setShowStrengthRangePicker] = useState(false);
-  const [selectedStrengthKey, setSelectedStrengthKey] = useState<string | null>(null);
+  const { width, fontScale } = useWindowDimensions();
   const profile = useWorkoutStore((state) => state.profile);
   const sessions = useWorkoutStore((state) => state.sessions);
-  const getWeeklyProgress = useWorkoutStore((state) => state.getWeeklyProgress);
-
-  const completedSessions = useMemo(
-    () => sessions.filter((session) => session.completed),
-    [sessions]
-  );
-  const verifiedSessions = useMemo(
-    () => getVerifiedSessions(sessions),
-    [sessions]
-  );
-  const strengthMetrics = useMemo(
-    () => deriveStrengthMetrics(verifiedSessions, strengthRange),
-    [verifiedSessions, strengthRange]
-  );
-  const selectedStrengthMetric = useMemo(
-    () => strengthMetrics.find((metric) => metric.key === selectedStrengthKey) ?? null,
-    [selectedStrengthKey, strengthMetrics]
-  );
-  const personalRecords = useMemo(
-    () => derivePersonalRecords(verifiedSessions),
-    [verifiedSessions]
-  );
-  const weeklyProgress = getWeeklyProgress();
+  const weekly = useWorkoutStore((state) => state.getWeeklyProgress)();
+  const lifts = useMemo(() => deriveLiftProgress(sessions), [sessions]);
+  const records = useMemo(() => derivePersonalRecords(sessions), [sessions]);
+  const { names, preferences } = useWatchedLifts(lifts);
+  const watched = names.flatMap((name) => lifts.filter((lift) => lift.name === name));
+  const unit = profile?.weightUnit ?? DEFAULT_WEIGHT_UNIT;
+  const completed = sessions.filter((session) => session.completed).length;
+  const stacked = width < 360 || fontScale > 1.2;
+  const tap = (action: () => void) => {
+    if (Platform.OS !== 'web') void Haptics.selectionAsync();
+    action();
+  };
+  const openLifts = (choose = false) => tap(() => router.push({ pathname: '/lift-progress', params: choose ? { choose: '1' } : {} }));
+  const retry = () => {
+    if (preferences.error === 'load') void loadLiftProgressPreferences();
+    else {
+      useLiftProgressPreferences.setState({ error: null });
+      void saveWatchedLifts(names, preferences.automatic);
+    }
+  };
 
   if (!profile) return null;
-
-  const openSettings = () => {
-    if (Platform.OS !== 'web') void Haptics.selectionAsync();
-    router.push('/settings');
-  };
-  const openAllRecords = () => {
-    if (Platform.OS !== 'web') void Haptics.selectionAsync();
-    router.push('/records');
-  };
-  const openHistory = () => {
-    if (Platform.OS !== 'web') void Haptics.selectionAsync();
-    router.push('/history' as Parameters<typeof router.push>[0]);
-  };
-  const openStrengthDetail = (metric: StrengthMetric) => {
-    if (Platform.OS !== 'web') void Haptics.selectionAsync();
-    setSelectedStrengthKey(metric.key);
-  };
-  const openStrengthRangePicker = () => {
-    if (Platform.OS !== 'web') void Haptics.selectionAsync();
-    setShowStrengthRangePicker(true);
-  };
-
   return (
-    <View style={styles.screen}>
-      <LinearGradient
-        pointerEvents="none"
-        colors={['#17130F', redesignColors.ink, '#100E0C']}
-        locations={[0, 0.55, 1]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={StyleSheet.absoluteFill}
-      />
-
-      <ScrollView
-        contentContainerStyle={[
-          styles.scrollContent,
-          { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 130 },
-        ]}
-        showsVerticalScrollIndicator={false}
-      >
+    <View style={[styles.screen, { paddingTop: insets.top }]}>
+      <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}
+        contentContainerStyle={[styles.content, { paddingTop: 20, paddingBottom: insets.bottom + 110 }]}>
         <View style={styles.header}>
-          <Text style={styles.title}>Progress</Text>
-          <Pressable
-            accessibilityLabel="Open settings"
-            accessibilityRole="button"
-            hitSlop={8}
-            onPress={openSettings}
-            style={({ pressed }) => [styles.settingsButton, pressed && styles.buttonPressed]}
-          >
-            <Settings color={redesignColors.ash} size={24} strokeWidth={2} />
+          <Text accessibilityRole="header" style={[styles.title, fontScale > 1.6 && {
+            // Orientation stays compact; workout content still follows the full text size.
+            fontSize: 54 / fontScale, lineHeight: 66 / fontScale, letterSpacing: -1,
+          }]}>Progress</Text>
+          <ProgressSettingsButton onPress={() => tap(() => router.push('/settings'))} />
+        </View>
+        <WeeklySummary completed={weekly.completed} goal={weekly.goal} />
+        <View style={styles.liftSection}>
+          <View style={styles.sectionHeading}>
+            <Text accessibilityRole="header" style={styles.sectionTitle}>Lift progress</Text>
+            {lifts.length > 0 && <Pressable accessibilityRole="button" accessibilityLabel="Change featured exercises"
+              disabled={!preferences.hydrated || preferences.saving || preferences.error === 'load'} onPress={() => openLifts(true)}
+              style={({ pressed }) => [styles.textButton, pressed && styles.buttonPressed]}>
+              <Text style={styles.textButtonLabel}>Change</Text>
+            </Pressable>}
+          </View>
+          {preferences.error && <View style={styles.preferenceError}>
+            <Text accessibilityRole="alert" style={styles.emptyCopy}>{preferences.error === 'load'
+              ? 'Couldn’t load your exercise choices.' : 'Couldn’t save your exercise choices.'}</Text>
+            <Pressable accessibilityRole="button" onPress={retry} style={styles.textButton}>
+              <Text style={styles.textButtonLabel}>Retry</Text>
+            </Pressable>
+          </View>}
+          {preferences.error === 'load' ? <View style={styles.emptyState}>
+            <Text style={styles.emptyCopy}>Retry to restore your featured exercises. Your full lift history is available below.</Text>
+          </View> : !preferences.hydrated ? <View style={styles.emptyState}>
+            <Text style={styles.emptyCopy}>Loading your lift progress…</Text>
+          </View> : watched.length > 0 ? <View style={[styles.cards, stacked && styles.cardsStacked]}>
+            {watched.map((lift) => <LiftProgressCard key={lift.name} lift={lift} unit={unit}
+              onPress={() => tap(() => router.push({ pathname: '/lift-detail', params: { exerciseName: lift.name } }))} />)}
+          </View> : <View key={`empty-progress:${fontScale}`} style={styles.emptyState}>
+            {lifts.length === 0 && <WorkoutCardSurface color={splitColors.chest} radius={22} showEdge={false} />}
+            {lifts.length === 0 && <View style={styles.emptyBrand} accessible accessibilityRole="image" accessibilityLabel="Your logged sets build your lift history."><StackLogo size={36} /><Text style={styles.emptyEyebrow}>SET BY SET</Text></View>}
+            <Text accessibilityRole="header" style={styles.emptyTitle}>{lifts.length > 0 ? 'Follow the lifts you care about' : 'No lift history yet.'}</Text>
+            <Text style={styles.emptyCopy}>{lifts.length > 0
+              ? 'Choose up to two exercises to compare here.'
+              : 'Your logged sets will show how your lifts change.'}</Text>
+            <Pressable accessibilityRole="button"
+              onPress={() => lifts.length > 0 ? openLifts(true) : tap(() => router.navigate('/(tabs)'))}
+              style={({ pressed }) => [styles.emptyAction, pressed && styles.buttonPressed]}>
+              <Text style={styles.textButtonLabel}>{lifts.length > 0 ? 'Choose exercises' : 'Go to Train'}</Text>
+              <ChevronRight size={17} color={redesignColors.bone} />
+            </Pressable>
+          </View>}
+          {lifts.length > 0 && <Pressable accessibilityRole="button" accessibilityLabel="View all lift progress" onPress={() => openLifts()}
+            style={({ pressed }) => [styles.viewAll, pressed && styles.buttonPressed]}>
+            <Text style={styles.viewAllLabel}>View all lift progress</Text>
+            <ChevronRight size={17} color={redesignColors.ash} />
+          </Pressable>}
+        </View>
+        <View style={styles.destinations}>
+          <Pressable accessibilityRole="button" accessibilityLabel={`Personal records. ${records.length} ${records.length === 1 ? 'exercise' : 'exercises'} tracked`}
+            onPress={() => tap(() => router.push('/records'))} style={({ pressed }) => [styles.destination, pressed && styles.buttonPressed]}>
+            <View style={styles.destinationIcon}><Trophy size={20} strokeWidth={2} color={redesignColors.bone} /></View>
+            <View style={styles.destinationCopy}>
+              <Text style={styles.destinationTitle}>Personal records</Text>
+              <Text style={styles.destinationMeta}>{records.length} {records.length === 1 ? 'exercise' : 'exercises'} tracked</Text>
+            </View>
+            <ChevronRight size={18} color={redesignColors.ash} />
           </Pressable>
-        </View>
-
-        <View style={styles.weeklyGoalSection}>
-          <WeeklyGoalCard completed={weeklyProgress.completed} goal={weeklyProgress.goal} />
-        </View>
-
-        <View style={styles.section}>
-          <SectionHeader
-            label="STRENGTH PROGRESSION"
-            action={(
-              <StrengthRangeButton
-                rangeWeeks={strengthRange}
-                onPress={openStrengthRangePicker}
-              />
-            )}
-          />
-          {strengthMetrics.length > 0 ? (
-            <View style={styles.strengthGrid}>
-              {[strengthMetrics.slice(0, 2), strengthMetrics.slice(2, 4)].map((row, rowIndex) => (
-                row.length > 0 ? (
-                  <View key={`strength-row-${rowIndex}`} style={styles.strengthRow}>
-                    {row.map((metric) => (
-                      <StrengthCard
-                        key={metric.key}
-                        metric={metric}
-                        onPress={() => openStrengthDetail(metric)}
-                      />
-                    ))}
-                  </View>
-                ) : null
-              ))}
+          <Pressable accessibilityRole="button" accessibilityLabel={`History. ${completed} ${completed === 1 ? 'workout' : 'workouts'} logged`}
+            onPress={() => tap(() => router.push('/history'))} style={({ pressed }) => [styles.destination, styles.destinationLast, pressed && styles.buttonPressed]}>
+            <View style={styles.destinationIcon}><HistoryIcon size={20} strokeWidth={2} color={redesignColors.bone} /></View>
+            <View style={styles.destinationCopy}>
+              <Text style={styles.destinationTitle}>History</Text>
+              <Text style={styles.destinationMeta}>{completed} {completed === 1 ? 'workout' : 'workouts'} logged</Text>
             </View>
-          ) : (
-            <View style={styles.strengthSectionEmpty}>
-              <Text style={styles.strengthSectionEmptyText}>
-                Log a set to start tracking your strength progression.
-              </Text>
-            </View>
-          )}
-        </View>
-
-        <View style={styles.section}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Personal Records. ${personalRecords.length} exercises tracked`}
-            onPress={openAllRecords}
-            style={styles.recordCard}
-          >
-            <View style={[styles.trophyTile, { backgroundColor: `${STREAK_ORANGE}21` }]}>
-              <Trophy color={STREAK_ORANGE} size={21} strokeWidth={2} />
-            </View>
-            <View style={styles.recordCopy}>
-              <Text style={styles.recordName}>Personal Records</Text>
-              <Text style={styles.recordDetails}>{personalRecords.length} exercises tracked</Text>
-            </View>
-            <ChevronRight color={redesignColors.ash} size={21} style={styles.historyChevron} />
-          </Pressable>
-        </View>
-
-        <View style={[styles.section, styles.compactSection]}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`View history. ${completedSessions.length} ${completedSessions.length === 1 ? 'workout' : 'workouts'} logged`}
-            onPress={openHistory}
-            style={[styles.recordCard, styles.historyCard]}
-          >
-            <View style={[styles.trophyTile, { backgroundColor: `${STREAK_ORANGE}21` }]}>
-              <HistoryIcon color={STREAK_ORANGE} size={21} strokeWidth={2} />
-            </View>
-            <View style={styles.recordCopy}>
-              <Text numberOfLines={1} style={styles.recordName}>History</Text>
-              <Text numberOfLines={1} style={styles.recordDetails}>
-                {completedSessions.length}{' '}
-                {completedSessions.length === 1 ? 'workout' : 'workouts'} logged
-              </Text>
-            </View>
-            <ChevronRight
-              color={redesignColors.ash}
-              size={21}
-              strokeWidth={2.1}
-              style={styles.historyChevron}
-            />
+            <ChevronRight size={18} color={redesignColors.ash} />
           </Pressable>
         </View>
       </ScrollView>
-
-      {selectedStrengthMetric ? (
-        <StrengthProgressionDetail
-          metric={selectedStrengthMetric}
-          rangeWeeks={strengthRange}
-          bottomInset={insets.bottom}
-          onRangeChange={setStrengthRange}
-          onDismiss={() => setSelectedStrengthKey(null)}
-        />
-      ) : null}
-
-      {showStrengthRangePicker ? (
-        <StrengthRangePicker
-          selectedRange={strengthRange}
-          onSelect={setStrengthRange}
-          onDismiss={() => setShowStrengthRangePicker(false)}
-        />
-      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: redesignColors.ink,
-  },
-  scrollContent: {
-    paddingHorizontal: 24,
-  },
-  header: {
-    minHeight: 57,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  // Same size as Home's greeting so the two tab titles match.
-  title: {
-    fontFamily: redesignFonts.display,
-    fontSize: 34,
-    lineHeight: 42,
-    letterSpacing: -1.6,
-    color: redesignColors.bone,
-  },
-  settingsButton: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    borderColor: redesignColors.border,
-    backgroundColor: redesignColors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  buttonPressed: {
-    opacity: 0.72,
-    transform: [{ scale: 0.97 }],
-  },
-  weeklyGoalSection: {
-    marginTop: 27,
-  },
-  weeklyGoalCard: {
-    paddingHorizontal: 22,
-    paddingTop: 20,
-    paddingBottom: 18,
-    borderRadius: 27,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    borderColor: 'transparent',
-    backgroundColor: '#171716',
-    shadowColor: STREAK_ORANGE,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.13,
-    shadowRadius: 20,
-  },
-  weeklyGoalBorder: {
-    ...StyleSheet.absoluteFill,
-    borderRadius: 27,
-    borderCurve: 'continuous',
-  },
-  weeklyGoalFill: {
-    position: 'absolute',
-    top: 1,
-    right: 1,
-    bottom: 1,
-    left: 1,
-    borderRadius: 26,
-    borderCurve: 'continuous',
-  },
-  weeklyGoalTopRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    gap: 14,
-  },
-  weeklyGoalCopy: {
-    flex: 1,
-    minWidth: 0,
-  },
-  weeklyGoalEyebrow: {
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 11,
-    lineHeight: 16,
-    letterSpacing: 1.65,
-    color: STREAK_ORANGE,
-  },
-  weeklyGoalHeadline: {
-    marginTop: 6,
-    fontFamily: redesignFonts.display,
-    fontSize: 24,
-    lineHeight: 30,
-    letterSpacing: -0.7,
-    color: redesignColors.bone,
-  },
-  weeklyGoalCount: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-  },
-  weeklyGoalCompleted: {
-    fontFamily: redesignFonts.display,
-    fontSize: 30,
-    lineHeight: 34,
-    letterSpacing: -1,
-    color: redesignColors.bone,
-  },
-  weeklyGoalTotal: {
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 14,
-    color: redesignColors.ash,
-  },
-  weeklyGoalDays: {
-    flexDirection: 'row',
-    gap: 6,
-    marginTop: 16,
-  },
-  weeklyGoalDay: {
-    flex: 1,
-    height: 28,
-    borderRadius: 9,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    borderColor: 'transparent',
-    backgroundColor: 'rgba(255, 255, 255, 0.045)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  weeklyGoalDayTrained: {
-    backgroundColor: STREAK_ORANGE,
-  },
-  weeklyGoalDayPlanned: {
-    backgroundColor: 'transparent',
-    borderColor: `${STREAK_ORANGE}80`,
-  },
-  weeklyGoalDayLetter: {
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 10,
-    color: redesignColors.ashDim,
-  },
-  weeklyGoalDayLetterPlanned: {
-    color: redesignColors.ash,
-  },
-  weeklyGoalDayLetterToday: {
-    color: redesignColors.bone,
-  },
-  weeklyGoalDayLetterTrained: {
-    color: redesignColors.ink,
-  },
-  weeklyGoalCaption: {
-    marginTop: 12,
-    fontFamily: redesignFonts.uiMedium,
-    fontSize: 14,
-    lineHeight: 19,
-    color: redesignColors.ash,
-  },
-  weeklyGoalCaptionStrong: {
-    fontFamily: redesignFonts.uiSemiBold,
-    color: redesignColors.bone,
-  },
-  section: {
-    marginTop: 34,
-  },
-  compactSection: {
-    marginTop: 24,
-  },
-  sectionHeader: {
-    minHeight: 44,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  sectionLabel: {
-    flex: 1,
-    minWidth: 0,
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 12,
-    letterSpacing: 2.15,
-    color: redesignColors.ash,
-  },
-  sectionMeta: {
-    fontFamily: redesignFonts.mono,
-    fontSize: 12,
-    letterSpacing: 0.3,
-    color: redesignColors.ashDim,
-  },
-  strengthRangeControl: {
-    flexShrink: 0,
-    marginLeft: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 9,
-  },
-  rangeButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 15,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    borderColor: 'rgba(241, 130, 73, 0.38)',
-    backgroundColor: 'rgba(241, 130, 73, 0.10)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  rangeButtonPressed: {
-    opacity: 0.72,
-    transform: [{ scale: 0.96 }],
-  },
-  rangeButtonText: {
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 10,
-    letterSpacing: 0.15,
-    color: STREAK_ORANGE,
-  },
-  strengthGrid: {
-    gap: 12,
-  },
-  strengthRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  strengthSectionEmpty: {
-    minHeight: 112,
-    paddingHorizontal: 20,
-    paddingVertical: 22,
-    borderRadius: 24,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    borderColor: SECTION_BORDER,
-    backgroundColor: redesignColors.surface,
-    justifyContent: 'center',
-  },
-  strengthSectionEmptyText: {
-    maxWidth: 250,
-    fontFamily: redesignFonts.uiMedium,
-    fontSize: 15,
-    lineHeight: 21,
-    color: redesignColors.ash,
-  },
-  strengthCardSlot: {
-    flex: 1,
-    minWidth: 0,
-  },
-  strengthCardTapTarget: {
-    width: '100%',
-  },
-  strengthCardPressed: {
-    opacity: 0.86,
-    transform: [{ scale: 0.975 }],
-  },
-  // Matches recordCard: same surface, border and corner radius as the cards around it.
-  strengthTile: {
-    width: '100%',
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 15,
-    borderRadius: 23,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    borderColor: SECTION_BORDER,
-    backgroundColor: redesignColors.surface,
-  },
-  strengthTileName: {
-    // Always two lines tall, so every card's content starts at the same height.
-    height: 38,
-    fontFamily: redesignFonts.uiSemiBold,
-    fontSize: 15,
-    lineHeight: 19,
-    color: redesignColors.bone,
-  },
-  strengthTileWeightRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    marginTop: 10,
-  },
-  strengthTileWeight: {
-    flexShrink: 1,
-    fontFamily: redesignFonts.display,
-    fontSize: 30,
-    lineHeight: 34,
-    letterSpacing: -0.9,
-    color: redesignColors.bone,
-  },
-  strengthTileUnit: {
-    marginLeft: 5,
-    fontFamily: redesignFonts.uiSemiBold,
-    fontSize: 13,
-    color: redesignColors.ash,
-  },
-  strengthTileMeta: {
-    marginTop: 4,
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 11,
-    lineHeight: 15,
-    letterSpacing: 0.4,
-    color: redesignColors.ashDim,
-  },
-  cardAccent: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 3,
-  },
-  exerciseDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginTop: 7,
-    marginRight: 10,
-  },
-  gainRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 7,
-  },
-  periodText: {
-    marginTop: 2,
-    marginLeft: 1,
-    fontFamily: redesignFonts.mono,
-    fontSize: 12,
-    lineHeight: 18,
-    color: redesignColors.ash,
-  },
-  detailModal: {
-    flex: 1,
-    paddingHorizontal: 12,
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-  },
-  rangeModal: {
-    flex: 1,
-    paddingHorizontal: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  detailBackdrop: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(10, 8, 6, 0.76)',
-  },
-  detailCard: {
-    width: '100%',
-    height: 630,
-    maxWidth: 460,
-    maxHeight: '86%',
-    paddingHorizontal: 24,
-    paddingTop: 26,
-    paddingBottom: 22,
-    borderRadius: 30,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    borderColor: SECTION_BORDER,
-    backgroundColor: redesignColors.surface,
-    overflow: 'hidden',
-  },
-  rangeSheet: {
-    width: '100%',
-    maxWidth: 420,
-    paddingHorizontal: 20,
-    paddingTop: 22,
-    paddingBottom: 20,
-    borderRadius: 30,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    borderColor: SECTION_BORDER,
-    backgroundColor: redesignColors.surface,
-    overflow: 'hidden',
-  },
-  rangeSheetHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 18,
-  },
-  rangeSheetHeading: {
-    flex: 1,
-    minWidth: 0,
-  },
-  rangeSheetEyebrow: {
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 9,
-    lineHeight: 14,
-    letterSpacing: 1.3,
-    color: STREAK_ORANGE,
-  },
-  rangeSheetTitle: {
-    marginTop: 5,
-    fontFamily: redesignFonts.display,
-    fontSize: 27,
-    lineHeight: 32,
-    letterSpacing: -0.85,
-    color: redesignColors.bone,
-  },
-  rangeSheetCopy: {
-    maxWidth: 290,
-    marginTop: 5,
-    fontFamily: redesignFonts.uiMedium,
-    fontSize: 13,
-    lineHeight: 18,
-    color: redesignColors.ash,
-  },
-  rangeOptionList: {
-    marginTop: 17,
-    gap: 8,
-  },
-  rangeOptionRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  rangeOptionSlot: {
-    flex: 1,
-    minWidth: 0,
-  },
-  rangeOption: {
-    width: '100%',
-    minHeight: 54,
-    paddingHorizontal: 12,
-    borderRadius: 17,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    borderColor: 'rgba(169, 159, 145, 0.14)',
-    backgroundColor: 'rgba(42, 35, 28, 0.54)',
-  },
-  rangeOptionSelected: {
-    borderColor: 'rgba(241, 130, 73, 0.62)',
-    backgroundColor: 'rgba(241, 130, 73, 0.11)',
-  },
-  rangeOptionPressed: {
-    opacity: 0.72,
-  },
-  rangeOptionContent: {
-    width: '100%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 9,
-  },
-  rangeOptionCheck: {
-    width: 23,
-    height: 23,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: redesignColors.hi,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  rangeOptionCheckSelected: {
-    borderColor: STREAK_ORANGE,
-    backgroundColor: STREAK_ORANGE,
-  },
-  rangeOptionLabel: {
-    flexShrink: 1,
-    fontFamily: redesignFonts.uiSemiBold,
-    fontSize: 13,
-    color: redesignColors.ash,
-  },
-  rangeOptionLabelSelected: {
-    color: STREAK_ORANGE,
-  },
-  detailHeader: {
-    minHeight: 64,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 16,
-  },
-  detailHeadingCopy: {
-    flex: 1,
-    minWidth: 0,
-  },
-  detailEyebrowRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  detailDot: {
-    width: 8,
-    height: 8,
-    marginTop: 0,
-    marginRight: 8,
-  },
-  detailEyebrow: {
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 10,
-    lineHeight: 15,
-    letterSpacing: 1.4,
-  },
-  detailTitle: {
-    marginTop: 6,
-    fontFamily: redesignFonts.display,
-    fontSize: 31,
-    lineHeight: 36,
-    letterSpacing: -0.9,
-    color: redesignColors.bone,
-  },
-  detailCloseButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    borderColor: redesignColors.border,
-    backgroundColor: redesignColors.raised,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  detailSummary: {
-    minHeight: 84,
-    marginTop: 13,
-    paddingHorizontal: 18,
-    paddingVertical: 14,
-    borderRadius: 20,
-    borderCurve: 'continuous',
-    backgroundColor: redesignColors.raised,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  detailSummaryLabel: {
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 9,
-    letterSpacing: 1.2,
-    color: redesignColors.ashDim,
-  },
-  detailWeightRow: {
-    marginTop: 2,
-    flexDirection: 'row',
-    alignItems: 'baseline',
-  },
-  detailWeight: {
-    fontFamily: redesignFonts.display,
-    fontSize: 34,
-    lineHeight: 38,
-    letterSpacing: -1,
-    color: redesignColors.bone,
-  },
-  detailWeightUnit: {
-    marginLeft: 6,
-    fontFamily: redesignFonts.uiSemiBold,
-    fontSize: 13,
-    color: redesignColors.ash,
-  },
-  detailGainPill: {
-    minHeight: 38,
-    paddingHorizontal: 12,
-    borderRadius: 19,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  detailGainText: {
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 12,
-  },
-  detailRangeSelector: {
-    marginTop: 16,
-    padding: 5,
-    borderRadius: 20,
-    backgroundColor: 'rgba(42, 35, 28, 0.68)',
-    flexDirection: 'row',
-    gap: 7,
-  },
-  detailRangeSlot: {
-    flex: 1,
-    minWidth: 0,
-  },
-  detailRangeOption: {
-    width: '100%',
-    minHeight: 42,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'transparent',
-  },
-  detailRangeOptionContent: {
-    width: '100%',
-    minHeight: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  detailRangeOptionText: {
-    fontFamily: redesignFonts.uiSemiBold,
-    fontSize: 12,
-    letterSpacing: 0.15,
-    color: redesignColors.ash,
-  },
-  breakdownHeader: {
-    marginTop: 18,
-    marginBottom: 9,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  breakdownTitle: {
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 10,
-    letterSpacing: 1.4,
-    color: redesignColors.ash,
-  },
-  breakdownMeta: {
-    fontFamily: redesignFonts.mono,
-    fontSize: 9,
-    letterSpacing: 1,
-    color: redesignColors.ashDim,
-  },
-  weekList: {
-    gap: 7,
-    paddingBottom: 2,
-  },
-  detailWeekScroll: {
-    flex: 1,
-    minHeight: 0,
-  },
-  weekRow: {
-    minHeight: 59,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    borderRadius: 17,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    borderColor: 'rgba(169, 159, 145, 0.10)',
-    backgroundColor: 'rgba(42, 35, 28, 0.52)',
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  weekMarkerColumn: {
-    alignSelf: 'stretch',
-    width: 29,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  weekMarker: {
-    zIndex: 1,
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    borderWidth: 1,
-    borderColor: redesignColors.hi,
-    backgroundColor: redesignColors.raised,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  weekMarkerText: {
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 10,
-    color: redesignColors.ash,
-  },
-  weekConnector: {
-    position: 'absolute',
-    top: 35,
-    width: 1,
-    height: 25,
-    backgroundColor: redesignColors.border,
-  },
-  weekCopy: {
-    flex: 1,
-    marginLeft: 10,
-  },
-  weekLabel: {
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 10,
-    lineHeight: 14,
-    letterSpacing: 0.8,
-    color: redesignColors.bone,
-  },
-  weekCaption: {
-    marginTop: 2,
-    fontFamily: redesignFonts.uiMedium,
-    fontSize: 12,
-    lineHeight: 15,
-    color: redesignColors.ashDim,
-  },
-  weekValueGroup: {
-    alignItems: 'flex-end',
-  },
-  weekIncrease: {
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 9,
-    lineHeight: 13,
-  },
-  weekStart: {
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 8,
-    lineHeight: 13,
-    letterSpacing: 0.7,
-    color: redesignColors.ashDim,
-  },
-  weekValue: {
-    marginTop: 1,
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 14,
-    lineHeight: 19,
-    color: redesignColors.bone,
-  },
-  detailInsight: {
-    minHeight: 42,
-    marginTop: 14,
-    paddingHorizontal: 13,
-    paddingVertical: 10,
-    borderLeftWidth: 2,
-    borderRadius: 8,
-    backgroundColor: 'rgba(42, 35, 28, 0.42)',
-    justifyContent: 'center',
-  },
-  detailInsightText: {
-    fontFamily: redesignFonts.uiMedium,
-    fontSize: 12,
-    lineHeight: 17,
-    color: redesignColors.ash,
-  },
-  recordCard: {
-    minHeight: 88,
-    paddingHorizontal: 18,
-    paddingVertical: 15,
-    borderRadius: 23,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    borderColor: SECTION_BORDER,
-    backgroundColor: redesignColors.surface,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  historyCard: {
-    width: '100%',
-    overflow: 'hidden',
-  },
-  historyChevron: {
-    marginLeft: 10,
-    flexShrink: 0,
-  },
-  trophyTile: {
-    width: 50,
-    height: 50,
-    borderRadius: 16,
-    borderCurve: 'continuous',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  recordCopy: {
-    flex: 1,
-    minWidth: 0,
-    marginLeft: 16,
-  },
-  recordName: {
-    fontFamily: redesignFonts.uiBold,
-    fontSize: 17,
-    lineHeight: 21,
-    color: redesignColors.bone,
-  },
-  recordDetails: {
-    marginTop: 2,
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 12,
-    lineHeight: 17,
-    color: redesignColors.ash,
-  },
-
+  screen: { flex: 1, backgroundColor: redesignColors.ink },
+  scroll: { flex: 1 },
+  content: { paddingHorizontal: 24 },
+  header: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 16 },
+  title: { flex: 1, fontFamily: redesignFonts.display, lineHeight: 42, fontSize: 34, letterSpacing: -1.6, color: redesignColors.bone },
+  settingsButton: { width: 44, height: 44, borderRadius: 22, borderCurve: 'continuous', alignItems: 'center', justifyContent: 'center' },
+  settingsGlass: { width: 44, height: 44, borderRadius: 22, borderCurve: 'continuous', alignItems: 'center', justifyContent: 'center' },
+  settingsIcon: { width: 22, height: 22 },
+  settingsButtonFallback: { borderWidth: 1, borderColor: redesignColors.border, backgroundColor: redesignColors.surface },
+  buttonPressed: { opacity: 0.7 },
+  weeklySummary: { marginTop: 24, padding: 18, borderRadius: 28, borderCurve: 'continuous', overflow: 'hidden', backgroundColor: redesignColors.surface },
+  weeklyHeading: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 12 },
+  weeklyHeadingLarge: { flexDirection: 'column', alignItems: 'flex-start' },
+  weeklyCopyLarge: { flex: 0, alignSelf: 'stretch' },
+  weeklyCopy: { flex: 1, minWidth: 0, gap: 4 },
+  weeklyTitle: { fontFamily: redesignFonts.uiMedium, lineHeight: 18, fontSize: 12, color: redesignColors.bone, opacity: 0.75 },
+  weeklyCount: { fontFamily: redesignFonts.monoBold, fontVariant: ['tabular-nums'], lineHeight: 42, fontSize: 32, letterSpacing: -1, color: redesignColors.accent },
+  weeklyTotal: { fontFamily: redesignFonts.mono, lineHeight: 26, fontSize: 18, color: redesignColors.ash },
+  weekdays: { flexDirection: 'row', gap: 6, marginTop: 14 },
+  weekdaysWrapped: { flexWrap: 'wrap' },
+  day: { flex: 1, minWidth: 0, gap: 10, alignItems: 'center', paddingVertical: 5 },
+  dayLarge: { flexGrow: 0, flexShrink: 0, flexBasis: '22%' },
+  dayLabel: { alignItems: 'center' },
+  dayLetter: { fontFamily: redesignFonts.uiMedium, lineHeight: 18, fontSize: 12, color: redesignColors.ash },
+  todayLetter: { color: redesignColors.bone, fontFamily: redesignFonts.uiBold },
+  todayDot: { position: 'absolute', bottom: -5, width: 3, height: 3, borderRadius: 1.5, backgroundColor: redesignColors.accent },
+  dayMark: { minWidth: 28, minHeight: 28, borderRadius: 14, paddingHorizontal: 3, alignItems: 'center', justifyContent: 'center' },
+  dayTrained: { backgroundColor: redesignColors.accent },
+  dayPlanned: { backgroundColor: redesignColors.surface },
+  dayCount: { fontFamily: redesignFonts.monoBold, lineHeight: 18, fontSize: 12, color: redesignColors.ink },
+  dayDash: { fontFamily: redesignFonts.uiMedium, lineHeight: 20, fontSize: 14, color: redesignColors.ash },
+  weeklyCaption: { fontFamily: redesignFonts.display, lineHeight: 30, fontSize: 24, letterSpacing: -0.6, color: redesignColors.bone },
+  weeklyGoalPrompt: { fontFamily: redesignFonts.uiMedium, fontSize: 14, lineHeight: 20, letterSpacing: 0 },
+  liftSection: { marginTop: 24 },
+  sectionHeading: { marginBottom: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
+  sectionTitle: { fontFamily: redesignFonts.uiSemiBold, lineHeight: 29, fontSize: 22, color: redesignColors.bone },
+  textButton: { minHeight: 44, minWidth: 44, paddingHorizontal: 6, justifyContent: 'center', alignItems: 'center' },
+  textButtonLabel: { fontFamily: redesignFonts.uiSemiBold, lineHeight: 20, fontSize: 14, color: redesignColors.bone },
+  cards: { flexDirection: 'row', gap: 12 },
+  cardsStacked: { flexDirection: 'column' },
+  viewAll: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  viewAllLabel: { fontFamily: redesignFonts.uiMedium, lineHeight: 20, fontSize: 14, color: redesignColors.ash },
+  emptyBrand: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8 },
+  emptyEyebrow: { fontFamily: redesignFonts.mono, fontSize: 11, letterSpacing: 1.5, color: splitColors.chest },
+  emptyState: { overflow: 'hidden', minHeight: 190, borderRadius: 22, backgroundColor: redesignColors.surface, padding: 20, justifyContent: 'center', gap: 8 },
+  emptyTitle: { fontFamily: redesignFonts.display, lineHeight: 33, fontSize: 28, color: redesignColors.bone },
+  emptyCopy: { fontFamily: redesignFonts.ui, lineHeight: 20, fontSize: 14, color: redesignColors.ash },
+  emptyAction: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start' },
+  preferenceError: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 12 },
+  destinations: { marginTop: 12 },
+  destination: { minHeight: 72, flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: redesignColors.border },
+  destinationLast: { borderBottomWidth: 0 },
+  destinationIcon: { width: 40, height: 40, borderRadius: 14, backgroundColor: redesignColors.raised, alignItems: 'center', justifyContent: 'center' },
+  destinationCopy: { flex: 1, minWidth: 0, gap: 3 },
+  destinationTitle: { fontFamily: redesignFonts.uiSemiBold, lineHeight: 22, fontSize: 16, color: redesignColors.bone },
+  destinationMeta: { fontFamily: redesignFonts.ui, lineHeight: 19, fontSize: 13, color: redesignColors.ash },
 });

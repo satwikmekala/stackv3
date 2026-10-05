@@ -1,4 +1,5 @@
-import type { ExperienceLevel, WorkoutType } from '@/store/workoutStore';
+import type { ExperienceLevel, WorkoutType, SessionOrigin } from '@/store/workoutStore';
+import type { ThreeDayStructure } from '@/store/programPreferences';
 import { workoutMeta } from '@/constants/workouts';
 import { redesignColors } from '@/constants/theme';
 
@@ -36,42 +37,45 @@ export const ARCHETYPE_COMPOSITIONS: Record<Archetype, ArchetypeComposition> = {
     armsFilter: 'Triceps',
     label: 'Push (Chest, Shoulders, Triceps)',
     shortLabel: 'Push',
-    color: workoutMeta.chest.color,
+    get color() { return workoutMeta.chest.color; },
   },
   pull: {
     workoutTypes: ['back', 'arms'],
     armsFilter: 'Biceps',
     label: 'Pull (Back, Biceps)',
     shortLabel: 'Pull',
-    color: workoutMeta.back.color,
+    get color() { return workoutMeta.back.color; },
   },
   legs: {
     workoutTypes: ['legs'],
     label: 'Legs',
     shortLabel: 'Legs',
-    color: workoutMeta.legs.color,
+    get color() { return workoutMeta.legs.color; },
   },
   upper: {
     workoutTypes: ['chest', 'back', 'shoulders', 'arms'],
     label: 'Upper Body',
     shortLabel: 'Upper',
-    color: workoutMeta.chest.color,
+    get color() { return workoutMeta.chest.color; },
   },
   lower: {
     workoutTypes: ['legs'],
     label: 'Lower Body',
     shortLabel: 'Lower',
-    color: workoutMeta.legs.color,
+    get color() { return workoutMeta.legs.color; },
   },
   full_body: {
     workoutTypes: ['chest', 'back', 'shoulders', 'arms', 'legs', 'core'],
     label: 'Full Body',
     shortLabel: 'Full Body',
-    color: workoutMeta.chest.color,
+    get color() { return workoutMeta.chest.color; },
   },
 };
 
 export type SessionWorkoutClassification = {
+  imported?: { name: string };
+  origin?: SessionOrigin;
+  completed?: boolean;
   archetype: Archetype | null;
   secondaryArchetype: Archetype | null;
   workoutTypes: readonly WorkoutType[];
@@ -85,6 +89,12 @@ export type SessionWorkoutClassification = {
 export function getSessionWorkoutDisplay(
   session: SessionWorkoutClassification
 ): { label: string; color: string; isMerged: boolean } {
+  if (session.imported) return { label: session.imported.name, color: redesignColors.accent, isMerged: false };
+  if (session.origin === 'adhoc') {
+    const groups = session.workoutTypes.map((type) => workoutMeta[type].shortLabel);
+    return { label: session.completed && groups.length ? `Workout · ${groups.join(' / ')}` : 'Workout',
+      color: redesignColors.accent, isMerged: false };
+  }
   if (session.archetype) {
     const primary = ARCHETYPE_COMPOSITIONS[session.archetype];
     const secondary = session.secondaryArchetype
@@ -122,7 +132,7 @@ export type { ExperienceLevel };
  */
 export function getWeeklyArchetypeSequence(
   weeklyGoal: number,
-  experienceLevel: ExperienceLevel
+  threeDayStructure: ThreeDayStructure
 ): Archetype[] {
   switch (weeklyGoal) {
     case 1:
@@ -130,7 +140,7 @@ export function getWeeklyArchetypeSequence(
     case 2:
       return ['full_body', 'full_body'];
     case 3:
-      return experienceLevel === 'beginner'
+      return threeDayStructure === 'full-body'
         ? ['full_body', 'full_body', 'full_body']
         : ['push', 'pull', 'legs'];
     case 4:

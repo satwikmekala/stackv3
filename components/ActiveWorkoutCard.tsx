@@ -1,10 +1,12 @@
+import { hasMuscleColorPreference, getWorkoutLoggingColor } from '@/constants/muscleColors';
+import { useMuscleColors } from '@/store/muscleColors';
 import { ChevronUp } from 'lucide-react-native';
 import {
   StyleSheet, Text, TouchableOpacity, View,
   type LayoutChangeEvent, type StyleProp, type ViewStyle,
 } from 'react-native';
 import { ARCHETYPE_COMPOSITIONS } from '@/constants/archetypes';
-import { redesignColors, redesignFonts, workoutLoggingColors } from '@/constants/theme';
+import { redesignColors, redesignFonts } from '@/constants/theme';
 import { useWorkoutStore, type WorkoutSession } from '@/store/workoutStore';
 import { getCurrentWorkoutExerciseIndex } from '@/utils/workoutResume';
 
@@ -14,21 +16,24 @@ export function ActiveWorkoutCard({ session, onPress, onLayout, style }: {
   onLayout?: (event: LayoutChangeEvent) => void;
   style?: StyleProp<ViewStyle>;
 }) {
+  useMuscleColors(state => state.preferences);
   const workoutFocus = useWorkoutStore((state) => state.workoutFocus);
   const exercise = session.exercises[getCurrentWorkoutExerciseIndex(session, workoutFocus)];
   const nextSetIndex = exercise?.sets.findIndex((set) => !set.completed) ?? -1;
   const progress = nextSetIndex >= 0
     ? `Set ${nextSetIndex + 1} of ${exercise.sets.length}`
-    : 'Ready to finish';
-  const accent = session.archetype
+    : session.exercises.length === 0 ? 'Add your first exercise' : 'Ready to finish';
+  const exerciseType = exercise ? useWorkoutStore.getState().getExerciseWorkoutType(exercise.name) : null;
+  const accent = exerciseType && hasMuscleColorPreference(exerciseType)
+    ? getWorkoutLoggingColor(exerciseType) : session.origin === 'adhoc' ? redesignColors.accent : session.archetype
     ? ARCHETYPE_COMPOSITIONS[session.archetype].color
-    : workoutLoggingColors[session.workoutTypes[0]];
+    : getWorkoutLoggingColor(session.workoutTypes[0]);
 
   return (
     <TouchableOpacity
       testID="active-workout-bar"
       accessibilityRole="button"
-      accessibilityLabel={`Resume workout, ${exercise?.name ?? 'Active workout'}, ${progress}`}
+      accessibilityLabel={`Resume workout, ${exercise?.name ?? 'Workout'}, ${progress}`}
       onPress={onPress}
       onLayout={onLayout}
       disabled={!onPress}
@@ -36,7 +41,7 @@ export function ActiveWorkoutCard({ session, onPress, onLayout, style }: {
       style={[styles.bar, { borderColor: accent, shadowColor: accent }, style]}
     >
       <View style={styles.details}>
-        <Text numberOfLines={1} style={styles.exercise}>{exercise?.name ?? 'Active workout'}</Text>
+        <Text numberOfLines={1} style={styles.exercise}>{exercise?.name ?? 'Workout'}</Text>
         <Text style={styles.progress}>{progress}</Text>
       </View>
       <Text style={[styles.resume, { color: accent }]}>Resume</Text>

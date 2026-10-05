@@ -1,3 +1,4 @@
+import { spokenTrainingCopy } from '@/utils/content';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, AppState, BackHandler, Pressable, ScrollView, StyleSheet, Text, View, type AppStateStatus } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -127,9 +128,9 @@ export default function CastingScreen({ sessionId, demo, onFinish, forceFailure 
   // The final beat on screen (animated Beat 4 or the static screen) is what uses the casting up.
   useEffect(() => { if (landed || shown === 'static') presentation.current?.finalBeat(); }, [landed, shown]);
   useEffect(() => { if (shown === 'static' && copy) AccessibilityInfo.announceForAccessibility(castingAnnouncement(copy)); }, [shown, copy]);
-  const header = <View style={styles.header}><Text style={styles.brand}>YOUR STACK{demo ? ' · PREVIEW' : ''}</Text>{shown !== 'static' && <Pressable accessibilityRole="button" accessibilityLabel={demo ? 'Skip casting preview' : 'Skip casting and view workout summary'} onPress={skip} style={styles.skip}><Text style={styles.skipText}>Skip</Text></Pressable>}</View>;
+  const header = <View style={styles.header}><Text style={styles.brand}>MY STACK{demo ? ' · PREVIEW' : ''}</Text>{shown !== 'static' && <Pressable accessibilityRole="button" accessibilityLabel={demo ? 'Skip to summary' : 'Skip to workout summary'} onPress={skip} style={styles.skip}><Text style={styles.skipText}>Skip</Text></Pressable>}</View>;
   const done = <Pressable accessibilityRole="button" accessibilityLabel={demo ? 'Done, return to sandbox' : 'Done, view workout summary'} onPress={onFinish} style={styles.continue}><Text style={styles.continueText}>Done</Text></Pressable>;
-  const metrics = copy?.landing.metrics.map((metric) => <View key={metric.label} style={styles.metric}>
+  const metrics = copy?.landing.metrics.map((metric) => <View key={metric.label} accessible accessibilityLabel={spokenTrainingCopy(`${metric.value} ${metric.label}`)} style={styles.metric}>
     <Text maxFontSizeMultiplier={1.4} style={styles.metricValue}>{metric.value}</Text>
     <Text style={styles.label}>{metric.label}</Text>
   </View>);
@@ -141,7 +142,7 @@ export default function CastingScreen({ sessionId, demo, onFinish, forceFailure 
       <ScrollView contentContainerStyle={styles.staticContent}>
         <View style={styles.staticPiece} accessibilityElementsHidden importantForAccessibility="no-hide-descendants"><BuildPreview slabs={history.slabs} width={180} height={150} /></View>
         {record && <View style={styles.staticRecord}>
-          <Text style={styles.recordLabel}>{record.heading}</Text>
+          <Text accessibilityLabel={spokenTrainingCopy(record.heading)} style={styles.recordLabel}>{record.heading}</Text>
           {record.lines.map((line, index) => <Text key={index} style={styles.recordLine}>{line}</Text>)}
           <Text style={styles.caption}>{record.closing}</Text>
         </View>}
@@ -169,7 +170,7 @@ export default function CastingScreen({ sessionId, demo, onFinish, forceFailure 
           {copy.progress.more && <Text maxFontSizeMultiplier={1.4} style={styles.more}>{copy.progress.more}</Text>}
         </View>
         : beat === 3 ? <View>
-          <Text style={styles.recordLabel}>{copy.record.heading}</Text>
+          <Text accessibilityLabel={spokenTrainingCopy(copy.record.heading)} style={styles.recordLabel}>{copy.record.heading}</Text>
           {copy.record.lines.map((line, index) => <Text key={index} maxFontSizeMultiplier={1.4} numberOfLines={2} style={styles.recordLine}>{line}</Text>)}
           <Text maxFontSizeMultiplier={1.4} style={styles.caption}>{copy.record.closing}</Text>
         </View>
@@ -178,7 +179,7 @@ export default function CastingScreen({ sessionId, demo, onFinish, forceFailure 
           <Text maxFontSizeMultiplier={1.4} style={styles.caption}>{copy.landing.subtitle}</Text>
         </View>}
     </View>
-    <View style={styles.stage} accessible accessibilityLabel={playing ? `${phase}. ${piece?.label ?? 'Workout'} piece, ${piece?.height.toFixed(2) ?? '1.00'} times baseline thickness. ${piece?.records.length ?? 0} records.` : 'Preparing saved workout presentation'}>
+    <View style={styles.stage} accessible accessibilityLabel={playing ? `${piece?.label ?? 'Workout'} block${piece?.metrics.liftsUp ? `, ${piece.metrics.liftsUp} improved ${piece.metrics.liftsUp === 1 ? 'exercise' : 'exercises'}` : ''}${piece?.records.length ? `, ${piece.records.length} personal ${piece.records.length === 1 ? 'record' : 'records'}` : ''}.` : 'Opening workout summary…'}>
       <LinearGradient colors={['#13110E', '#2C1D12', '#13110E']} style={StyleSheet.absoluteFill} />
       {playing && slabId && (forceFailure ? <RendererFailure /> : <BuildScene key={run} slabs={history.slabs} tuning={DEFAULT_TUNING} lamination="strata" overview={false} reducedMotion={false} paused={paused} casting={casting} onError={fail} benchmark={0} onStats={ignoreStats} />)}
     </View>

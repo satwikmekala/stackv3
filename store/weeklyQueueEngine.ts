@@ -3,8 +3,8 @@ import {
   type Archetype,
 } from '@/constants/archetypes';
 import { readCompletedSessionsSync } from '@/store/workoutDatabase';
+import { getProgramFrequency } from '@/store/trainingPreferences';
 import {
-  deriveDefaultSlots,
   getSessionLocalDate,
   getWeekDates,
   useWorkoutStore,
@@ -26,7 +26,7 @@ export interface WeeklyQueueState {
 
 export const getWeeklyQueueState = (): WeeklyQueueState => {
   const profile = useWorkoutStore.getState().profile;
-  if (!profile) {
+  if (!profile || profile.programMode !== 'stack') {
     return {
       sequence: [],
       completedKnown: [],
@@ -40,8 +40,8 @@ export const getWeeklyQueueState = (): WeeklyQueueState => {
   }
 
   const sequence = getWeeklyArchetypeSequence(
-    profile.weeklyGoal,
-    profile.experienceLevel
+    getProgramFrequency(profile),
+    profile.threeDayStructure
   );
   const weekDates = getWeekDates();
   const sessionsThisWeek = readCompletedSessionsSync().filter((session) =>
@@ -50,7 +50,8 @@ export const getWeeklyQueueState = (): WeeklyQueueState => {
   // Custom Split sessions are their own program: they still count as trained
   // days, but they must never consume a slot in Stack's archetype queue.
   const stackSessionsThisWeek = sessionsThisWeek.filter(
-    (session) => session.customSplitId == null
+    // Custom provenance remains authoritative even without a routine ID.
+    (session) => session.origin !== 'adhoc' && session.origin !== 'custom' && session.customSplitId == null
   );
   const completedKnown: Archetype[] = [];
   let unknownCompletedCount = 0;
@@ -82,7 +83,7 @@ export const getWeeklyQueueState = (): WeeklyQueueState => {
   const trainingDays = new Set(
     profile.trainingDays?.length
       ? profile.trainingDays
-      : deriveDefaultSlots(profile.weeklyGoal)
+      : []
   );
 
   // Today only still counts as an available training day if nothing has been

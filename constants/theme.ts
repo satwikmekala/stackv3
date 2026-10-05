@@ -61,6 +61,12 @@ export const workoutLoggingColors = {
   core: '#55C96B',
 };
 
+// Completion stays blue across workout categories; it represents a logged set.
+export const workoutSetColors = {
+  completedBackground: '#4F8BFF26',
+  completedMark: '#74A3FF',
+};
+
 /**
  * Loaded font family names (see app/_layout.tsx font gating).
  * Switzer = all text (weight is the only variable), SpaceMono = all numbers.

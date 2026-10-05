@@ -1,4 +1,5 @@
-import { workoutSetActions, type WorkoutSetAction, type WorkoutSetActionResult, type WorkoutSetTarget } from '@/store/workoutSetActions';
+import { getMeasurementActions, workoutSetActions, type WorkoutSetAction, type WorkoutSetActionResult, type WorkoutSetTarget } from '@/store/workoutSetActions';
+import type { ExerciseMetric } from '@/store/exerciseMeasurement';
 
 const prefix = 'stack.workout.v2:';
 export const createActionTargetPrefix = (target: WorkoutSetTarget, weightStepKg?: number) =>
@@ -6,10 +7,14 @@ export const createActionTargetPrefix = (target: WorkoutSetTarget, weightStepKg?
 export type LiveActivityActionTargets = Partial<Record<WorkoutSetAction, string>>;
 export type LiveActivityActionEvent = { id: string; source: string; target: string; timestamp: number };
 
-export function createLiveActivityActionTargets(target: WorkoutSetTarget | null, bodyweight: boolean, weightStepKg?: number): LiveActivityActionTargets {
+export function createLiveActivityActionTargets(
+  target: WorkoutSetTarget | null,
+  bodyweight: boolean,
+  weightStepKg?: number,
+  metric: ExerciseMetric = 'reps'
+): LiveActivityActionTargets {
   if (!target) return {};
-  return Object.fromEntries(workoutSetActions
-    .filter((action) => !bodyweight || (action !== 'increaseWeight' && action !== 'decreaseWeight'))
+  return Object.fromEntries(getMeasurementActions(bodyweight ? 'bodyweight' : 'external_weight', metric)
     .map((action) => [action, createActionTargetPrefix(target, weightStepKg) + action]));
 }
 
@@ -37,19 +42,24 @@ export function createLiveActivityActionBridge(options: {
   onApplied: (target: WorkoutSetTarget, result: WorkoutSetActionResult) => void;
   reconcile: () => void;
   onError: (error: unknown) => void;
+  onTrace?: (stage: string, commandId?: string, detail?: string) => void;
 }) {
   let draining = false;
   const seen = new Set<string>();
   return () => {
+    options.onTrace?.('rnDrainInvoked');
     if (draining || !options.isReady()) return;
     draining = true;
     try {
       // Drain an event-driven inbox, not a polling loop. Native consumes one
       // command at a time so a process exit cannot discard an unhandled batch.
       while (true) {
+        options.onTrace?.('rnCommandTakeBegin');
         const batch = options.takePending();
+        options.onTrace?.('rnCommandTakeEnd', batch[0]?.id);
         if (batch.length === 0) break;
         for (const event of batch) {
+          options.onTrace?.('rnCommandRetrieved', event.id, `action=${event.target.split('#').pop() ?? '?'}`);
           try {
             if (!event.id || seen.has(event.id)) continue;
             seen.add(event.id);
@@ -58,7 +68,9 @@ export function createLiveActivityActionBridge(options: {
             if (seen.size > 1024) seen.delete(seen.values().next().value!);
             const command = parseLiveActivityAction(event.target);
             if (!command || !options.isCurrentActivity(event.source)) continue;
+            options.onTrace?.('rnMutationBegin', event.id);
             const result = options.apply(command.target, command.action, command.weightStepKg);
+            options.onTrace?.('rnMutationEnd', event.id, `status=${result.status}`);
             if (result.status === 'applied') options.onApplied(command.target, result);
           } catch (error) { options.onError(error); }
         }
@@ -66,6 +78,7 @@ export function createLiveActivityActionBridge(options: {
     } catch (error) { options.onError(error); }
     finally {
       draining = false;
+      options.onTrace?.('rnReconcileRequested');
       options.reconcile();
     }
   };

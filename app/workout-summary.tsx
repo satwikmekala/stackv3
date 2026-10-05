@@ -1,5 +1,10 @@
+import { spokenTrainingCopy } from '@/utils/content';
+import { ImportedFacts } from '@/features/import/ImportedFacts';
+import { displayExerciseName } from '@/constants/exerciseNames';
+import { useMuscleColors } from '@/store/muscleColors';
 import { useMemo, useState } from 'react';
 import {
+  Alert,
   Platform,
   Pressable,
   ScrollView,
@@ -9,38 +14,40 @@ import {
   View,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import * as Haptics from 'expo-haptics';
-import { Check } from 'lucide-react-native';
-import {
-  Defs,
-  RadialGradient,
-  Rect,
-  Stop,
-  Svg,
-} from 'react-native-svg';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import * as Haptics from '@/services/haptics';
+import { ArrowUpRight, Check, ChevronDown, ChevronUp, Share, Trophy, X } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   FadeInDown,
   ReduceMotion,
-  ZoomIn,
 } from 'react-native-reanimated';
+import { WorkoutCardSurface } from '@/components/home/WorkoutCardSurface';
+import { getMuscleColor } from '@/constants/muscleColors';
+import { deriveLiftProgress, formatLiftPerformance, type LiftPerformance } from '@/store/liftProgress';
+import { parseSessionDate } from '@/store/workoutCalendar';
+import { SaveAdhocRoutine } from '@/components/SaveAdhocRoutine';
+import { buildWorkoutReport, type ReportExercise } from '@/features/report/workoutReport';
 import { ShareSheet } from '@/components/ShareSheet';
+import type { StackPosterLayer } from '@/components/StackPosterCard';
+import { deriveLiftLog } from '@/store/liftLog';
+import { shareWorkoutReportPdf } from '@/features/report/shareWorkoutReport';
 import { BUILD_DEMO_ENABLED } from '@/features/build/config';
 import { motionDuration, motionEasing } from '@/constants/motion';
 import { redesignColors, redesignFonts } from '@/constants/theme';
 import { DEFAULT_WEIGHT_UNIT } from '@/store/workoutDatabase';
 import {
   deriveWorkoutSummary,
+  formatExercisePerformance,
   displayVolume,
   formatSummaryDate,
   formatSummaryNumber,
   intensitySummaryLabel,
   specialSetSummaryLabel,
   type WorkoutSummary,
+  type WorkoutSummaryExercise,
 } from '@/store/workoutSummary';
 import { unitLabel, type WeightUnit } from '@/store/weightUnits';
-import { deriveLiftLog } from '@/store/liftLog';
 import { getWorkoutLetter } from '@/store/customSplitDraft';
 import { useWorkoutStore } from '@/store/workoutStore';
 import '@/global.css';
@@ -52,14 +59,6 @@ const CONTENT_ENTER = FadeInDown.delay(130)
   .duration(motionDuration.entrance)
   .easing(motionEasing.decelerate)
   .reduceMotion(ReduceMotion.System);
-const CHECK_ENTER = ZoomIn.delay(260)
-  .springify()
-  .damping(14)
-  .stiffness(220)
-  .reduceMotion(ReduceMotion.System);
-
-const SPECIAL_LABEL = 'SPECIAL SETS';
-
 function rgba(hex: string, opacity: number): string {
   const normalized = hex.replace('#', '');
   const value = normalized.length === 3
@@ -69,47 +68,6 @@ function rgba(hex: string, opacity: number): string {
   const green = Number.parseInt(value.slice(2, 4), 16);
   const blue = Number.parseInt(value.slice(4, 6), 16);
   return `rgba(${red}, ${green}, ${blue}, ${opacity})`;
-}
-
-function HeroGlow({ accent }: { accent: string }) {
-  return (
-    <Svg
-      pointerEvents="none"
-      preserveAspectRatio="none"
-      style={styles.heroGlow}
-      viewBox="0 0 100 100"
-    >
-      <Defs>
-        <RadialGradient
-          id="summaryHeroGlow"
-          cx="50%"
-          cy="104%"
-          rx="61%"
-          ry="66%"
-          fx="50%"
-          fy="104%"
-        >
-          <Stop offset="0%" stopColor={accent} stopOpacity={0.76} />
-          <Stop offset="42%" stopColor={accent} stopOpacity={0.42} />
-          <Stop offset="74%" stopColor={accent} stopOpacity={0.14} />
-          <Stop offset="100%" stopColor={accent} stopOpacity={0} />
-        </RadialGradient>
-      </Defs>
-      <Rect width="100" height="100" fill="url(#summaryHeroGlow)" />
-    </Svg>
-  );
-}
-
-function SummaryStat({ value, label }: { value: number; label: string }) {
-  return (
-    <View
-      accessibilityLabel={`${value} ${label.toLowerCase()}`}
-      style={styles.statCard}
-    >
-      <Text allowFontScaling={false} style={styles.statValue}>{value}</Text>
-      <Text allowFontScaling={false} style={styles.statLabel}>{label}</Text>
-    </View>
-  );
 }
 
 function WeeklyGoal({
@@ -125,7 +83,7 @@ function WeeklyGoal({
 
   return (
     <View
-      accessibilityLabel={`${completed} of ${goal} weekly workouts completed`}
+      accessibilityLabel={`${completed} of ${goal} weekly training days completed`}
       style={styles.weeklyValue}
     >
       <View style={styles.weeklyBars}>
@@ -142,7 +100,7 @@ function WeeklyGoal({
           />
         ))}
       </View>
-      <Text allowFontScaling={false} style={styles.weeklyCount}>
+      <Text style={styles.weeklyCount}>
         {completed} / {goal}
       </Text>
     </View>
@@ -165,28 +123,17 @@ function SummaryDetails({
   return (
     <View style={styles.detailList}>
       <View style={styles.detailRow}>
-        <Text allowFontScaling={false} style={styles.detailLabel}>INTENSITY</Text>
-        <Text allowFontScaling={false} style={styles.detailText}>
+        <Text style={styles.detailLabel}>How it felt</Text>
+        <Text style={styles.detailText}>
           {intensitySummaryLabel(summary.intensity)}
         </Text>
       </View>
 
       {specialLabel ? (
         <View style={styles.detailRow}>
-          <Text allowFontScaling={false} style={styles.detailLabel}>{SPECIAL_LABEL}</Text>
-          <View
-            accessibilityLabel={specialLabel.toLowerCase()}
-            style={[
-              styles.specialPill,
-              {
-                borderColor: rgba(summary.accent, 0.68),
-                backgroundColor: rgba(summary.accent, 0.06),
-              },
-            ]}
-          >
+          <Text style={styles.detailLabel}>Bonus sets</Text>
+          <View accessibilityLabel={specialLabel.toLowerCase()} style={styles.specialPill}>
             <Text
-              allowFontScaling={false}
-              numberOfLines={1}
               style={[styles.specialText, { color: summary.accent }]}
             >
               {specialLabel}
@@ -195,9 +142,9 @@ function SummaryDetails({
         </View>
       ) : null}
 
-      {showWeeklyGoal ? (
+      {showWeeklyGoal && weeklyGoal > 0 ? (
         <View style={styles.detailRow}>
-          <Text allowFontScaling={false} style={styles.detailLabel}>WEEKLY GOAL</Text>
+          <Text style={styles.detailLabel}>This week</Text>
           <WeeklyGoal
             completed={weeklyCompleted}
             goal={weeklyGoal}
@@ -209,47 +156,119 @@ function SummaryDetails({
   );
 }
 
-function ExerciseRecap({
-  summary,
-  weightUnit,
-}: {
+function ExerciseResult({ exercise, detail, previous, unit, accent }: {
+  exercise: WorkoutSummaryExercise;
+  detail?: ReportExercise;
+  previous?: LiftPerformance;
+  unit: WeightUnit;
+  accent: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const performance = formatExercisePerformance(exercise, unit);
+  const sets = detail?.sets ?? [];
+  const canExpand = sets.length > 0;
+  const previousText = previous ? formatLiftPerformance(previous, unit) : null;
+
+  return (
+    <View style={styles.exerciseRow}>
+      <Pressable
+        cssInterop={false}
+        accessibilityRole="button"
+        accessibilityLabel={`${displayExerciseName(exercise.name)}. ${performance.value}. ${performance.context}.${detail?.hasRecord ? ' Personal record.' : ''}${previousText ? ` Previous top set: ${previousText}.` : ''}`}
+        accessibilityHint={expanded ? 'Hide set details' : 'Show every logged set'}
+        accessibilityState={{ expanded, disabled: !canExpand }}
+        disabled={!canExpand}
+        onPress={() => setExpanded(value => !value)}
+        style={({ pressed }) => [styles.exerciseTrigger, pressed && styles.buttonPressed]}
+      >
+        <View style={[styles.categoryMark, { backgroundColor: accent }]} />
+        <View style={styles.exerciseContent}>
+          <View style={styles.exerciseHeading}>
+            <Text style={styles.exerciseName}>{displayExerciseName(exercise.name)}</Text>
+            {canExpand && (expanded
+              ? <ChevronUp size={16} color={redesignColors.ash} />
+              : <ChevronDown size={16} color={redesignColors.ash} />)}
+          </View>
+          <Text style={styles.exerciseMetric}>{performance.value}</Text>
+          <View style={styles.exerciseContextRow}>
+            <Text style={styles.exerciseContext}>{performance.context}</Text>
+            {detail?.hasRecord && <View style={styles.recordLabel}>
+              <Trophy size={12} color={accent} />
+              <Text accessibilityLabel="Personal record" style={[styles.recordText, { color: accent }]}>PR</Text>
+            </View>}
+          </View>
+          {previousText && <Text style={styles.previous}>
+            <Text style={styles.previousLabel}>Prev </Text>{previousText}
+          </Text>}
+        </View>
+      </Pressable>
+      {expanded && <View style={styles.setList}>
+        {sets.map(set => <View key={set.ordinal} style={styles.setRow}>
+          <Text accessibilityLabel={spokenTrainingCopy(`Set ${set.ordinal}${set.kind === 'working' ? '' : `, ${set.kind === 'pr' ? 'PR attempt' : set.kind === 'dropset' ? 'Drop set' : 'Extra set'}`}`)} style={styles.setLabel}>Set {set.ordinal}{set.kind === 'working' ? '' : ` · ${set.kind === 'pr' ? 'PR attempt' : set.kind === 'dropset' ? 'Drop set' : 'Extra set'}`}</Text>
+          <Text style={[styles.setValue, set.skipped && styles.skippedSet]}>{set.text}</Text>
+        </View>)}
+      </View>}
+    </View>
+  );
+}
+
+function ExerciseRecap({ summary, reportExercises, previousLifts, weightUnit }: {
   summary: WorkoutSummary;
+  reportExercises: ReportExercise[];
+  previousLifts: Map<string, LiftPerformance>;
   weightUnit: WeightUnit;
 }) {
+  const getWorkoutType = useWorkoutStore(state => state.getExerciseWorkoutType);
+  const performed = reportExercises.filter(exercise => exercise.performedCount > 0);
   return (
-    <View style={styles.recapCard}>
-      <Text allowFontScaling={false} style={styles.recapTitle}>EXERCISE RECAP</Text>
-      <View style={styles.recapHeaderRule} />
-
-      {summary.exercises.map((exercise, index) => (
-        <View
-          key={`${exercise.name}-${index}`}
-          style={[
-            styles.exerciseRow,
-            index < summary.exercises.length - 1 && styles.exerciseRowBorder,
-          ]}
-        >
-          <Text
-            allowFontScaling={false}
-            numberOfLines={1}
-            style={styles.exerciseName}
-          >
-            {exercise.name}
-          </Text>
-          <Text
-            accessibilityLabel={`${exercise.setCount} sets, ${exercise.repCount} reps, ${formatSummaryNumber(displayVolume(exercise.volumeKg, weightUnit))} ${unitLabel(weightUnit)} volume`}
-            allowFontScaling={false}
-            numberOfLines={1}
-            style={styles.exerciseMetric}
-          >
-            <Text style={styles.exerciseMetricMuted}>
-              {exercise.setCount} × {exercise.repCount} ·{' '}
-            </Text>
-            {formatSummaryNumber(displayVolume(exercise.volumeKg, weightUnit))}
-          </Text>
-        </View>
-      ))}
+    <View style={styles.recap}>
+      <Text style={styles.recapTitle}>EXERCISES COMPLETED</Text>
+      {summary.exercises.length === 0 && <Text style={styles.emptyRecap}>No exercise sets were logged for this workout.</Text>}
+      {summary.exercises.map((exercise, index) => {
+        const type = getWorkoutType(exercise.name);
+        const previous = previousLifts.get(exercise.name);
+        const comparable = exercise.metric === 'reps' && previous
+          && previous.bodyweight === (exercise.loadType === 'bodyweight');
+        return <ExerciseResult key={`${summary.id}-${index}`} exercise={exercise}
+          detail={performed[index]} previous={comparable ? previous : undefined}
+          unit={weightUnit} accent={type ? getMuscleColor(type) : summary.accent} />;
+      })}
     </View>
+  );
+}
+
+function SummaryNavigation({ openedFromHistory }: { openedFromHistory: boolean }) {
+  const router = useRouter();
+  const close = () => router.dismissTo('/(tabs)');
+
+  return (
+    <>
+      {Platform.OS === 'ios' ? (
+        <Stack.Toolbar placement="right">
+          <Stack.Toolbar.Button
+            hidden={openedFromHistory}
+            icon="xmark"
+            accessibilityLabel="Close workout summary"
+            accessibilityHint="Return to Train"
+            onPress={close}
+          />
+        </Stack.Toolbar>
+      ) : (
+        <Stack.Screen options={{
+          headerRight: openedFromHistory ? undefined : () => (
+            <Pressable
+              cssInterop={false}
+              accessibilityRole="button"
+              accessibilityLabel="Close workout summary"
+              onPress={close}
+              style={({ pressed }) => [styles.closeButton, pressed && styles.buttonPressed]}
+            >
+              <X size={22} color={redesignColors.bone} />
+            </Pressable>
+          ),
+        }} />
+      )}
+    </>
   );
 }
 
@@ -275,9 +294,10 @@ function MissingSummary() {
 }
 
 export default function WorkoutSummaryScreen() {
+  const muscleColors = useMuscleColors(state => state.preferences);
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { width, fontScale } = useWindowDimensions();
   const params = useLocalSearchParams<{
     sessionId?: string | string[];
     /** History and history-week pass source=history when reopening a recap. */
@@ -321,42 +341,99 @@ export default function WorkoutSummaryScreen() {
   }, [customWorkoutId, getCustomWorkoutLabel]);
   const summary = useMemo(
     () => session ? deriveWorkoutSummary(session, customTitle) : null,
-    [customTitle, session]
+    // Metadata color getters read these preferences without taking them as an argument.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [customTitle, session, muscleColors]
   );
-  // Top set per lift for the Lift Log share card; PRs are judged against the saved history.
-  const liftLog = useMemo(
-    () => session ? deriveLiftLog(session, history, weightUnit) : undefined,
-    [session, history, weightUnit]
+  // Full set-by-set report, in the global Settings unit, for sending to a coach or partner.
+  const report = useMemo(
+    () => session ? buildWorkoutReport(session, { unit: weightUnit, titleOverride: customTitle, history }) : null,
+    [customTitle, history, session, weightUnit]
   );
+  const previousLifts = useMemo(() => {
+    if (!session) return new Map<string, LiftPerformance>();
+    const currentDate = parseSessionDate(session.date).getTime();
+    const earlier = history.filter(item => item.id !== session.id && (
+      parseSessionDate(item.date).getTime() < currentDate ||
+      (parseSessionDate(item.date).getTime() === currentDate && item.id.localeCompare(session.id, 'en', { numeric: true }) < 0)
+    ));
+    return new Map(deriveLiftProgress(earlier).flatMap(lift => {
+      const exercise = session.exercises.find(item => item.name === lift.name);
+      const previous = lift.history.find(item => item.bodyweight === (exercise?.loadType === 'bodyweight'));
+      return previous ? [[lift.name, previous] as const] : [];
+    }));
+  }, [history, session]);
   const weeklyProgress = getWeeklyProgress();
   const compact = width < 375;
+  const stackActions = compact || fontScale > 1.2;
+  // Every lift's top set, for the Lift Log share card.
+  const liftLog = useMemo(
+    () => session ? deriveLiftLog(session, history, weightUnit) : undefined,
+    [history, session, weightUnit]
+  );
   const [shareVisible, setShareVisible] = useState(false);
+  const getExerciseWorkoutType = useWorkoutStore((state) => state.getExerciseWorkoutType);
+  // "The Stack" poster: each performed exercise as a slab in its muscle colour, as thick as
+  // its share of the session's sets and volume (so bodyweight work still shows).
+  const posterLayers = useMemo<StackPosterLayer[]>(() => {
+    if (!summary) return [];
+    const performed = summary.exercises.filter((exercise) => exercise.setCount > 0);
+    const totalSets = performed.reduce((sum, exercise) => sum + exercise.setCount, 0) || 1;
+    const totalVolume = performed.reduce((sum, exercise) => sum + exercise.volumeKg, 0);
+    return performed.map((exercise) => {
+      const type = getExerciseWorkoutType(exercise.name);
+      const sets = `${exercise.setCount} ${exercise.setCount === 1 ? 'SET' : 'SETS'}`;
+      const amount = exercise.volumeKg > 0
+        ? `${formatSummaryNumber(Math.round(displayVolume(exercise.volumeKg, weightUnit)))} ${unitLabel(weightUnit)}`
+        : exercise.repCount > 0 ? `${exercise.repCount} REPS` : null;
+      return {
+        name: exercise.name,
+        color: type ? getMuscleColor(type) : summary.accent,
+        weight: exercise.setCount / totalSets + (totalVolume > 0 ? exercise.volumeKg / totalVolume : 0),
+        detail: amount ? `${sets} · ${amount}` : sets,
+        record: report?.exercises.some((item) => item.name === exercise.name && item.hasRecord) ?? false,
+      };
+    });
+    // Muscle colour getters read user preferences without taking them as an argument.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [getExerciseWorkoutType, muscleColors, report, summary, weightUnit]);
 
-  if (!summary) return <MissingSummary />;
+  if (!summary) {
+    return (
+      <>
+        <SummaryNavigation openedFromHistory={openedFromHistory} />
+        <MissingSummary />
+      </>
+    );
+  }
 
   const displayedVolume = displayVolume(summary.volumeKg, weightUnit);
-  const specialLabel = specialSetSummaryLabel(summary.specialSets);
-  const stripSpecialLabel = specialLabel?.replace(/ LOGGED$/, '');
-  const stripDate = formatSummaryDate(summary.date).replace(/^[^,]+,\s*/, '');
   const finish = (destination: '/(tabs)' | '/(tabs)/profile') => {
     if (Platform.OS !== 'web') {
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
     router.replace(destination);
   };
-  const closeHistorySummary = () => {
-    if (Platform.OS !== 'web') {
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
-    router.back();
-  };
+  // Share opens the card sheet (copy an image to the clipboard); the full PDF report is one tap further, for sending outside.
   const openShare = () => {
     if (Platform.OS !== 'web') void Haptics.selectionAsync();
     setShareVisible(true);
   };
+  const sharePdf = async () => {
+    if (!report) return;
+    try {
+      await shareWorkoutReportPdf(report);
+    } catch (error) {
+      if (Platform.OS === 'web') Alert.alert('Couldn’t share workout', 'Open Stack on your phone to share your workout as a PDF.');
+      throw error;
+    }
+  };
+  const specialLabel = specialSetSummaryLabel(summary.specialSets)?.replace(/ LOGGED$/, '');
+  const shareDate = formatSummaryDate(summary.date).replace(/^[^,]+,\s*/, '');
 
   return (
     <View style={styles.screen}>
+      <SummaryNavigation openedFromHistory={openedFromHistory} />
       <LinearGradient
         pointerEvents="none"
         colors={['#17130F', redesignColors.ink, '#0F0D0B']}
@@ -368,192 +445,82 @@ export default function WorkoutSummaryScreen() {
 
       <ScrollView
         bounces
+        contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={[
           styles.scrollContent,
           {
-            paddingTop: insets.top + (compact ? 14 : 22),
-            paddingBottom: Math.max(insets.bottom, 12) + 132,
+            paddingTop: compact ? 14 : 18,
+            paddingBottom: 24,
             paddingHorizontal: compact ? 16 : 20,
           },
         ]}
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.contentColumn}>
-          <Animated.View
-            entering={HERO_ENTER}
-            style={[
-              styles.hero,
-              compact && styles.heroCompact,
-              {
-                borderColor: rgba(summary.accent, 0.44),
-                shadowColor: summary.accent,
-              },
-            ]}
-          >
-            <LinearGradient
-              pointerEvents="none"
-              colors={openedFromHistory
-                ? [
-                    rgba(summary.accent, 0.34),
-                    rgba(summary.accent, 0.16),
-                    rgba(summary.accent, 0.055),
-                    rgba(summary.accent, 0),
-                  ]
-                : [
-                    rgba(summary.accent, 0),
-                    rgba(summary.accent, 0.025),
-                    rgba(summary.accent, 0.2),
-                  ]}
-              locations={openedFromHistory
-                ? [0, 0.28, 0.62, 1]
-                : [0, 0.48, 1]}
-              start={{ x: 0.5, y: 0 }}
-              end={{ x: 0.5, y: 1 }}
-              style={StyleSheet.absoluteFill}
-            />
-            {!openedFromHistory ? <HeroGlow accent={summary.accent} /> : null}
-
-            {!openedFromHistory ? (
-              <View
-                accessibilityLabel="Workout complete"
-                style={[
-                  styles.completePill,
-                  {
-                    borderColor: rgba(summary.accent, 0.58),
-                    backgroundColor: rgba(summary.accent, 0.09),
-                  },
-                ]}
-              >
-                <Animated.View
-                  entering={CHECK_ENTER}
-                  style={[styles.completeIcon, { backgroundColor: summary.accent }]}
-                >
-                  <Check color={redesignColors.ink} size={15} strokeWidth={3.5} />
-                </Animated.View>
-                <Text
-                  allowFontScaling={false}
-                  style={[styles.completeLabel, { color: summary.accent }]}
-                >
-                  WORKOUT COMPLETE
+          <Animated.View entering={openedFromHistory ? undefined : HERO_ENTER} style={styles.sessionCard}>
+            {/* Both glows share the full card bounds, so the footer light fades into the recap. */}
+            <WorkoutCardSurface color={summary.accent} radius={36} lightHeight={420}
+              variant="summary" showBottomGlow={summary.volumeKg > 0} />
+            <View style={styles.sessionHeader}>
+              <View style={[styles.completePill, { borderColor: rgba(summary.accent, 0.6), backgroundColor: rgba(summary.accent, 0.09) }]}>
+                <Check color={summary.accent} size={13} strokeWidth={3} />
+                <Text style={[styles.completeLabel, { color: summary.accent }]}>
+                  {openedFromHistory ? 'WORKOUT SAVED' : 'WORKOUT COMPLETE'}
                 </Text>
               </View>
-            ) : null}
-
-            <Text
-              adjustsFontSizeToFit
-              allowFontScaling={false}
-              minimumFontScale={0.74}
-              numberOfLines={1}
-              style={[
-                styles.workoutTitle,
-                openedFromHistory && styles.historyWorkoutTitle,
-                openedFromHistory && compact && styles.historyWorkoutTitleCompact,
-              ]}
-            >
-              {summary.title}
-            </Text>
-            <Text allowFontScaling={false} style={styles.workoutDate}>
-              {formatSummaryDate(summary.date)}
-            </Text>
-
-            <View style={styles.heroRule} />
-            <Text allowFontScaling={false} style={styles.volumeLabel}>
-              TOTAL VOLUME LIFTED
-            </Text>
-            {openedFromHistory ? (
-              <>
-                <Text
-                  adjustsFontSizeToFit
-                  allowFontScaling={false}
-                  minimumFontScale={0.68}
-                  numberOfLines={1}
-                  style={[
-                    styles.volumeValue,
-                    styles.historyVolumeValue,
-                    compact && styles.volumeValueCompact,
-                  ]}
-                >
-                  {formatSummaryNumber(displayedVolume)}
-                </Text>
-                <Text
-                  allowFontScaling={false}
-                  style={[
-                    styles.volumeUnit,
-                    styles.historyVolumeUnit,
-                    { color: summary.accent },
-                  ]}
-                >
-                  {unitLabel(weightUnit)}
-                </Text>
-              </>
-            ) : (
-              <Text
-                adjustsFontSizeToFit
-                allowFontScaling={false}
-                minimumFontScale={0.68}
-                numberOfLines={1}
-                style={[styles.volumeValue, compact && styles.volumeValueCompact]}
-              >
-                {formatSummaryNumber(displayedVolume)}{' '}
-                <Text
-                  allowFontScaling={false}
-                  style={[styles.volumeUnit, { color: summary.accent }]}
-                >
-                  {unitLabel(weightUnit)}
-                </Text>
+              <Text accessibilityRole="header" style={styles.workoutTitle}>{summary.title}</Text>
+              <Text style={styles.workoutDate}>{formatSummaryDate(summary.date)}</Text>
+              <Text style={styles.sessionMeta}>
+                {summary.exerciseCount} {summary.exerciseCount === 1 ? 'exercise' : 'exercises'} · {summary.setCount} {summary.setCount === 1 ? 'set' : 'sets'}
+                {report?.durationLabel ? ` · ${report.durationLabel}` : ''}
               </Text>
-            )}
-          </Animated.View>
-
-          <Animated.View entering={CONTENT_ENTER}>
-            <View style={styles.statRow}>
-              <SummaryStat value={summary.setCount} label="SETS" />
-              <SummaryStat value={summary.exerciseCount} label="EXERCISES" />
-              <SummaryStat value={summary.repCount} label="REPS" />
+              {report?.exercises.some(exercise => exercise.hasRecord) && <View style={styles.sessionHighlight}>
+                <Trophy size={14} color={summary.accent} />
+                <Text accessibilityLabel={`${report.exercises.filter(exercise => exercise.hasRecord).length} personal ${report.exercises.filter(exercise => exercise.hasRecord).length === 1 ? 'record' : 'records'} this workout`} style={styles.highlightText}>
+                  {report.exercises.filter(exercise => exercise.hasRecord).length} {report.exercises.filter(exercise => exercise.hasRecord).length === 1 ? 'PR' : 'PRs'} this workout
+                </Text>
+              </View>}
             </View>
 
-            <SummaryDetails
-              summary={summary}
-              weeklyCompleted={weeklyProgress.completed}
-              weeklyGoal={weeklyProgress.goal}
-              showWeeklyGoal={!openedFromHistory}
-            />
+            <ExerciseRecap summary={summary} reportExercises={report?.exercises ?? []}
+              previousLifts={previousLifts} weightUnit={weightUnit} />
 
-            <ExerciseRecap summary={summary} weightUnit={weightUnit} />
+            {summary.volumeKg > 0 && <View style={styles.volumeFooter}>
+              <Text style={styles.volumeLabel}>MOVED</Text>
+              <Text style={styles.volumeValue}>
+                {formatSummaryNumber(displayedVolume)} <Text style={styles.volumeUnit}>{unitLabel(weightUnit)}</Text>
+              </Text>
+              <Text style={styles.volumeContext}>Weight × reps across logged sets</Text>
+            </View>}
+          </Animated.View>
 
-            {openedFromHistory ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Close workout summary"
-                onPress={closeHistorySummary}
-                style={[
-                  styles.doneButton,
-                  { backgroundColor: summary.accent },
-                ]}
-              >
-                <Text allowFontScaling={false} style={styles.doneButtonText}>
-                  Close
-                </Text>
-              </Pressable>
-            ) : (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Done. Return home"
-                onPress={() => finish('/(tabs)')}
-                style={[
-                  styles.doneButton,
-                  { backgroundColor: summary.accent },
-                ]}
-              >
-                <Text allowFontScaling={false} style={styles.doneButtonText}>Done</Text>
-              </Pressable>
-            )}
+          <Animated.View entering={openedFromHistory ? undefined : CONTENT_ENTER}>
+            {session?.imported ? <ImportedFacts exercises={session.imported.exercises} templates={session.imported.templates} notes={session.imported.notes} unit={weightUnit}
+              durationS={(Date.parse(session.imported.endedAt) - Date.parse(session.imported.startedAt)) / 1000} /> : null}
+            <SummaryDetails summary={summary} weeklyCompleted={weeklyProgress.completed}
+              weeklyGoal={weeklyProgress.goal} showWeeklyGoal={!openedFromHistory} />
+            {session?.origin === 'adhoc' && session.completed && <View style={styles.saveRoutine}>
+              <SaveAdhocRoutine key={session.id} session={session} stacked secondary />
+            </View>}
+
+            <View style={styles.secondaryActions}>
+              {!openedFromHistory ? (
+                <Pressable
+                  cssInterop={false}
+                  accessibilityRole="button"
+                  onPress={() => finish('/(tabs)/profile')}
+                  style={({ pressed }) => [styles.progressButton, pressed && styles.buttonPressed]}
+                >
+                  <Text style={styles.progressButtonText}>View progress</Text>
+                  <ArrowUpRight size={17} color={redesignColors.ash} />
+                </Pressable>
+              ) : null}
+            </View>
           </Animated.View>
         </View>
       </ScrollView>
 
       <View
-        pointerEvents="box-none"
         style={[
           styles.actionDock,
           {
@@ -562,54 +529,38 @@ export default function WorkoutSummaryScreen() {
           },
         ]}
       >
-        <LinearGradient
-          pointerEvents="none"
-          colors={[
-            rgba(redesignColors.ink, 0),
-            rgba(redesignColors.ink, 0.96),
-            redesignColors.ink,
-          ]}
-          locations={[0, 0.3, 1]}
-          style={StyleSheet.absoluteFill}
-        />
+        {/* The list softens into the dock rather than meeting it at a hard edge. */}
+        <LinearGradient pointerEvents="none" colors={[rgba(redesignColors.ink, 0), redesignColors.ink]}
+          style={styles.dockFade} />
         <View style={styles.actionColumn}>
           <View
             style={[
               styles.actionRow,
-              openedFromHistory && styles.historyActionRow,
+              stackActions && styles.actionRowStacked,
             ]}
           >
-            {!openedFromHistory ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="View progress"
-                hitSlop={6}
-                onPress={() => finish('/(tabs)/profile')}
-                style={({ pressed }) => [
-                  styles.progressButton,
-                  pressed && styles.buttonPressed,
-                ]}
-              >
-                <Text allowFontScaling={false} style={styles.progressButtonText}>
-                  View progress
-                </Text>
-              </Pressable>
-            ) : null}
-
             <Pressable
+              cssInterop={false}
               accessibilityRole="button"
               accessibilityLabel="Share workout"
-              hitSlop={6}
+              accessibilityHint="Copy a share card, or send the full workout as a PDF"
               onPress={openShare}
               style={({ pressed }) => [
+                styles.actionButton,
                 styles.shareButton,
-                openedFromHistory && styles.historyShareButton,
-                pressed && styles.buttonPressed,
+                stackActions && styles.stackedButton,
+                pressed && styles.shareButtonPressed,
               ]}
             >
-              <Text allowFontScaling={false} style={styles.progressButtonText}>
-                Share
-              </Text>
+              <Share size={20} color={redesignColors.bone} />
+              <Text style={styles.shareButtonText}>Share</Text>
+            </Pressable>
+            <Pressable cssInterop={false} accessibilityRole="button" accessibilityLabel="Done"
+              accessibilityHint={openedFromHistory ? 'Return to workout history' : 'Return to Train'}
+              onPress={() => openedFromHistory ? router.back() : finish('/(tabs)')}
+              style={({ pressed }) => [styles.actionButton, styles.doneButton,
+                stackActions && styles.stackedButton, pressed && styles.buttonPressed]}>
+              <Text style={styles.doneButtonText}>Done</Text>
             </Pressable>
           </View>
         </View>
@@ -620,394 +571,94 @@ export default function WorkoutSummaryScreen() {
         onClose={() => setShareVisible(false)}
         accent={summary.accent}
         title={summary.title}
-        date={stripDate}
+        date={shareDate}
         volumeValue={formatSummaryNumber(displayedVolume)}
         volumeUnit={unitLabel(weightUnit)}
         setCount={summary.setCount}
         repCount={summary.repCount}
-        {...(stripSpecialLabel ? { specialSetLabel: stripSpecialLabel } : {})}
+        {...(specialLabel ? { specialSetLabel: specialLabel } : {})}
+        exerciseCount={summary.exerciseCount}
+        {...(report?.durationLabel ? { durationLabel: report.durationLabel } : {})}
+        recordCount={report?.exercises.filter(exercise => exercise.hasRecord).length ?? 0}
         {...(liftLog ? { liftLog } : {})}
+        posterLayers={posterLayers}
+        {...(report ? { onSharePdf: sharePdf } : {})}
       />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: redesignColors.ink,
-  },
-  scrollContent: {
-    flexGrow: 1,
-  },
-  contentColumn: {
-    width: '100%',
-    maxWidth: 470,
-    alignSelf: 'center',
-  },
-  hero: {
-    height: 296,
-    overflow: 'hidden',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderRadius: 28,
-    borderCurve: 'continuous',
-    backgroundColor: redesignColors.surface,
-    shadowOpacity: 0.12,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 12 },
-  },
-  heroCompact: {
-    height: 284,
-  },
-  completePill: {
-    height: 30,
-    marginTop: 26,
-    paddingLeft: 11,
-    paddingRight: 14,
-    borderWidth: 1,
-    borderRadius: 18,
-    borderCurve: 'continuous',
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  completeIcon: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  completeLabel: {
-    marginLeft: 8,
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 9.5,
-    lineHeight: 14,
-    letterSpacing: 2.15,
-  },
-  workoutTitle: {
-    width: '84%',
-    marginTop: 18,
-    textAlign: 'center',
-    fontFamily: redesignFonts.display,
-    fontSize: 34,
-    lineHeight: 40,
-    letterSpacing: -0.8,
-    color: redesignColors.bone,
-  },
-  historyWorkoutTitle: {
-    marginTop: 42,
-  },
-  historyWorkoutTitleCompact: {
-    marginTop: 36,
-  },
-  workoutDate: {
-    marginTop: 1,
-    fontFamily: redesignFonts.uiMedium,
-    fontSize: 16,
-    lineHeight: 22,
-    color: redesignColors.ash,
-  },
-  heroRule: {
-    width: '68%',
-    height: StyleSheet.hairlineWidth,
-    marginTop: 17,
-    backgroundColor: rgba(redesignColors.ash, 0.28),
-  },
-  volumeLabel: {
-    marginTop: 16,
-    fontFamily: redesignFonts.mono,
-    fontSize: 10,
-    lineHeight: 15,
-    letterSpacing: 2.6,
-    color: redesignColors.ash,
-  },
-  volumeValue: {
-    width: '92%',
-    marginTop: 4,
-    textAlign: 'center',
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 58,
-    lineHeight: 68,
-    letterSpacing: -3,
-    color: redesignColors.bone,
-  },
-  volumeValueCompact: {
-    fontSize: 54,
-    lineHeight: 64,
-  },
-  volumeUnit: {
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 23,
-    letterSpacing: -0.8,
-  },
-  historyVolumeValue: {
-    marginTop: 14,
-  },
-  historyVolumeUnit: {
-    marginTop: -4,
-    textAlign: 'center',
-    fontSize: 17,
-    lineHeight: 22,
-    letterSpacing: -0.4,
-  },
-  heroGlow: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    width: '100%',
-    height: '72%',
-  },
-  statRow: {
-    height: 72,
-    marginTop: 14,
-    flexDirection: 'row',
-    gap: 10,
-  },
-  statCard: {
-    flex: 1,
-    minWidth: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: redesignColors.border,
-    borderRadius: 18,
-    borderCurve: 'continuous',
-    backgroundColor: redesignColors.surface,
-  },
-  statValue: {
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 24,
-    lineHeight: 29,
-    color: redesignColors.bone,
-  },
-  statLabel: {
-    marginTop: 3,
-    fontFamily: redesignFonts.mono,
-    fontSize: 9,
-    lineHeight: 13,
-    letterSpacing: 2,
-    color: redesignColors.ash,
-  },
-  detailList: {
-    marginTop: 14,
-    marginHorizontal: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: rgba(redesignColors.ash, 0.16),
-  },
-  detailRow: {
-    minHeight: 45,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  detailLabel: {
-    flexShrink: 0,
-    fontFamily: redesignFonts.mono,
-    fontSize: 10,
-    lineHeight: 16,
-    letterSpacing: 2.5,
-    color: redesignColors.ash,
-  },
-  detailText: {
-    marginLeft: 16,
-    fontFamily: redesignFonts.uiBold,
-    fontSize: 16,
-    lineHeight: 22,
-    color: redesignColors.bone,
-  },
-  specialPill: {
-    maxWidth: '64%',
-    height: 30,
-    marginLeft: 14,
-    paddingHorizontal: 11,
-    borderWidth: 1,
-    borderRadius: 16,
-    borderCurve: 'continuous',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  specialText: {
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 9,
-    lineHeight: 14,
-    letterSpacing: 1.7,
-  },
-  weeklyValue: {
-    minWidth: 148,
-    marginLeft: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-  },
-  weeklyBars: {
-    flexShrink: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: 5,
-  },
-  weeklyBar: {
-    width: 16,
-    height: 4,
-  },
-  weeklyCount: {
-    marginLeft: 16,
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 14,
-    lineHeight: 20,
-    color: redesignColors.bone,
-  },
-  recapCard: {
-    marginTop: 12,
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 4,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: redesignColors.border,
-    borderRadius: 24,
-    borderCurve: 'continuous',
-    backgroundColor: redesignColors.surface,
-  },
-  recapTitle: {
-    fontFamily: redesignFonts.mono,
-    fontSize: 10,
-    lineHeight: 15,
-    letterSpacing: 2.4,
-    color: redesignColors.ash,
-  },
-  recapHeaderRule: {
-    height: StyleSheet.hairlineWidth,
-    marginTop: 10,
-    backgroundColor: rgba(redesignColors.ash, 0.22),
-  },
-  exerciseRow: {
-    minHeight: 43,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  exerciseRowBorder: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: rgba(redesignColors.ash, 0.22),
-  },
-  exerciseName: {
-    flex: 1,
-    minWidth: 0,
-    paddingRight: 12,
-    fontFamily: redesignFonts.uiSemiBold,
-    fontSize: 16,
-    lineHeight: 21,
-    color: redesignColors.bone,
-  },
-  exerciseMetric: {
-    flexShrink: 0,
-    textAlign: 'right',
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 12.5,
-    lineHeight: 18,
-    color: redesignColors.bone,
-  },
-  exerciseMetricMuted: {
-    fontFamily: redesignFonts.mono,
-    color: redesignColors.ash,
-  },
-  doneButton: {
-    height: 58,
-    marginTop: 18,
-    borderRadius: 18,
-    borderCurve: 'continuous',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  doneButtonText: {
-    fontFamily: redesignFonts.uiBold,
-    fontSize: 18,
-    lineHeight: 24,
-    color: redesignColors.ink,
-  },
-  progressButton: {
-    minWidth: 120,
-    height: 47,
-    alignItems: 'flex-start',
-    justifyContent: 'center',
-  },
-  shareButton: {
-    minWidth: 120,
-    height: 47,
-    alignItems: 'flex-end',
-    justifyContent: 'center',
-  },
-  historyShareButton: {
-    alignItems: 'center',
-  },
-  progressButtonText: {
-    fontFamily: redesignFonts.uiSemiBold,
-    fontSize: 16,
-    lineHeight: 22,
-    color: redesignColors.ash,
-  },
-  actionDock: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    paddingTop: 22,
-  },
-  actionColumn: {
-    width: '100%',
-    maxWidth: 470,
-    alignSelf: 'center',
-  },
-  actionRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  historyActionRow: {
-    justifyContent: 'center',
-  },
-  buttonPressed: {
-    opacity: 0.72,
-    transform: [{ scale: 0.99 }],
-  },
-  missingScreen: {
-    flex: 1,
-    paddingHorizontal: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: redesignColors.ink,
-  },
-  missingTitle: {
-    textAlign: 'center',
-    fontFamily: redesignFonts.display,
-    fontSize: 34,
-    color: redesignColors.bone,
-  },
-  missingBody: {
-    maxWidth: 340,
-    marginTop: 12,
-    textAlign: 'center',
-    fontFamily: redesignFonts.ui,
-    fontSize: 16,
-    lineHeight: 24,
-    color: redesignColors.ash,
-  },
-  missingButton: {
-    height: 54,
-    marginTop: 24,
-    paddingHorizontal: 28,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: redesignColors.accent,
-  },
-  missingButtonText: {
-    fontFamily: redesignFonts.uiBold,
-    fontSize: 17,
-    color: redesignColors.ink,
-  },
+  screen: { flex: 1, backgroundColor: redesignColors.ink },
+  scrollContent: { flexGrow: 1 },
+  contentColumn: { width: '100%', maxWidth: 470, alignSelf: 'center' },
+  sessionCard: { borderRadius: 36, borderCurve: 'continuous', overflow: 'hidden', backgroundColor: redesignColors.surface },
+  sessionHeader: { paddingHorizontal: 20, paddingTop: 22, paddingBottom: 22 },
+  completePill: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, borderWidth: 1 },
+  completeLabel: { fontFamily: redesignFonts.monoBold, fontSize: 10, lineHeight: 14, letterSpacing: 1.8 },
+  workoutTitle: { marginTop: 16, fontFamily: redesignFonts.display, fontSize: 40, lineHeight: 44, letterSpacing: -1.3, color: redesignColors.bone },
+  workoutDate: { marginTop: 6, fontFamily: redesignFonts.ui, fontSize: 14, lineHeight: 21, color: redesignColors.ash },
+  sessionMeta: { marginTop: 4, fontFamily: redesignFonts.uiMedium, fontSize: 14, lineHeight: 21, color: redesignColors.bone, opacity: 0.8, fontVariant: ['tabular-nums'] },
+  sessionHighlight: { marginTop: 12, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 7 },
+  highlightText: { fontFamily: redesignFonts.uiMedium, fontSize: 14, lineHeight: 21, color: redesignColors.bone },
+  recap: { paddingHorizontal: 20 },
+  recapTitle: { paddingBottom: 4, fontFamily: redesignFonts.mono, fontSize: 10, lineHeight: 16, letterSpacing: 1.8, color: redesignColors.ash },
+  emptyRecap: { paddingVertical: 18, fontFamily: redesignFonts.ui, fontSize: 15, lineHeight: 22, color: redesignColors.ash },
+  exerciseRow: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: rgba(redesignColors.ash, 0.13) },
+  exerciseTrigger: { paddingVertical: 16, flexDirection: 'row', alignItems: 'flex-start', gap: 10, minHeight: 44 },
+  categoryMark: { width: 3, height: 18, borderRadius: 2, marginTop: 2 },
+  exerciseContent: { flex: 1, minWidth: 0 },
+  exerciseHeading: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  exerciseName: { flex: 1, fontFamily: redesignFonts.uiSemiBold, fontSize: 17, lineHeight: 23, color: redesignColors.bone },
+  exerciseMetric: { marginTop: 5, fontFamily: redesignFonts.monoBold, fontSize: 20, lineHeight: 28, letterSpacing: -0.7, color: redesignColors.bone, fontVariant: ['tabular-nums'] },
+  exerciseContextRow: { marginTop: 3, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 10, rowGap: 5 },
+  exerciseContext: { fontFamily: redesignFonts.ui, fontSize: 12, lineHeight: 18, color: redesignColors.ash },
+  recordLabel: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  recordText: { fontFamily: redesignFonts.uiSemiBold, fontSize: 12, lineHeight: 18 },
+  previous: { marginTop: 5, fontFamily: redesignFonts.mono, fontSize: 12, lineHeight: 18, color: redesignColors.bone, fontVariant: ['tabular-nums'] },
+  previousLabel: { fontFamily: redesignFonts.uiMedium, color: redesignColors.ash },
+  setList: { paddingLeft: 13, paddingBottom: 16, gap: 8 },
+  setRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between', columnGap: 12, rowGap: 4 },
+  setLabel: { fontFamily: redesignFonts.ui, fontSize: 13, lineHeight: 20, color: redesignColors.ash },
+  setValue: { fontFamily: redesignFonts.mono, fontSize: 13, lineHeight: 20, color: redesignColors.bone, fontVariant: ['tabular-nums'] },
+  skippedSet: { color: redesignColors.ash },
+  volumeFooter: { paddingHorizontal: 20, paddingTop: 24, paddingBottom: 26, overflow: 'hidden' },
+  volumeLabel: { fontFamily: redesignFonts.mono, fontSize: 10, lineHeight: 16, letterSpacing: 1.8, color: redesignColors.ash },
+  volumeValue: { marginTop: 7, fontFamily: redesignFonts.monoBold, fontSize: 30, lineHeight: 40, letterSpacing: -1.3, color: redesignColors.bone, fontVariant: ['tabular-nums'] },
+  volumeUnit: { fontFamily: redesignFonts.uiMedium, fontSize: 16, letterSpacing: 0, color: redesignColors.bone },
+  volumeContext: { marginTop: 2, fontFamily: redesignFonts.ui, fontSize: 12, lineHeight: 18, color: redesignColors.bone, opacity: 0.8 },
+  detailList: { marginTop: 16, paddingHorizontal: 4, gap: 4 },
+  detailRow: { minHeight: 44, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', columnGap: 16, rowGap: 6, paddingVertical: 6 },
+  detailLabel: { fontFamily: redesignFonts.ui, fontSize: 14, lineHeight: 21, color: redesignColors.ash },
+  detailText: { fontFamily: redesignFonts.uiMedium, fontSize: 14, lineHeight: 21, color: redesignColors.bone },
+  specialPill: { paddingVertical: 4 },
+  specialText: { fontFamily: redesignFonts.mono, fontSize: 10, lineHeight: 16, letterSpacing: 0.7 },
+  weeklyValue: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  weeklyBars: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  weeklyBar: { width: 14, height: 4, borderRadius: 2 },
+  weeklyCount: { fontFamily: redesignFonts.mono, fontSize: 13, lineHeight: 20, color: redesignColors.bone, fontVariant: ['tabular-nums'] },
+  saveRoutine: { marginTop: 16 },
+  secondaryActions: { marginTop: 12, alignItems: 'center' },
+  progressButton: { minHeight: 44, paddingHorizontal: 16, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 14 },
+  progressButtonText: { fontFamily: redesignFonts.uiSemiBold, fontSize: 15, lineHeight: 22, color: redesignColors.ash },
+  actionDock: { paddingTop: 12, backgroundColor: redesignColors.ink },
+  dockFade: { position: 'absolute', left: 0, right: 0, top: -32, height: 32 },
+  actionColumn: { width: '100%', maxWidth: 470, alignSelf: 'center' },
+  actionRow: { flexDirection: 'row', gap: 10 },
+  actionRowStacked: { flexDirection: 'column-reverse' },
+  actionButton: { minWidth: 0, minHeight: 56, paddingVertical: 15, paddingHorizontal: 16, borderRadius: 18, borderCurve: 'continuous', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  shareButton: { flex: 1, backgroundColor: redesignColors.raised },
+  doneButton: { flex: 1.35, backgroundColor: redesignColors.bone },
+  stackedButton: { flex: 0, width: '100%' },
+  shareButtonText: { flexShrink: 1, textAlign: 'center', fontFamily: redesignFonts.uiSemiBold, fontSize: 16, lineHeight: 22, color: redesignColors.bone },
+  doneButtonText: { fontFamily: redesignFonts.uiBold, fontSize: 16, lineHeight: 22, color: redesignColors.ink },
+  buttonDisabled: { opacity: 0.65 },
+  shareButtonPressed: { backgroundColor: redesignColors.hi },
+  closeButton: { minWidth: 44, minHeight: 44, marginRight: 12, alignItems: 'center', justifyContent: 'center', borderRadius: 22, backgroundColor: redesignColors.raised },
+  buttonPressed: { opacity: 0.72 },
+  missingScreen: { flex: 1, paddingHorizontal: 28, alignItems: 'center', justifyContent: 'center', backgroundColor: redesignColors.ink },
+  missingTitle: { textAlign: 'center', fontFamily: redesignFonts.display, fontSize: 34, color: redesignColors.bone },
+  missingBody: { maxWidth: 340, marginTop: 12, textAlign: 'center', fontFamily: redesignFonts.ui, fontSize: 16, lineHeight: 24, color: redesignColors.ash },
+  missingButton: { minHeight: 54, marginTop: 24, paddingVertical: 14, paddingHorizontal: 28, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: redesignColors.accent },
+  missingButtonText: { fontFamily: redesignFonts.uiBold, fontSize: 17, color: redesignColors.ink },
 });

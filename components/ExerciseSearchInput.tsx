@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, TextInput, View, type StyleProp, type ViewStyle } from 'react-native';
 import { Search, X } from 'lucide-react-native';
 
 import { redesignColors, redesignFonts } from '@/constants/theme';
@@ -6,19 +6,20 @@ import { redesignColors, redesignFonts } from '@/constants/theme';
 interface ExerciseSearchInputProps {
   value: string;
   onChangeText: (value: string) => void;
+  style?: StyleProp<ViewStyle>;
 }
 
-export function ExerciseSearchInput({ value, onChangeText }: ExerciseSearchInputProps) {
+export function ExerciseSearchInput({ value, onChangeText, style }: ExerciseSearchInputProps) {
   return (
-    <View style={styles.container}>
-      <Search color={redesignColors.ashDim} size={20} />
+    <View style={[styles.container, style]}>
+      <Search color={redesignColors.ash} size={20} />
       <TextInput
         accessibilityLabel="Search exercises"
         autoCapitalize="none"
         autoCorrect={false}
         onChangeText={onChangeText}
         placeholder="Search exercises"
-        placeholderTextColor={redesignColors.ashDim}
+        placeholderTextColor={redesignColors.ash}
         returnKeyType="search"
         style={styles.input}
         value={value}
@@ -59,5 +60,5 @@ const styles = StyleSheet.create({
     fontFamily: redesignFonts.uiSemiBold,
     fontSize: 16,
   },
-  clearButton: { minHeight: 32, justifyContent: 'center' },
+  clearButton: { minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' },
 });

@@ -1,8 +1,10 @@
+import { useMuscleColors } from '@/store/muscleColors';
 import { useState } from 'react';
 import { useWorkoutStore } from '../../store/workoutStore';
 import { buildHistoryCache, type BuildHistory } from './buildHistoryCache';
 
 function useSharedHistory(weekStart: string, active: boolean, lazy: boolean): BuildHistory | null {
+  useMuscleColors(state => state.preferences);
   const sessions = useWorkoutStore((state) => state.sessions);
   const [last, setLast] = useState<BuildHistory | null>(null);
   // A covered or hidden screen keeps showing its last result and never derives on its own.

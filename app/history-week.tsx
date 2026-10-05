@@ -1,22 +1,21 @@
+import { contentDateRange } from '@/utils/content';
+import { SplitPressable as Pressable } from '@/components/custom-split/SplitPressable';
 import { useMemo } from 'react';
 import {
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import * as Haptics from 'expo-haptics';
-import { ChevronLeft } from 'lucide-react-native';
+import * as Haptics from '@/services/haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { HistoryWorkoutRow } from '@/components/HistoryWorkoutRow';
 import { redesignColors, redesignFonts } from '@/constants/theme';
 import { DEFAULT_WEIGHT_UNIT } from '@/store/workoutDatabase';
 import { deriveHistoryGroups } from '@/store/workoutHistory';
-import { deriveWorkoutSummary, formatSummaryDate } from '@/store/workoutSummary';
+import { deriveWorkoutSummary } from '@/store/workoutSummary';
 import {
   parseSessionDate,
   toLocalCalendarDate,
@@ -29,12 +28,8 @@ import '@/global.css';
 const useWeightUnit = (): WeightUnit =>
   useWorkoutStore((state) => state.profile?.weightUnit ?? DEFAULT_WEIGHT_UNIT);
 
-function formatWeekDate(date: Date): string {
-  return formatSummaryDate(date).replace(/^[^,]+,\s*/, '');
-}
-
 function formatWeekRange(weekStart: Date, weekEnd: Date): string {
-  return `${formatWeekDate(weekStart)} \u2013 ${formatWeekDate(weekEnd)}`;
+  return contentDateRange(weekStart, weekEnd);
 }
 
 function groupFormattedWeight(value: string): string {
@@ -104,47 +99,32 @@ export default function HistoryWeek() {
 
   return (
     <View style={styles.screen}>
-      <LinearGradient
-        pointerEvents="none"
-        colors={['#17130F', redesignColors.ink, '#100E0C']}
-        locations={[0, 0.55, 1]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={StyleSheet.absoluteFill}
-      />
-
       <ScrollView
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: insets.top + 25, paddingBottom: insets.bottom + 32 },
+          { paddingTop: 20, paddingBottom: insets.bottom + 32 },
         ]}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.header}>
-          <Pressable
-            accessibilityLabel="Back to history"
-            accessibilityRole="button"
-            hitSlop={8}
-            onPress={() => tap(() => router.back())}
-            style={styles.backButton}
-          >
-            <ChevronLeft color={redesignColors.bone} size={29} strokeWidth={2.3} />
-          </Pressable>
-          <View style={styles.headerCopy}>
-            <Text
-              adjustsFontSizeToFit
-              minimumFontScale={0.68}
-              numberOfLines={1}
-              style={styles.title}
+        <Text accessibilityRole="header" style={styles.title}>{title}</Text>
+        <Text style={styles.subtitle}>
+          {workoutCount} {workoutCount === 1 ? 'workout' : 'workouts'}
+          {workoutCount > 0 ? ` · ${totalVolume} ${unitLabel(weightUnit)} moved` : ''}
+        </Text>
+
+        {!week ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>No workouts from this week.</Text>
+            <Text style={styles.emptyCopy}>Return to History to browse your completed workouts.</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => router.back()}
+              style={({ pressed }) => [styles.returnButton, pressed && styles.pressed]}
             >
-              {title}
-            </Text>
-            <Text style={styles.subtitle}>
-              {workoutCount} WORKOUTS \u00b7 {totalVolume}{' '}
-              {unitLabel(weightUnit).toUpperCase()}
-            </Text>
+              <Text style={styles.returnLabel}>Back to History</Text>
+            </Pressable>
           </View>
-        </View>
+        ) : null}
 
         <View style={styles.workoutList}>
           {week?.sessions.map((session) => (
@@ -169,36 +149,48 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingHorizontal: 24,
   },
-  header: {
-    minHeight: 58,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  backButton: {
-    width: 30,
-    height: 58,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerCopy: {
-    flex: 1,
-    minWidth: 0,
-    marginLeft: 20,
-  },
   title: {
     fontFamily: redesignFonts.display,
-    fontSize: 36,
-    lineHeight: 43,
-    letterSpacing: -1.2,
+    fontSize: 28,
+    lineHeight: 35,
+    letterSpacing: -0.6,
     color: redesignColors.bone,
   },
   subtitle: {
-    marginTop: 3,
-    fontFamily: redesignFonts.mono,
-    fontSize: 11,
-    lineHeight: 15,
-    letterSpacing: 1.8,
+    marginTop: 8,
+    fontFamily: redesignFonts.ui,
+    fontSize: 15,
+    lineHeight: 22,
     color: redesignColors.ash,
+  },
+  emptyState: {
+    paddingVertical: 48,
+    gap: 12,
+  },
+  emptyTitle: {
+    fontFamily: redesignFonts.uiSemiBold,
+    fontSize: 20,
+    lineHeight: 27,
+    color: redesignColors.bone,
+  },
+  emptyCopy: {
+    fontFamily: redesignFonts.ui,
+    fontSize: 16,
+    lineHeight: 24,
+    color: redesignColors.ash,
+  },
+  returnButton: {
+    minHeight: 44,
+    paddingVertical: 12,
+    alignSelf: 'flex-start',
+  },
+  returnLabel: {
+    fontFamily: redesignFonts.uiSemiBold,
+    fontSize: 16,
+    color: redesignColors.bone,
+  },
+  pressed: {
+    opacity: 0.7,
   },
   workoutList: {
     marginTop: 36,

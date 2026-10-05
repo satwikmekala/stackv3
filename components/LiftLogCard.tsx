@@ -1,6 +1,8 @@
 import React, { forwardRef } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { StackLogo } from '@/components/StackLogo';
+
 import { STAT_STRIP_HEIGHT, STAT_STRIP_WIDTH } from '@/components/StatStripCard';
 import { redesignColors, redesignFonts } from '@/constants/theme';
 import type { LiftLogLine } from '@/store/liftLog';
@@ -67,10 +69,13 @@ export const LiftLogCard = forwardRef<View, LiftLogCardProps>(function LiftLogCa
         </View>
 
         <View style={styles.footer}>
-          <Text allowFontScaling={false} style={styles.wordmark}>STACK</Text>
+          <View style={styles.brand}>
+            <StackLogo size={scaled(12)} />
+            <Text allowFontScaling={false} style={styles.wordmark}>STACK</Text>
+          </View>
           {volumeValue !== '0' ? (
             <Text allowFontScaling={false} style={styles.total}>
-              {volumeValue} {volumeUnit.toUpperCase()} MOVED
+              {volumeValue} {volumeUnit} moved
             </Text>
           ) : null}
         </View>
@@ -125,7 +130,6 @@ const styles = StyleSheet.create({
     fontSize: scaled(8.5),
     lineHeight: scaled(12),
     letterSpacing: scaled(1.2),
-    textTransform: 'uppercase',
     color: SOFT,
   },
   body: {
@@ -188,7 +192,6 @@ const styles = StyleSheet.create({
     fontSize: scaled(7.5),
     lineHeight: scaled(10),
     letterSpacing: scaled(1.6),
-    textTransform: 'uppercase',
     color: SOFT,
   },
   more: {
@@ -204,6 +207,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: scaled(10),
     marginTop: scaled(16),
+  },
+  brand: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: scaled(5),
   },
   wordmark: {
     ...shadow,

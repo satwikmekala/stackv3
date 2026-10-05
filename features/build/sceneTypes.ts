@@ -15,12 +15,16 @@ export type BuildSceneProps = {
   lamination: Lamination;
   overview: boolean;
   paused?: boolean;
+  /** Repaint a native drawable after its containing scroll view moves. */
+  repaintKey?: number;
   onError?: () => void;
   /** `onProgress` receives the clamped playback clock on every rendered frame (stall detection). */
   fusion?: { weekId: string; onPhase: (phase: FusionPhase) => void; onComplete: () => void; onProgress?: (playbackMs: number) => void };
   /** `animationTime` maps playback time to castingFrame time (readable-beat holds); identity when omitted. */
   casting?: { slabId: string; onPhase: (phase: CastingPhase) => void; onComplete: () => void; animationTime?: (playbackMs: number) => number; onProgress?: (playbackMs: number) => void };
   introStack?: { alreadyPlayed: boolean; onLanding: (index: number) => void; onComplete: () => void };
+  /** Welcome-only presentation: the final slab forms from an example workout and lands. */
+  welcome?: { alreadyPlayed: boolean; onFrame: (elapsedMs: number) => void; onComplete: () => void };
   introProgress?: {
     alreadyPlayed: boolean;
     onLanding: (index: number) => void;

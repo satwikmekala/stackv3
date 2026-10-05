@@ -1,841 +1,175 @@
-import { useState } from 'react';
-import {
-  Alert,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
-import { useRouter } from 'expo-router';
-import * as Haptics from 'expo-haptics';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated from 'react-native-reanimated';
-import { ChevronLeft, ChevronRight, Pencil } from 'lucide-react-native';
-
-import { redesignColors, redesignFonts, splitColors } from '@/constants/theme';
-import { usePressScale } from '@/hooks/usePressScale';
-import {
-  MUSCLE_GROUP_COLORS,
-  getMuscleGroupForExercise,
-  getWorkoutDisplayName,
-  getWorkoutLetter,
-  getWorkoutMuscleSegments,
-  useCustomSplitDraftStore,
-  type DraftWorkout,
-} from '@/store/customSplitDraft';
+import { displayExerciseName } from '@/constants/exerciseNames';
+import { workoutEntryLabel } from '@/utils/content';
+import { useMuscleColors } from '@/store/muscleColors';
+import { SplitPressable as Pressable } from '@/components/custom-split/SplitPressable';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, View } from 'react-native';
+import { Stack, useNavigation, useRouter } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { MoreHorizontal, Pencil } from 'lucide-react-native';
+import { showActions } from '@/components/custom-split/showActions';
+import { Action, ui } from '@/components/custom-split/ui';
+import { resolveDayColor } from '@/features/custom-split/colors';
+import { redesignColors as c } from '@/constants/theme';
+import { getWorkoutDisplayName, splitRevision, useCustomSplitDraftStore } from '@/store/customSplitDraft';
+import { getCustomSplitDetailAsync } from '@/store/workoutDatabase';
 import { useWorkoutStore } from '@/store/workoutStore';
-import '@/global.css';
 
-const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
-
-const alpha = (color: string, opacity: string) => `${color}${opacity}`;
-
-const plural = (count: number, noun: string) =>
-  `${noun}${count === 1 ? '' : 's'}`;
-
-interface SplitNameProps {
-  name: string;
-  onChange: (name: string) => void;
-}
-
-function SplitName({ name, onChange }: SplitNameProps) {
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(name);
-
-  const commit = () => {
-    setEditing(false);
-    onChange(value.trim());
-  };
-
-  if (editing) {
-    return (
-      <View style={styles.nameRow}>
-        <TextInput
-          accessibilityLabel="Split name"
-          autoCapitalize="words"
-          autoFocus
-          maxLength={48}
-          onBlur={commit}
-          onChangeText={(nextValue) => {
-            setValue(nextValue);
-            onChange(nextValue);
-          }}
-          onSubmitEditing={commit}
-          placeholder="Name this split"
-          placeholderTextColor={redesignColors.ashDim}
-          returnKeyType="done"
-          selectTextOnFocus
-          style={styles.nameInput}
-          value={value}
-        />
-      </View>
-    );
-  }
-
-  return (
-    <View style={styles.nameRow}>
-      <Text numberOfLines={1} style={styles.name}>{name}</Text>
-      <Pressable
-        accessibilityLabel="Rename split"
-        accessibilityRole="button"
-        hitSlop={10}
-        onPress={() => {
-          void Haptics.selectionAsync();
-          setValue(name);
-          setEditing(true);
-        }}
-        style={styles.renameButton}
-      >
-        <Pencil color={splitColors.chest} size={18} strokeWidth={2.3} />
-      </Pressable>
-    </View>
-  );
-}
-
-interface WorkoutCardProps {
-  index: number;
-  isMenuTarget: boolean;
-  onEdit: () => void;
-  onLongPress: () => void;
-  workout: DraftWorkout;
-}
-
-function WorkoutCard({
-  index,
-  isMenuTarget,
-  onEdit,
-  onLongPress,
-  workout,
-}: WorkoutCardProps) {
-  const letter = getWorkoutLetter(index);
-  const displayName = getWorkoutDisplayName(workout) || 'Untitled workout';
-  const segments = getWorkoutMuscleSegments(workout);
-  const badgeColor =
-    MUSCLE_GROUP_COLORS[
-      workout.exercises[0]
-        ? getMuscleGroupForExercise(workout.exercises[0])
-        : 'Chest'
-    ];
-
-  return (
-    <Pressable
-      accessibilityHint="Press and hold for workout actions"
-      accessibilityLabel={`Workout ${letter}, ${displayName}`}
-      delayLongPress={380}
-      onLongPress={onLongPress}
-      style={[styles.card, isMenuTarget && styles.cardMenuTarget]}
-    >
-      <View style={styles.cardHeader}>
-        <View style={[styles.badge, { backgroundColor: alpha(badgeColor, '26') }]}>
-          <Text style={[styles.badgeText, { color: badgeColor }]}>{letter}</Text>
-        </View>
-        <Text numberOfLines={1} style={styles.cardTitle}>{displayName}</Text>
-        <Pressable
-          accessibilityLabel={`Edit workout ${letter}, ${displayName}`}
-          accessibilityRole="button"
-          hitSlop={8}
-          onPress={onEdit}
-          style={styles.editButton}
-        >
-          <Text style={styles.editText}>Edit</Text>
-          <ChevronRight color={splitColors.chest} size={17} strokeWidth={2.6} />
-        </Pressable>
-      </View>
-
-      <View style={styles.cardDivider} />
-
-      {workout.exercises.length > 0 ? (
-        <Text style={styles.exerciseList}>
-          {workout.exercises.map((exercise) => exercise.name).join(' · ')}
-        </Text>
-      ) : (
-        <Text style={styles.emptyWorkoutText}>
-          No exercises yet — add anytime.
-        </Text>
-      )}
-
-      {segments.length > 0 ? (
-        <View style={styles.muscleBar}>
-          {segments.map((segment) => (
-            <View
-              key={segment.group}
-              style={[
-                styles.muscleSegment,
-                { backgroundColor: segment.color, flexGrow: segment.count },
-              ]}
-            />
-          ))}
-        </View>
-      ) : null}
-    </Pressable>
-  );
-}
-
-/** A focused confirmation sheet for the destructive long-press action. */
-interface WorkoutMenuProps {
-  canDelete: boolean;
-  onClose: () => void;
-  onDelete: () => void;
-  workout: DraftWorkout;
-  workoutIndex: number;
-}
-
-function WorkoutMenu({
-  canDelete,
-  onClose,
-  onDelete,
-  workout,
-  workoutIndex,
-}: WorkoutMenuProps) {
-  const insets = useSafeAreaInsets();
-  const letter = getWorkoutLetter(workoutIndex);
-  const displayName = getWorkoutDisplayName(workout) || 'Untitled workout';
-
-  return (
-    <Modal
-      animationType="slide"
-      onRequestClose={onClose}
-      statusBarTranslucent
-      transparent
-      visible
-    >
-      <View style={styles.menuModal}>
-        <Pressable
-          accessibilityLabel="Close workout menu"
-          accessibilityRole="button"
-          onPress={onClose}
-          style={styles.menuBackdrop}
-        />
-        <View
-          pointerEvents="box-none"
-          style={[styles.menuDock, { paddingBottom: Math.max(insets.bottom, 12) }]}
-        >
-          <View accessibilityViewIsModal style={styles.workoutMenu}>
-            <View style={styles.sheetHandle} />
-
-            <View style={styles.menuHeader}>
-              <Text style={styles.menuTitle}>
-                {canDelete ? `Remove Workout ${letter}?` : `Workout ${letter} can’t be removed`}
-              </Text>
-              <Text numberOfLines={1} style={styles.menuWorkoutName}>
-                {canDelete ? displayName : 'A split needs at least one workout.'}
-              </Text>
-            </View>
-
-            <View style={styles.menuActions}>
-              <Pressable
-                accessibilityLabel={canDelete ? 'Cancel removal' : 'Close'}
-                accessibilityRole="button"
-                onPress={onClose}
-                style={styles.actionHitbox}
-              >
-                {({ pressed }) => (
-                  <View
-                    style={[
-                      styles.cancelAction,
-                      pressed && styles.cancelActionPressed,
-                    ]}
-                  >
-                    <Text style={styles.cancelActionText}>
-                      {canDelete ? 'Cancel' : 'Got it'}
-                    </Text>
-                  </View>
-                )}
-              </Pressable>
-
-              {canDelete ? (
-                <Pressable
-                  accessibilityLabel={`Remove Workout ${letter}`}
-                  accessibilityRole="button"
-                  onPress={onDelete}
-                  style={styles.actionHitbox}
-                >
-                  {({ pressed }) => (
-                    <View
-                      style={[
-                        styles.deleteAction,
-                        pressed && styles.deleteActionPressed,
-                      ]}
-                    >
-                      <Text style={styles.deleteActionText}>Remove</Text>
-                    </View>
-                  )}
-                </Pressable>
-              ) : null}
-            </View>
-          </View>
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
-export default function CustomSplitReviewScreen() {
+export default function ReviewSplit() {
+  useMuscleColors(state => state.preferences);
   const router = useRouter();
-  const draft = useCustomSplitDraftStore((state) => state.draft);
-  const source = useCustomSplitDraftStore((state) => state.source);
-  const setSplitName = useCustomSplitDraftStore((state) => state.setSplitName);
-  const selectWorkout = useCustomSplitDraftStore((state) => state.selectWorkout);
-  const deleteWorkout = useCustomSplitDraftStore((state) => state.deleteWorkout);
-  const discardDraft = useCustomSplitDraftStore((state) => state.discardDraft);
-  const editingSplitId = useCustomSplitDraftStore((state) => state.editingSplitId);
-  const saveCustomSplitDraft = useWorkoutStore((state) => state.saveCustomSplitDraft);
-  const updateCustomSplitDraft = useWorkoutStore((state) => state.updateCustomSplitDraft);
-  const deleteSplit = useWorkoutStore((state) => state.deleteSplit);
-
-  const [menu, setMenu] = useState<{ workoutId: string } | null>(null);
+  const navigation = useNavigation();
+  const state = useCustomSplitDraftStore();
+  const workouts = useWorkoutStore();
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const savePressScale = usePressScale();
-
-  if (!draft) {
-    return <SafeAreaView style={styles.safeArea} />;
-  }
-
-  const workoutCount = draft.workouts.length;
-  const exerciseCount = draft.workouts.reduce(
-    (total, workout) => total + workout.exercises.length,
-    0
-  );
-
-  const trimmedName = draft.name.trim();
-  const validationError =
-    !trimmedName
-      ? 'Give this split a name before saving.'
-      : workoutCount === 0
-        ? 'Add at least one workout before saving.'
-        : exerciseCount === 0
-          ? 'Add at least one exercise to this split before saving.'
-          : null;
-  const menuWorkoutIndex = menu
-    ? draft.workouts.findIndex((workout) => workout.id === menu.workoutId)
-    : -1;
-  const isEditing = editingSplitId !== null;
-  const canSave = validationError === null && !saving && !deleting;
-
-  const returnToLibrary = () => {
-    try {
-      router.dismissTo('/your-splits');
-    } catch {
-      router.replace('/your-splits');
-    }
-  };
-
-  const handleEdit = (workoutId: string) => {
-    void Haptics.selectionAsync();
-    selectWorkout(workoutId);
-    router.back();
-  };
-
-  const openWorkoutMenu = (workoutId: string) => {
-    if (saving || deleting) return;
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setMenu({ workoutId });
-  };
-
-  // Draft-only: the persistent split is untouched until Save is pressed.
-  const handleDeleteWorkout = (workout: DraftWorkout) => {
-    setMenu(null);
-    if (workoutCount <= 1 || saving || deleting) return;
-    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-    deleteWorkout(workout.id);
-    // A stale save-time failure must not outlive the edit that may have fixed it.
-    setError(null);
-  };
-
-  const handleSave = async () => {
-    if (saving || deleting) return;
-    if (validationError) {
-      setError(validationError);
-      return;
-    }
-
-    setSaving(true);
-    setError(null);
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-
-    const workoutInputs = draft.workouts.map((workout) => ({
-      name: getWorkoutDisplayName(workout),
-      exerciseIds: workout.exercises.map((exercise) => exercise.id),
-      persistedWorkoutId: workout.persistedWorkoutId ?? null,
-    }));
-
-    if (editingSplitId !== null) {
-      // Edit mode rewrites the same split row; activation and onboarding state
-      // are deliberately left exactly as they are.
-      const updated = await updateCustomSplitDraft(
-        editingSplitId,
-        trimmedName,
-        workoutInputs
-      );
-      if (!updated) {
-        setSaving(false);
-        setError("Couldn't save these changes. Please try again.");
-        return;
-      }
-      discardDraft();
-      returnToLibrary();
-      return;
-    }
-
-    const splitId = await saveCustomSplitDraft(trimmedName, workoutInputs, {
-      completeOnboarding: source === 'onboarding',
+  const [conflict, setConflict] = useState(false);
+  const locked = useRef(false);
+  const busy = saving || deleting;
+  useEffect(() => {
+    return navigation.addListener('beforeRemove', event => {
+      if (locked.current) event.preventDefault();
     });
-
-    if (splitId === undefined) {
-      setSaving(false);
-      setError("Couldn't save this split. Please try again.");
-      return;
-    }
-
-    // Only once the split graph and the profile update have both landed.
-    discardDraft();
-    if (source === 'onboarding') {
-      // The refreshed completed profile lets the root redirect architecture
-      // keep onboarding out of the post-save navigation path.
-      router.replace('/your-splits');
-      return;
-    }
-    // The library flow entered from Your Splits — drop the builder stack.
-    returnToLibrary();
+  }, [navigation]);
+  const draft = state.draft;
+  const editing = state.editingSplitId !== null;
+  // Stack's plan is always updated in place: never deleted, renamed or saved as a new routine.
+  const stackPlan = state.source === 'stack';
+  const discard = useCallback(() => {
+    if (!draft || locked.current) return;
+    Alert.alert('Discard this draft?', 'This removes your unfinished changes. Your saved routine and workout history stay intact.', [
+      { text: 'Keep building', style: 'cancel' }, { text: 'Discard draft', style: 'destructive', onPress: () => {
+        if (locked.current) return;
+        state.discardDraft(); router.dismissTo('/your-splits');
+      } },
+    ]);
+  }, [draft, state, router]);
+  const deleteSplit = useCallback(() => {
+    const splitId = state.editingSplitId;
+    if (!draft || splitId === null || locked.current) return;
+    Alert.alert(`Delete “${draft.name}”?`, 'This deletes the saved routine and its unfinished changes. Your completed workout history stays intact.', [
+      { text: 'Cancel', style: 'cancel' }, { text: 'Delete routine', style: 'destructive', onPress: () => {
+        if (locked.current) return;
+        locked.current = true; setDeleting(true); setError(null);
+        void (async () => {
+          try {
+            await workouts.deleteSplit(splitId);
+            // The store's guarded action can resolve after a failed write. Confirm deletion before removing the draft.
+            if (await getCustomSplitDetailAsync(splitId)) throw new Error('Couldn’t delete this routine. Your draft is still here. Try again.');
+            locked.current = false;
+            state.discardDraft(); router.dismissTo('/your-splits');
+          } catch { setError('Couldn’t delete this routine. Your draft is still here. Try again.'); }
+          finally { locked.current = false; setDeleting(false); }
+        })();
+      } },
+    ]);
+  }, [draft, state, workouts, router]);
+  const headerOptions = useMemo(() => ({
+    headerShown: true, title: 'Review routine', gestureEnabled: !busy,
+    headerBackVisible: Platform.OS !== 'ios' && !busy,
+    unstable_headerLeftItems: Platform.OS === 'ios' ? () => [{ type: 'button' as const,
+      label: 'Back', accessibilityLabel: 'Back to edit routine', disabled: busy,
+      icon: { type: 'sfSymbol' as const, name: 'chevron.left' as const }, onPress: () => { if (!locked.current) router.back(); } }] : undefined,
+    unstable_headerRightItems: Platform.OS === 'ios' ? () => [{ type: 'menu' as const,
+      label: 'Routine actions', accessibilityLabel: 'Routine actions', disabled: busy || !draft,
+      icon: { type: 'sfSymbol' as const, name: 'ellipsis' as const },
+      menu: { items: [
+        { type: 'action' as const, label: 'Discard draft', destructive: true, onPress: discard },
+        ...(editing && !stackPlan ? [{ type: 'action' as const, label: 'Delete routine', destructive: true,
+          icon: { type: 'sfSymbol' as const, name: 'trash' as const }, onPress: deleteSplit }] : []),
+      ] },
+    }] : undefined,
+    headerRight: Platform.OS === 'ios' ? undefined : () => <Pressable accessibilityRole="button"
+      accessibilityLabel="Routine actions" disabled={busy || !draft} style={ui.iconButton}
+      onPress={() => showActions('Routine actions', [
+        { title: 'Discard draft', destructive: true, onPress: discard },
+        ...(editing && !stackPlan ? [{ title: 'Delete routine', destructive: true, onPress: deleteSplit }] : []),
+      ])}><MoreHorizontal color={c.bone} size={22} /></Pressable>,
+  }), [busy, draft, editing, stackPlan, discard, deleteSplit, router]);
+  const invalid = !draft?.name.trim() ? 'Give your routine a name.' : draft.workouts.some(day => !day.exercises.length) ? 'Add exercises to every workout, or remove the workouts you don’t need.' : null;
+  const save = async (activate: boolean) => {
+    if (!draft || invalid || locked.current) return;
+    locked.current = true; setSaving(true); setError(null);
+    try {
+      if (state.editingSplitId !== null) {
+        const saved = await getCustomSplitDetailAsync(state.editingSplitId);
+        if (!saved || splitRevision(saved) !== state.sourceRevision) {
+          setConflict(true); throw new Error('The saved routine changed while you were editing. Recover this draft as a new routine to keep your work.');
+        }
+      }
+      const inputs = draft.workouts.map((day, index) => ({
+        name: getWorkoutDisplayName(day) || workoutEntryLabel(index), color: day.color ?? null,
+        exerciseIds: day.exercises.map(exercise => exercise.id), persistedWorkoutId: day.persistedWorkoutId ?? null,
+      }));
+      const success = state.editingSplitId !== null
+        ? await workouts.updateCustomSplitDraft(state.editingSplitId, draft.name.trim(), inputs)
+        : stackPlan
+          // First edit of Stack's plan: it stays the active plan if it already was.
+          ? (await workouts.saveCustomSplitDraft(draft.name.trim(), inputs, { stackPlan: true, activate: workouts.profile?.programMode === 'stack' })) !== undefined
+          : (await workouts.saveCustomSplitDraft(draft.name.trim(), inputs, { activate, completeOnboarding: state.source === 'onboarding' })) !== undefined;
+      if (!success) throw new Error('Couldn’t save your routine. Your draft is still here. Try again.');
+      locked.current = false;
+      state.discardDraft();
+      if (state.source === 'onboarding') router.replace('/your-splits');
+      else router.dismissTo('/your-splits');
+    } catch { setError('Couldn’t save your routine. Your draft is still here. Try again.'); }
+    finally { locked.current = false; setSaving(false); }
   };
-
-  const handleDelete = () => {
-    if (editingSplitId === null || saving || deleting) return;
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    Alert.alert(
-      `Delete "${trimmedName || draft.name}"?`,
-      'This permanently deletes this split. Your completed workout history will remain.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete Split',
-          style: 'destructive',
-          onPress: () => {
-            setDeleting(true);
-            setError(null);
-            void deleteSplit(editingSplitId).then(() => {
-              discardDraft();
-              returnToLibrary();
-            });
-          },
-        },
-      ]
-    );
-  };
-
-  return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.screen}>
-        <View style={styles.header}>
-          <Pressable
-            accessibilityLabel="Back to split builder"
-            accessibilityRole="button"
-            hitSlop={8}
-            onPress={() => router.back()}
-            style={styles.circleButton}
-          >
-            <ChevronLeft color={redesignColors.bone} size={22} strokeWidth={2.3} />
-          </Pressable>
-          <Text style={styles.eyebrow}>REVIEW</Text>
+  return <SafeAreaView edges={['left', 'right', 'bottom']} style={ui.screen}>
+    <Stack.Screen options={headerOptions} />
+    {draft ? <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={ui.content}>
+        <View style={ui.section}>
+          <Text accessibilityRole="header" style={ui.title}>{editing || stackPlan ? 'Ready to update?' : 'Ready to save?'}</Text>
+          <Text style={ui.body}>{stackPlan ? 'Check the workout order, then save Stack’s plan.' : 'Check the workout order, then save your routine.'}</Text>
         </View>
-
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-          style={styles.scroll}
-        >
-          <SplitName name={draft.name} onChange={setSplitName} />
-
-          <Text style={styles.counts}>
-            <Text style={styles.countValue}>{workoutCount}</Text>
-            {`  ${plural(workoutCount, 'workout')}  ·  `}
-            <Text style={styles.countValue}>{exerciseCount}</Text>
-            {`  ${plural(exerciseCount, 'exercise')}`}
-          </Text>
-
-          <View style={styles.cards}>
-            {draft.workouts.map((workout, index) => (
-              <WorkoutCard
-                index={index}
-                isMenuTarget={menu?.workoutId === workout.id}
-                key={workout.id}
-                onEdit={() => handleEdit(workout.id)}
-                onLongPress={() => openWorkoutMenu(workout.id)}
-                workout={workout}
-              />
-            ))}
+        <View style={{ gap: 8 }}>
+          {stackPlan ? null : <>
+            <Text style={ui.label}>Routine name</Text>
+            <TextInput accessibilityLabel="Routine name" maxLength={48} value={draft.name} onChangeText={state.setSplitName} editable={!busy}
+              style={ui.input} placeholder="Name your routine" placeholderTextColor={c.ash} returnKeyType="done" />
+          </>}
+          <Text style={ui.label}>{draft.workouts.length} {draft.workouts.length === 1 ? 'workout' : 'workouts'} · {draft.workouts.reduce((total, day) => total + day.exercises.length, 0)} {draft.workouts.reduce((total, day) => total + day.exercises.length, 0) === 1 ? 'exercise' : 'exercises'}</Text>
+        </View>
+        {draft.workouts.map((day, index) => <View key={day.id} style={ui.card}>
+          <View style={ui.row}>
+            <View style={{ flex: 1, gap: 6 }}>
+              <View style={ui.row}><View style={[ui.dot, { backgroundColor: resolveDayColor(day) }]} /><Text style={ui.eyebrow}>{workoutEntryLabel(index).toUpperCase()}</Text></View>
+              <Text style={ui.subtitle}>{getWorkoutDisplayName(day) || workoutEntryLabel(index)}</Text>
+            </View>
+            {draft.workouts.length > 1 ? <Pressable accessibilityRole="button" accessibilityLabel={`Reorder or remove ${workoutEntryLabel(index)}`} disabled={busy}
+              style={({ pressed }) => [ui.iconButton, pressed && ui.pressed, busy && ui.disabled]}
+              onPress={() => showActions(workoutEntryLabel(index), [
+                ...(index > 0 ? [{ title: 'Move up', onPress: () => state.reorderWorkout(index, index - 1) }] : []),
+                ...(index < draft.workouts.length - 1 ? [{ title: 'Move down', onPress: () => state.reorderWorkout(index, index + 1) }] : []),
+                ...(draft.workouts.length > 1 ? [{ title: 'Remove workout', destructive: true, onPress: () => {
+                  if (!day.exercises.length) state.deleteWorkout(day.id);
+                  else Alert.alert(`Remove ${workoutEntryLabel(index)}?`, 'This removes the workout and its exercises from your draft.', [
+                    { text: 'Cancel', style: 'cancel' }, { text: 'Remove workout', style: 'destructive', onPress: () => state.deleteWorkout(day.id) },
+                  ]);
+                } }] : []),
+              ])}><MoreHorizontal color={c.ash} size={22} /></Pressable> : null}
           </View>
-        </ScrollView>
-
-        <View style={styles.bottomBar}>
-          {(error ?? validationError) ? (
-            <Text style={styles.errorText}>{error ?? validationError}</Text>
-          ) : null}
-          <AnimatedPressable
-            accessibilityLabel={isEditing ? 'Save changes' : 'Save split'}
-            accessibilityRole="button"
-            accessibilityState={{ disabled: !canSave, busy: saving }}
-            disabled={!canSave}
-            onPress={() => { void handleSave(); }}
-            onPressIn={savePressScale.onPressIn}
-            onPressOut={savePressScale.onPressOut}
-            style={[
-              styles.saveButton,
-              canSave ? styles.saveButtonEnabled : styles.saveButtonDisabled,
-              savePressScale.animatedStyle,
-            ]}
-          >
-            <Text
-              style={[
-                styles.saveButtonText,
-                canSave ? styles.saveButtonTextEnabled : styles.saveButtonTextDisabled,
-              ]}
-            >
-              {saving ? 'Saving…' : isEditing ? 'Save changes' : 'Save split'}
-            </Text>
-          </AnimatedPressable>
-
-          {isEditing ? (
-            <Pressable
-              accessibilityLabel="Delete split"
-              accessibilityRole="button"
-              accessibilityState={{ disabled: saving || deleting }}
-              disabled={saving || deleting}
-              hitSlop={6}
-              onPress={handleDelete}
-              style={styles.deleteButton}
-            >
-              <Text style={styles.deleteText}>
-                {deleting ? 'Deleting…' : 'Delete split'}
-              </Text>
-            </Pressable>
-          ) : null}
-        </View>
+          {day.exercises.length ? <View style={{ gap: 12 }}>{day.exercises.map((exercise, position) => <View key={exercise.id} style={[ui.row, { alignItems: 'flex-start' }]}>
+            <Text style={[ui.number, { paddingTop: 3 }]}>{String(position + 1).padStart(2, '0')}</Text>
+            <Text style={[ui.body, { flex: 1, color: c.bone }]}>{displayExerciseName(exercise.name)}</Text>
+          </View>)}</View> : <Text style={ui.body}>This workout needs exercises before you can save.</Text>}
+          <Action title={day.exercises.length ? 'Edit workout' : 'Add exercises'} secondary icon={<Pencil color={c.bone} size={16} />} disabled={busy} label={`Edit ${workoutEntryLabel(index)}`}
+            onPress={() => { state.selectWorkout(day.id); router.back(); }} />
+        </View>)}
+        <Text style={ui.body}>Your draft stays on this device until you save or discard it.</Text>
+      </ScrollView>
+      <View style={ui.dock}>
+        {error || invalid || state.storageError ? <Text accessibilityLiveRegion="polite" style={ui.error}>{error ?? invalid ?? state.storageError}</Text> : null}
+        {conflict ? <Action title="Recover draft" disabled={busy} onPress={() => {
+          if (locked.current) return;
+          if (state.drafts.new) { setError('Finish or discard your other new routine draft in Your routines first. Both drafts are safe.'); return; }
+          state.recoverAsNew(); setConflict(false); setError(null);
+        }} /> : null}
+        <Action title={deleting ? 'Deleting…' : saving ? 'Saving…' : editing || stackPlan ? 'Save changes' : 'Save and use'} primary disabled={busy || !!invalid || conflict} onPress={() => { void save(true); }} />
+        {!editing && !stackPlan && state.source !== 'onboarding' ? <Action title="Save for later" disabled={busy || !!invalid || conflict} onPress={() => { void save(false); }} /> : null}
       </View>
-
-      {menu && menuWorkoutIndex >= 0 ? (
-        <WorkoutMenu
-          canDelete={workoutCount > 1}
-          onClose={() => setMenu(null)}
-          onDelete={() =>
-            handleDeleteWorkout(draft.workouts[menuWorkoutIndex])
-          }
-          workout={draft.workouts[menuWorkoutIndex]}
-          workoutIndex={menuWorkoutIndex}
-        />
-      ) : null}
-    </SafeAreaView>
-  );
+    </KeyboardAvoidingView> : <View style={ui.content}><Text style={ui.body}>Your routine has been saved or closed.</Text><Action title="Your routines" onPress={() => router.replace('/your-splits')} /></View>}
+  </SafeAreaView>;
 }
-
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: redesignColors.ink,
-  },
-  screen: {
-    flex: 1,
-    paddingTop: 12,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-    paddingHorizontal: 24,
-  },
-  circleButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: redesignColors.surface,
-    borderWidth: 1,
-    borderColor: redesignColors.border,
-  },
-  eyebrow: {
-    color: redesignColors.ashDim,
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 13,
-    letterSpacing: 2.4,
-  },
-  scroll: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingTop: 26,
-    paddingHorizontal: 24,
-    paddingBottom: 24,
-  },
-  nameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-  },
-  name: {
-    flexShrink: 1,
-    color: redesignColors.bone,
-    fontFamily: redesignFonts.display,
-    fontSize: 40,
-    lineHeight: 46,
-    letterSpacing: -0.6,
-  },
-  nameInput: {
-    flex: 1,
-    paddingVertical: Platform.OS === 'ios' ? 4 : 0,
-    color: redesignColors.bone,
-    fontFamily: redesignFonts.display,
-    fontSize: 34,
-    lineHeight: 42,
-    letterSpacing: -0.5,
-  },
-  renameButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: alpha(splitColors.chest, '66'),
-  },
-  counts: {
-    marginTop: 10,
-    color: redesignColors.ash,
-    fontFamily: redesignFonts.ui,
-    fontSize: 16,
-  },
-  countValue: {
-    color: redesignColors.bone,
-    fontFamily: redesignFonts.uiBold,
-    fontSize: 16,
-  },
-  cards: {
-    marginTop: 26,
-    gap: 16,
-  },
-  card: {
-    padding: 18,
-    borderRadius: 22,
-    backgroundColor: redesignColors.surface,
-    borderWidth: 1,
-    borderColor: redesignColors.border,
-  },
-  cardMenuTarget: {
-    borderColor: splitColors.core,
-    backgroundColor: alpha(splitColors.core, '14'),
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  badge: {
-    width: 34,
-    height: 34,
-    borderRadius: 11,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  badgeText: {
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 14,
-  },
-  cardTitle: {
-    minWidth: 0,
-    flex: 1,
-    color: redesignColors.bone,
-    fontFamily: redesignFonts.uiBold,
-    fontSize: 20,
-  },
-  editButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-  },
-  editText: {
-    color: splitColors.chest,
-    fontFamily: redesignFonts.uiSemiBold,
-    fontSize: 16,
-  },
-  cardDivider: {
-    height: 1,
-    marginTop: 14,
-    marginBottom: 12,
-    backgroundColor: redesignColors.border,
-  },
-  exerciseList: {
-    color: redesignColors.ash,
-    fontFamily: redesignFonts.ui,
-    fontSize: 15.5,
-    lineHeight: 24,
-  },
-  emptyWorkoutText: {
-    color: redesignColors.ashDim,
-    fontFamily: redesignFonts.uiItalic,
-    fontSize: 15.5,
-    lineHeight: 24,
-  },
-  muscleBar: {
-    flexDirection: 'row',
-    gap: 4,
-    marginTop: 16,
-  },
-  muscleSegment: {
-    flexBasis: 0,
-    height: 6,
-    borderRadius: 3,
-  },
-  bottomBar: {
-    paddingTop: 10,
-    paddingHorizontal: 24,
-    paddingBottom: 12,
-    gap: 12,
-  },
-  errorText: {
-    color: splitColors.core,
-    fontFamily: redesignFonts.uiMedium,
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  saveButton: {
-    height: 58,
-    borderRadius: 19,
-    borderCurve: 'continuous',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  saveButtonEnabled: {
-    backgroundColor: splitColors.chest,
-  },
-  saveButtonDisabled: {
-    backgroundColor: redesignColors.raised,
-  },
-  saveButtonText: {
-    fontFamily: redesignFonts.display,
-    fontSize: 20,
-    letterSpacing: -0.2,
-  },
-  saveButtonTextEnabled: {
-    color: redesignColors.ink,
-  },
-  saveButtonTextDisabled: {
-    color: redesignColors.ashDim,
-  },
-  deleteButton: {
-    alignSelf: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 18,
-  },
-  deleteText: {
-    color: splitColors.core,
-    fontFamily: redesignFonts.uiSemiBold,
-    fontSize: 16,
-  },
-  menuModal: { flex: 1 },
-  menuBackdrop: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(7, 6, 5, 0.72)',
-  },
-  menuDock: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    paddingHorizontal: 12,
-  },
-  workoutMenu: {
-    width: '100%',
-    maxWidth: 520,
-    alignSelf: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 10,
-    paddingBottom: 18,
-    borderRadius: 28,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    borderColor: redesignColors.hi,
-    backgroundColor: redesignColors.surface,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: -8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 24,
-    elevation: 18,
-  },
-  sheetHandle: {
-    width: 38,
-    height: 4,
-    alignSelf: 'center',
-    marginBottom: 18,
-    borderRadius: 2,
-    backgroundColor: redesignColors.hi,
-  },
-  menuHeader: {
-    alignItems: 'flex-start',
-  },
-  menuTitle: {
-    color: redesignColors.bone,
-    fontFamily: redesignFonts.uiBold,
-    fontSize: 22,
-    lineHeight: 28,
-    letterSpacing: -0.3,
-  },
-  menuWorkoutName: {
-    marginTop: 3,
-    color: redesignColors.ash,
-    fontFamily: redesignFonts.uiMedium,
-    fontSize: 17,
-    lineHeight: 22,
-  },
-  menuActions: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    gap: 10,
-    marginTop: 24,
-  },
-  actionHitbox: {
-    minWidth: 0,
-    flexBasis: 0,
-    flexGrow: 1,
-    height: 54,
-  },
-  cancelAction: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: redesignColors.raised,
-    borderWidth: 1,
-    borderColor: redesignColors.border,
-  },
-  cancelActionPressed: {
-    backgroundColor: redesignColors.hi,
-  },
-  cancelActionText: {
-    color: redesignColors.bone,
-    fontFamily: redesignFonts.uiBold,
-    fontSize: 16,
-  },
-  deleteAction: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: splitColors.core,
-    overflow: 'hidden',
-  },
-  deleteActionPressed: {
-    opacity: 0.78,
-  },
-  deleteActionText: {
-    color: redesignColors.ink,
-    fontFamily: redesignFonts.uiBold,
-    fontSize: 16,
-  },
-});

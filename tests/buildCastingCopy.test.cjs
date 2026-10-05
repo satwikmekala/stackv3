@@ -42,7 +42,7 @@ test('baseline workout goes Beat 1 → Beat 4 with only MOVED', () => {
   assert.deepEqual(copy.beats, [1, 4]);
   assert.deepEqual(sequence(copy), [1, 1, 1, 1, 4, 4]);
   assert.equal(beatForPhase(null, copy.beats), 1);
-  assert.deepEqual(copy.landing, { title: 'Stacked.', subtitle: 'Second piece this week.', metrics: [{ value: '5,240 KG', label: 'MOVED' }], baseline: null });
+  assert.deepEqual(copy.landing, { title: 'Stacked.', subtitle: "Second block this week.", metrics: [{ value: "5,240 kg", label: 'MOVED' }], baseline: null });
 });
 
 test('lifts up without a PR shows progression rows, then lands without a PR row', () => {
@@ -56,7 +56,7 @@ test('lifts up without a PR shows progression rows, then lands without a PR row'
     { delta: '+2 reps', exercise: 'Cable fly', change: '12 → 14' },
   ]);
   assert.equal(copy.progress.more, null);
-  assert.deepEqual(copy.landing.metrics, [{ value: '840 KG', label: 'MOVED' }, { value: '2', label: 'LIFTS UP' }]);
+  assert.deepEqual(copy.landing.metrics, [{ value: "840 kg", label: 'MOVED' }, { value: '2', label: 'LIFTS UP' }]);
 });
 
 test('a rep-only improvement at the same load reads in reps, singular for one', () => {
@@ -79,7 +79,7 @@ test('one PR: NEW RECORD, one line, and a singular PR metric', () => {
   const copy = copyFor({ comparisons: [comparison('Bench press', [set([80, 8], [85, 8])])], records: [record('Bench press', 85, 8)] });
   assert.deepEqual(copy.beats, [1, 2, 3, 4]);
   assert.deepEqual(sequence(copy), [1, 2, 3, 3, 4, 4]);
-  assert.deepEqual(copy.record, { heading: 'NEW RECORD', lines: ['Bench press · 85 kg × 8'], closing: 'Your best yet.' });
+  assert.deepEqual(copy.record, { heading: "PR", lines: ['Bench press · 85 kg × 8'], closing: 'Your best yet.' });
   assert.deepEqual(copy.landing.metrics.at(-1), { value: '1', label: 'PR' });
 });
 
@@ -88,30 +88,30 @@ test('a PR without lifts up skips straight from Beat 1 to the record', () => {
   assert.deepEqual(sequence(copy), [1, 1, 3, 3, 4, 4]);
 });
 
-test('multiple PRs: NEW RECORDS, one line each, "Your best yet." once, PRS', () => {
+test("multiple PRs: NEW RECORDS, one line each, \"Your best yet.\" once, PRs", () => {
   const copy = copyFor({ records: [record('Bench press', 85, 8), record('Dips', 0, 15)] });
-  assert.deepEqual(copy.record, { heading: 'NEW RECORDS', lines: ['Bench press · 85 kg × 8', 'Dips · Bodyweight × 15'], closing: 'Your best yet.' });
-  assert.deepEqual(copy.landing.metrics.at(-1), { value: '2', label: 'PRS' });
+  assert.deepEqual(copy.record, { heading: "PRs", lines: ['Bench press · 85 kg × 8', 'Chest Dip · Bodyweight × 15'], closing: 'Your best yet.' });
+  assert.deepEqual(copy.landing.metrics.at(-1), { value: '2', label: "PRs" });
 });
 
-test('first piece ever is Beat 1 → Beat 4 with the baseline line', () => {
+test("first block ever is Beat 1 → Beat 4 with the baseline line", () => {
   const copy = copyFor({ comparisons: [comparison('Bench press')], volumeKg: 720 }, { firstEver: true, weekPosition: 1 });
   assert.deepEqual(copy.beats, [1, 4]);
-  assert.deepEqual(copy.landing, { title: 'Stacked.', subtitle: 'Your first piece.', metrics: [{ value: '720 KG', label: 'MOVED' }], baseline: 'Every lift today sets your baseline.' });
+  assert.deepEqual(copy.landing, { title: 'Stacked.', subtitle: "Your first block.", metrics: [{ value: "720 kg", label: 'MOVED' }], baseline: 'Your first logged sets start your history.' });
 });
 
 test('week ordinals are words through Seventh, digits from 8th', () => {
-  assert.equal(copyFor({}, { weekPosition: 1 }).landing.subtitle, 'First piece this week.');
-  assert.equal(copyFor({}, { weekPosition: 7 }).landing.subtitle, 'Seventh piece this week.');
-  assert.equal(copyFor({}, { weekPosition: 8 }).landing.subtitle, '8th piece this week.');
+  assert.equal(copyFor({}, { weekPosition: 1 }).landing.subtitle, "First block this week.");
+  assert.equal(copyFor({}, { weekPosition: 7 }).landing.subtitle, "Seventh block this week.");
+  assert.equal(copyFor({}, { weekPosition: 8 }).landing.subtitle, "8th block this week.");
   assert.deepEqual([11, 12, 13, 21, 22, 23, 101].map(pieceOrdinal), ['11th', '12th', '13th', '21st', '22nd', '23rd', '101st']);
 });
 
-test('lb profiles convert rows and records with the app formatter, and moved in LB', () => {
+test("lb profiles convert rows and records with the app formatter, and moved in lb", () => {
   const copy = copyFor({ comparisons: [comparison('Bench press', [set([80, 8], [85, 8])])], records: [record('Bench press', 85, 8)], volumeKg: 5240 }, { unit: 'lbs' });
-  assert.deepEqual(copy.progress.rows, [{ delta: '+11 lbs', exercise: 'Bench press', change: '176.4 → 187.4 lbs' }]);
-  assert.deepEqual(copy.record.lines, ['Bench press · 187.4 lbs × 8']);
-  assert.deepEqual(copy.landing.metrics[0], { value: '11,552 LB', label: 'MOVED' });
+  assert.deepEqual(copy.progress.rows, [{ delta: "+11 lb", exercise: 'Bench press', change: "176.4 → 187.4 lb" }]);
+  assert.deepEqual(copy.record.lines, ["Bench press · 187.4 lb × 8"]);
+  assert.deepEqual(copy.landing.metrics[0], { value: "11,552 lb", label: 'MOVED' });
 });
 
 test('a bodyweight-only workout with no load has no MOVED row', () => {
@@ -150,7 +150,7 @@ test('earned beats stay on screen for their minimum; skipped beats keep the fast
   assert.deepEqual(beatHolds([1, 4]), []);
 });
 
-test('a hold freezes an ordinary frame: grown piece, no gold yet', () => {
+test("a hold freezes an ordinary frame: grown block, no gold yet", () => {
   const timeline = castingTimeline(beatHolds([1, 2, 3, 4]));
   for (let wall = 1799; wall <= 2999; wall += 100) {
     const frame = castingFrame(timeline.animationTime(wall), 1.3);
@@ -225,14 +225,14 @@ test('the watchdog detects stalls on the playback clock, never a slow start or a
 });
 
 test('moved: sessions show full weight, aggregates keep tonnes (kg and lb)', () => {
-  assert.equal(formatMoved(5240, 'kg', 'session'), '5,240 KG');
-  assert.equal(formatMoved(138200, 'kg', 'session'), '138,200 KG');
-  assert.equal(formatMoved(840, 'kg', 'session'), '840 KG');
-  assert.equal(formatMoved(5240, 'kg', 'aggregate'), '5.2 T');
-  assert.equal(formatMoved(138200, 'kg', 'aggregate'), '138.2 T');
-  assert.equal(formatMoved(840, 'kg', 'aggregate'), '840 KG');
-  assert.equal(formatMoved(5240, 'lbs', 'session'), '11,552 LB');
-  assert.equal(formatMoved(5240, 'lbs', 'aggregate'), '11,552 LB');
+  assert.equal(formatMoved(5240, 'kg', 'session'), "5,240 kg");
+  assert.equal(formatMoved(138200, 'kg', 'session'), "138,200 kg");
+  assert.equal(formatMoved(840, 'kg', 'session'), "840 kg");
+  assert.equal(formatMoved(5240, 'kg', 'aggregate'), '5.2 t');
+  assert.equal(formatMoved(138200, 'kg', 'aggregate'), '138.2 t');
+  assert.equal(formatMoved(840, 'kg', 'aggregate'), "840 kg");
+  assert.equal(formatMoved(5240, 'lbs', 'session'), "11,552 lb");
+  assert.equal(formatMoved(5240, 'lbs', 'aggregate'), "11,552 lb");
   assert.equal(formatMoved(0, 'kg', 'session'), null);
   assert.equal(`${formatMoved(5240, 'kg', 'session').toLowerCase()} moved`, '5,240 kg moved');
 });

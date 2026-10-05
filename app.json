@@ -4,7 +4,7 @@
     "slug": "stack",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/app-icon.png",
     "scheme": "stack",
     "userInterfaceStyle": "automatic",
     "ios": {
@@ -22,6 +22,10 @@
     },
     "android": {
       "package": "com.liftwithstack.stack",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/logo.png",
+        "backgroundColor": "#000000"
+      },
       "versionCode": 1
     },
     "web": {

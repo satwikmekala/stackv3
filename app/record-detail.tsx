@@ -1,9 +1,10 @@
+import { displayExerciseName } from '@/constants/exerciseNames';
 import Animated from 'react-native-reanimated';
 import { recordReveal } from '@/constants/workoutMotion';
 import { useMemo } from 'react';
 import { Platform, Pressable, SectionList, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/services/haptics';
 import { ChevronLeft } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { redesignColors, redesignFonts } from '@/constants/theme';
@@ -14,11 +15,11 @@ import { formatWeight, unitLabel } from '@/store/weightUnits';
 import '@/global.css';
 
 function formatRecordDate(date: Date, weekday = false) {
-  return date.toLocaleDateString('en-US', {
+  return date.toLocaleDateString('en-GB', {
     ...(weekday ? { weekday: 'short' as const } : {}),
     month: 'short', day: 'numeric',
     ...(date.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' as const } : {}),
-  }).toUpperCase();
+  });
 }
 
 export default function RecordDetail() {
@@ -52,16 +53,16 @@ export default function RecordDetail() {
                 <ChevronLeft color={redesignColors.bone} size={23} />
               </Pressable>
               <View style={styles.headerCopy}>
-                <Text accessibilityRole="header" style={styles.title}>{exerciseName || 'Exercise records'}</Text>
+                <Text accessibilityRole="header" style={styles.title}>{displayExerciseName(exerciseName) || 'Exercise records'}</Text>
                 <Text style={styles.subtitle}>{sets.length} SETS LOGGED</Text>
               </View>
             </View>
             {best ? (
               <View style={styles.bestCard}>
                 <View style={styles.bestCopy}>
-                  <Text style={styles.label}>CURRENT BEST</Text>
+                  <Text style={styles.label}>Best set</Text>
                   <Text style={styles.bestWeight}>
-                    {best.weight === 0 ? 'BW' : formatWeight(best.weight, weightUnit)}
+                    {best.weight === 0 ? 'Bodyweight' : formatWeight(best.weight, weightUnit)}
                     <Text style={styles.bestReps}>{best.weight === 0 ? '' : ` ${unitLabel(weightUnit)}`} × {best.reps}</Text>
                   </Text>
                 </View>
@@ -90,7 +91,7 @@ export default function RecordDetail() {
             style={[styles.setRow, index < section.data.length - 1 && styles.setBorder]}>
             <Text style={[styles.setLabel, item.isPR && styles.accent]}>SET {item.setIndex + 1}</Text>
             <Text style={[styles.setWeight, item.isPR && styles.accent]}>
-              {item.weight === 0 ? 'BW' : formatWeight(item.weight, weightUnit)}
+              {item.weight === 0 ? 'Bodyweight' : formatWeight(item.weight, weightUnit)}
               {item.weight !== 0 ? <Text style={item.isPR ? styles.accent : styles.muted}> {unitLabel(weightUnit)}</Text> : null}
             </Text>
             <Text style={[styles.setReps, item.isPR && styles.accent]}>× {item.reps}</Text>

@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { ArrowRight, ChevronLeft } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import Animated from 'react-native-reanimated';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/services/haptics';
 import { redesignColors, splitColors } from '@/constants/theme';
 import { usePressScale } from '@/hooks/usePressScale';
 

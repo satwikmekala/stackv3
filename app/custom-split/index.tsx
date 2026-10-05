@@ -1,1150 +1,175 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  Alert,
-  type GestureResponderEvent,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  useWindowDimensions,
-  View,
-} from 'react-native';
-import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import * as Haptics from 'expo-haptics';
-import Animated, { useAnimatedRef, useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
+import { workoutEntryLabel } from '@/utils/content';
+import { SplitPressable as Pressable } from '@/components/custom-split/SplitPressable';
+import { showActions } from '@/components/custom-split/showActions';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Platform, Text, View } from 'react-native';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import {
-  Check,
-  ChevronLeft,
-  Copy,
-  List,
-  Pencil,
-  Plus,
-  Trash2,
-} from 'lucide-react-native';
-
+import Animated, { useAnimatedRef, useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
 import { SelectedExerciseList } from '@/components/custom-split/SelectedExerciseList';
-import { ExerciseSearchInput } from '@/components/ExerciseSearchInput';
-import { getWeeklyArchetypeSequence } from '@/constants/archetypes';
-import { redesignColors, redesignFonts, splitColors } from '@/constants/theme';
-import {
-  CUSTOM_SPLIT_MUSCLE_GROUPS,
-  MUSCLE_GROUP_COLORS as GROUP_COLORS,
-  getDraftPrefillRecommendation,
-  getMuscleGroupForExercise,
-  getWorkoutDisplayName,
-  getWorkoutLetter,
-  type CustomSplitMuscleGroup,
-  type CustomSplitSource,
-  type DraftExercise,
-  type DraftWorkout,
-  useCustomSplitDraftStore,
-} from '@/store/customSplitDraft';
-import {
-  getCustomSplitDetailAsync,
-  getNextCustomSplitNameAsync,
-  readArchetypeTemplateCatalogSync,
-  readArchetypeVariantsSync,
-  readExerciseCatalogSync,
-} from '@/store/workoutDatabase';
+import { WorkoutTabs } from '@/components/custom-split/WorkoutTabs';
+import { Action, StackMark, ui } from '@/components/custom-split/ui';
+import { ChevronLeft, MoreHorizontal, Plus, SlidersHorizontal } from 'lucide-react-native';
+import { useMuscleColors } from '@/store/muscleColors';
+import { redesignColors as c, redesignFonts as f } from '@/constants/theme';
+import { getWorkoutDisplayName, splitRevision, useCustomSplitDraftStore, type CustomSplitSource, type DraftExercise } from '@/store/customSplitDraft';
+import { getCustomSplitDetailAsync, getNextArchetypeVariant, getNextCustomSplitNameAsync, readArchetypeTemplateCatalogSync, readArchetypeVariantsSync } from '@/store/workoutDatabase';
 import { useWorkoutStore } from '@/store/workoutStore';
-import '@/global.css';
+import { getProgramFrequency } from '@/store/trainingPreferences';
+import { buildProgramLineup } from '@/features/program/lineup';
 
 export type { CustomSplitSource };
-
-const alpha = (color: string, opacity: string) => `${color}${opacity}`;
-
-interface WorkoutTabsProps {
-  activeWorkoutId: string;
-  contextWorkoutId: string | null;
-  onAdd: () => void;
-  onLongPress: (workoutId: string, event: GestureResponderEvent) => void;
-  onSelect: (workoutId: string) => void;
-  workouts: DraftWorkout[];
-}
-
-function WorkoutTabs({
-  activeWorkoutId,
-  contextWorkoutId,
-  onAdd,
-  onLongPress,
-  onSelect,
-  workouts,
-}: WorkoutTabsProps) {
-  const compact = workouts.length >= 5;
-  return (
-    <ScrollView
-      contentContainerStyle={[styles.tabsContent, compact && styles.tabsContentCompact]}
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      style={styles.tabs}
-    >
-      {workouts.map((workout, index) => {
-        const selected = workout.id === activeWorkoutId;
-        return (
-          <Pressable
-            accessibilityLabel={`Workout ${getWorkoutLetter(index)}`}
-            accessibilityRole="tab"
-            accessibilityState={{ selected }}
-            key={workout.id}
-            delayLongPress={380}
-            onLongPress={(event) => onLongPress(workout.id, event)}
-            onPress={() => {
-              void Haptics.selectionAsync();
-              onSelect(workout.id);
-            }}
-            style={[
-              styles.workoutTab,
-              compact && styles.workoutTabCompact,
-              selected && styles.workoutTabSelected,
-              workout.id === contextWorkoutId && styles.workoutTabContext,
-            ]}
-          >
-            <Text style={[
-              styles.workoutTabText,
-              selected && styles.workoutTabTextSelected,
-              workout.id === contextWorkoutId && styles.workoutTabTextContext,
-            ]}>
-              {getWorkoutLetter(index)}
-            </Text>
-          </Pressable>
-        );
-      })}
-      <Pressable
-        accessibilityLabel="Add workout"
-        accessibilityRole="button"
-        onPress={() => {
-          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          onAdd();
-        }}
-        style={[styles.addWorkoutTab, compact && styles.workoutTabCompact]}
-      >
-        <Plus color={redesignColors.ash} size={25} strokeWidth={2.2} />
-      </Pressable>
-    </ScrollView>
-  );
-}
-
-interface PrefillControlProps {
-  compact?: boolean;
-  enabled: boolean;
-  onToggle: () => void;
-  unavailable: boolean;
-  workoutLetter: string;
-}
-
-function PrefillControl({
-  compact = false,
-  enabled,
-  onToggle,
-  unavailable,
-  workoutLetter,
-}: PrefillControlProps) {
-  return (
-    <Pressable
-      accessibilityLabel={
-        unavailable
-          ? `Stack prefill is unavailable for Workout ${workoutLetter}`
-          : `Prefill Workout ${workoutLetter} from Stack`
-      }
-      accessibilityRole="switch"
-      accessibilityState={{ checked: enabled, disabled: unavailable }}
-      disabled={unavailable}
-      onPress={onToggle}
-      style={[
-        styles.prefillCard,
-        compact && styles.prefillCardCompact,
-        unavailable && styles.unavailable,
-      ]}
-    >
-      <View style={styles.prefillCopy}>
-        <Text style={[styles.prefillTitle, compact && styles.prefillTitleCompact]}>
-          Prefill from Stack
-        </Text>
-        {!compact ? (
-          <Text style={styles.prefillDescription}>
-            {unavailable
-              ? `No Stack template is available for Workout ${workoutLetter}.`
-              : `Fills Workout ${workoutLetter} from Stack’s template. Edit freely after.`}
-          </Text>
-        ) : null}
-      </View>
-      <View style={[styles.switchTrack, enabled && styles.switchTrackEnabled]}>
-        <View style={[styles.switchThumb, enabled && styles.switchThumbEnabled]} />
-      </View>
-    </Pressable>
-  );
-}
-
-interface WorkoutNameProps {
-  customName: string;
-  displayName: string;
-  hasExercises: boolean;
-  onChange: (value: string) => void;
-}
-
-function WorkoutName({
-  customName,
-  displayName,
-  hasExercises,
-  onChange,
-}: WorkoutNameProps) {
-  const [editing, setEditing] = useState(false);
-
-  if (!hasExercises || editing) {
-    return (
-      <View>
-        <View style={styles.nameInputShell}>
-          <TextInput
-            accessibilityLabel="Workout name"
-            autoCapitalize="words"
-            autoFocus={editing}
-            maxLength={48}
-            onBlur={() => setEditing(false)}
-            onChangeText={onChange}
-            placeholder="Name this workout"
-            placeholderTextColor={redesignColors.ashDim}
-            returnKeyType="done"
-            style={styles.nameInput}
-            value={customName}
-          />
-          <Text style={styles.optionalLabel}>OPTIONAL</Text>
-        </View>
-        {!hasExercises ? (
-          <Text style={styles.nameHelper}>Names itself from the muscle groups you pick.</Text>
-        ) : null}
-      </View>
-    );
-  }
-
-  return (
-    <View style={styles.nameDisplay}>
-      <Text numberOfLines={1} style={styles.nameDisplayText}>{displayName}</Text>
-      <Pressable
-        accessibilityLabel="Rename workout"
-        accessibilityRole="button"
-        hitSlop={8}
-        onPress={() => setEditing(true)}
-        style={styles.renameButton}
-      >
-        <Pencil color={splitColors.chest} size={15} strokeWidth={2.2} />
-        <Text style={styles.renameText}>Rename</Text>
-      </Pressable>
-    </View>
-  );
-}
-
-const formatLetterList = (letters: string[]): string => {
-  if (letters.length <= 1) return letters[0] ?? '';
-  if (letters.length === 2) return `${letters[0]} and ${letters[1]}`;
-  return `${letters.slice(0, -1).join(', ')} and ${letters[letters.length - 1]}`;
-};
-
-export const getDeleteWorkoutConsequence = (
-  workoutIndex: number,
-  workoutCount: number
-): string => {
-  const deletedLetter = getWorkoutLetter(workoutIndex);
-  const followingCount = Math.max(0, workoutCount - workoutIndex - 1);
-  if (followingCount === 0) {
-    return `Exercises in ${deletedLetter} are discarded.`;
-  }
-
-  const oldLetters = Array.from(
-    { length: followingCount },
-    (_, index) => getWorkoutLetter(workoutIndex + index + 1)
-  );
-  const newLetters = Array.from(
-    { length: followingCount },
-    (_, index) => getWorkoutLetter(workoutIndex + index)
-  );
-  const verb = followingCount === 1 ? 'becomes' : 'become';
-  return `${formatLetterList(oldLetters)} ${verb} ${formatLetterList(newLetters)}. Exercises in ${deletedLetter} are discarded.`;
-};
-
-interface WorkoutContextMenuProps {
-  anchorX: number;
-  anchorY: number;
-  canDelete: boolean;
-  onClose: () => void;
-  onDelete: () => void;
-  onDuplicate: () => void;
-  workoutCount: number;
-  workoutIndex: number;
-}
-
-function WorkoutContextMenu({
-  anchorX,
-  anchorY,
-  canDelete,
-  onClose,
-  onDelete,
-  onDuplicate,
-  workoutCount,
-  workoutIndex,
-}: WorkoutContextMenuProps) {
-  const workoutLetter = getWorkoutLetter(workoutIndex);
-  const arrowLeft = Math.max(24, Math.min(anchorX - 38, 430));
-
-  return (
-    <Modal
-      animationType="fade"
-      onRequestClose={onClose}
-      statusBarTranslucent
-      transparent
-      visible
-    >
-      <View style={styles.menuModal}>
-        <Pressable
-          accessibilityLabel="Close workout menu"
-          accessibilityRole="button"
-          onPress={onClose}
-          style={styles.menuBackdrop}
-        />
-        <View style={[styles.workoutMenu, { top: anchorY }]}>
-          <View style={[styles.menuArrow, { left: arrowLeft }]} />
-          <Pressable
-            accessibilityRole="button"
-            onPress={onDuplicate}
-            style={styles.menuAction}
-          >
-            <Copy color={redesignColors.bone} size={23} strokeWidth={2.2} />
-            <Text style={styles.menuActionText}>Duplicate</Text>
-          </Pressable>
-          <View style={styles.menuDivider} />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ disabled: !canDelete }}
-            disabled={!canDelete}
-            onPress={onDelete}
-            style={[
-              styles.deleteAction,
-              !canDelete && styles.deleteActionDisabled,
-            ]}
-          >
-            <Trash2 color={splitColors.core} size={23} strokeWidth={2.3} />
-            <Text style={styles.deleteActionText}>Delete Workout {workoutLetter}</Text>
-          </Pressable>
-          <Text style={styles.deleteExplanation}>
-            {canDelete
-              ? getDeleteWorkoutConsequence(workoutIndex, workoutCount)
-              : 'A split must keep at least one workout.'}
-          </Text>
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
-interface MuscleFiltersProps {
-  onToggle: (group: CustomSplitMuscleGroup) => void;
-  selected: CustomSplitMuscleGroup[];
-}
-
-function MuscleFilters({ onToggle, selected }: MuscleFiltersProps) {
-  return (
-    <View style={styles.filterWrap}>
-      {CUSTOM_SPLIT_MUSCLE_GROUPS.map((group) => {
-        const color = GROUP_COLORS[group];
-        const isSelected = selected.includes(group);
-        return (
-          <Pressable
-            accessibilityRole="checkbox"
-            accessibilityState={{ checked: isSelected }}
-            key={group}
-            onPress={() => {
-              void Haptics.selectionAsync();
-              onToggle(group);
-            }}
-            style={[
-              styles.filterChip,
-              {
-                backgroundColor: isSelected ? color : 'transparent',
-                borderColor: isSelected ? color : alpha(color, '40'),
-              },
-            ]}
-          >
-            <Text style={[styles.filterChipText, { color: isSelected ? redesignColors.ink : alpha(color, '99') }]}>
-              {group}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-}
-
-interface CatalogSectionProps {
-  exercises: DraftExercise[];
-  group: CustomSplitMuscleGroup;
-  onToggle: (exercise: DraftExercise) => void;
-  selectedIds: Set<number>;
-}
-
-function CatalogSection({ exercises, group, onToggle, selectedIds }: CatalogSectionProps) {
-  const color = GROUP_COLORS[group];
-  return (
-    <View style={styles.catalogSection}>
-      <View style={styles.catalogHeadingRow}>
-        <View style={[styles.catalogHeadingDot, { backgroundColor: color }]} />
-        <Text style={[styles.catalogHeading, { color }]}>{group.toUpperCase()}</Text>
-      </View>
-      {exercises.map((exercise) => {
-        const selected = selectedIds.has(exercise.id);
-        return (
-          <Pressable
-            accessibilityRole="checkbox"
-            accessibilityState={{ checked: selected }}
-            key={exercise.id}
-            onPress={() => onToggle(exercise)}
-            style={styles.catalogRow}
-          >
-            <View
-              style={[
-                styles.checkbox,
-                { borderColor: selected ? color : redesignColors.hi },
-                selected && { backgroundColor: color },
-              ]}
-            >
-              {selected ? <Check color={redesignColors.ink} size={18} strokeWidth={3} /> : null}
-            </View>
-            <Text numberOfLines={1} style={styles.catalogExerciseName}>{exercise.name}</Text>
-            {exercise.equipment ? (
-              <Text numberOfLines={1} style={styles.equipmentText}>
-                {exercise.equipment.toUpperCase()}
-              </Text>
-            ) : null}
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-}
-
 export default function CustomSplitBuilderScreen() {
   const router = useRouter();
-  const { height: windowHeight } = useWindowDimensions();
-  const { source, splitId } = useLocalSearchParams<{
-    source?: CustomSplitSource;
-    splitId?: string;
-  }>();
-  // Presence of a persistent id is what puts the builder in edit mode; the
-  // whole split is never threaded through route params.
-  const editingTargetId = splitId ? Number(splitId) : null;
-  const editTarget =
-    editingTargetId !== null && Number.isInteger(editingTargetId) && editingTargetId > 0
-      ? editingTargetId
-      : null;
-  const profile = useWorkoutStore((state) => state.profile);
-  const draft = useCustomSplitDraftStore((state) => state.draft);
-  const activeWorkoutId = useCustomSplitDraftStore((state) => state.activeWorkoutId);
-  const initializeDraft = useCustomSplitDraftStore((state) => state.initializeDraft);
-  const hydrateDraftForEdit = useCustomSplitDraftStore((state) => state.hydrateDraftForEdit);
-  const editingSplitId = useCustomSplitDraftStore((state) => state.editingSplitId);
-  const discardDraft = useCustomSplitDraftStore((state) => state.discardDraft);
-  const selectWorkout = useCustomSplitDraftStore((state) => state.selectWorkout);
-  const addWorkout = useCustomSplitDraftStore((state) => state.addWorkout);
-  const duplicateWorkout = useCustomSplitDraftStore((state) => state.duplicateWorkout);
-  const deleteWorkout = useCustomSplitDraftStore((state) => state.deleteWorkout);
-  const setWorkoutCustomName = useCustomSplitDraftStore((state) => state.setWorkoutCustomName);
-  const toggleMuscleGroup = useCustomSplitDraftStore((state) => state.toggleMuscleGroup);
-  const toggleExercise = useCustomSplitDraftStore((state) => state.toggleExercise);
-  const removeExercise = useCustomSplitDraftStore((state) => state.removeExercise);
-  const reorderExercise = useCustomSplitDraftStore((state) => state.reorderExercise);
-  const setPrefillEnabled = useCustomSplitDraftStore((state) => state.setPrefillEnabled);
-  const mergePrefill = useCustomSplitDraftStore((state) => state.mergePrefill);
-
-  const [catalog, setCatalog] = useState(() => readExerciseCatalogSync());
-  const [exerciseQuery, setExerciseQuery] = useState('');
-  const [contextMenu, setContextMenu] = useState<{
-    workoutId: string;
-    anchorX: number;
-    anchorY: number;
-  } | null>(null);
+  const params = useLocalSearchParams<{ splitId?: string; source?: CustomSplitSource }>();
+  const state = useCustomSplitDraftStore();
+  useMuscleColors(state => state.preferences);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [conflict, setConflict] = useState(false);
+  const [retry, setRetry] = useState(0);
   const [reordering, setReordering] = useState(false);
+  const [undo, setUndo] = useState<{ dayId: string; exercise: DraftExercise; index: number } | null>(null);
   const scrollRef = useAnimatedRef<Animated.ScrollView>();
-  // Measured separately from the ScrollView itself: only a host View exposes
-  // measureInWindow, and the drag needs window coordinates for its edge zones.
-  const scrollAreaRef = useRef<View>(null);
+  const scrollArea = useRef<View>(null);
   const scrollOffset = useSharedValue(0);
   const maxScrollOffset = useSharedValue(0);
-  const handleScroll = useAnimatedScrollHandler((event) => {
-    scrollOffset.value = event.contentOffset.y;
-  });
-  const scrollViewportHeight = useRef(0);
-  const scrollContentHeight = useRef(0);
-
-  const measureScrollViewport = useCallback(
-    () =>
-      new Promise<{ top: number; bottom: number }>((resolve) => {
-        const node = scrollAreaRef.current;
-        if (!node) {
-          resolve({ top: 0, bottom: 0 });
-          return;
-        }
-        node.measureInWindow((_x: number, y: number, _width: number, height: number) => {
-          resolve({ top: y, bottom: y + height });
-        });
-      }),
-    []
-  );
-
-  useFocusEffect(
-    useCallback(() => {
-      setCatalog(readExerciseCatalogSync());
-    }, [])
-  );
-
-  const leaveMissingSplit = useCallback(() => {
-    Alert.alert(
-      'Split unavailable',
-      'That split is no longer saved on this device.'
-    );
-    router.replace('/your-splits');
-  }, [router]);
+  const viewportHeight = useRef(0);
+  const onScroll = useAnimatedScrollHandler(event => { scrollOffset.value = event.contentOffset.y; });
+  const measureViewport = useCallback(() => new Promise<{ top: number; bottom: number }>(resolve => {
+    if (!scrollArea.current) return resolve({ top: 0, bottom: 0 });
+    scrollArea.current.measureInWindow((_x, y, _w, height) => resolve({ top: y, bottom: y + height }));
+  }), []);
 
   useEffect(() => {
-    if (draft || !profile) return;
+    if (!state.hydrated) return;
     let cancelled = false;
-
-    if (splitId !== undefined) {
-      // Edit mode: hydrate the saved split into the transient draft. Nothing is
-      // written back to SQLite until Review saves.
-      if (editTarget === null) {
-        leaveMissingSplit();
+    const load = async () => {
+      const store = useCustomSplitDraftStore.getState();
+      const target = params.splitId === undefined ? null : Number(params.splitId);
+      const stackPlan = params.source === 'stack';
+      if (target !== null && (!Number.isSafeInteger(target) || target <= 0)) throw new Error('This routine link is invalid.');
+      if (store.draft && store.editingSplitId === target && (target !== null || (store.source === 'stack') === stackPlan)) {
+        if (target !== null) {
+          const saved = await getCustomSplitDetailAsync(target);
+          if (!cancelled) setConflict(!saved || splitRevision(saved) !== store.sourceRevision);
+        }
         return;
       }
-      void getCustomSplitDetailAsync(editTarget).then((split) => {
-        if (cancelled) return;
-        if (!split) {
-          leaveMissingSplit();
-          return;
-        }
-        hydrateDraftForEdit(split);
-      });
-      return () => { cancelled = true; };
-    }
-
-    void getNextCustomSplitNameAsync().then((name) => {
-      if (!cancelled) initializeDraft(name, profile.weeklyGoal, source ?? 'library');
-    });
+      store.closeDraft();
+      const saved = target === null ? null : await getCustomSplitDetailAsync(target);
+      if (cancelled) return;
+      if (store.resumeDraft(target, stackPlan ? 'stack' : undefined)) {
+        const resumed = useCustomSplitDraftStore.getState();
+        setConflict(target !== null && (!saved || splitRevision(saved) !== resumed.sourceRevision));
+      } else if (saved) store.hydrateDraftForEdit(saved);
+      else if (target !== null) throw new Error('This routine is no longer saved on this device.');
+      else if (stackPlan) {
+        // Stack's plan has never been edited: start from the workouts it currently generates.
+        const profile = useWorkoutStore.getState().profile;
+        if (!profile) throw new Error('A profile is required to edit Stack’s plan.');
+        store.initializeStackPlanDraft(buildProgramLineup(getProgramFrequency(profile), profile.threeDayStructure, {
+          variants: readArchetypeVariantsSync, nextVariant: getNextArchetypeVariant, exercises: readArchetypeTemplateCatalogSync,
+        }));
+      } else {
+        const name = await getNextCustomSplitNameAsync();
+        if (!cancelled) store.initializeDraft(name, 1, params.source === 'onboarding' ? 'onboarding' : 'library');
+      }
+    };
+    void load().catch(e => { if (!cancelled) setError('Couldn’t open this routine. Try again.'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [
-    draft,
-    editTarget,
-    hydrateDraftForEdit,
-    initializeDraft,
-    leaveMissingSplit,
-    profile,
-    source,
-    splitId,
-  ]);
+  }, [params.splitId, params.source, state.hydrated, retry]);
 
-  if (!draft || !activeWorkoutId || !profile) {
-    return <SafeAreaView style={styles.safeArea} />;
-  }
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
+  }, [state.activeWorkoutId, scrollRef]);
 
-  const activeWorkoutIndex = draft.workouts.findIndex((workout) => workout.id === activeWorkoutId);
-  const activeWorkout = draft.workouts[activeWorkoutIndex] ?? draft.workouts[0];
-  const workoutLetter = getWorkoutLetter(activeWorkoutIndex);
-  const weeklySequence = getWeeklyArchetypeSequence(profile.weeklyGoal, profile.experienceLevel);
-  const archetype = weeklySequence[activeWorkoutIndex];
-  const recommendation = archetype
-    ? getDraftPrefillRecommendation(
-        weeklySequence,
-        activeWorkoutIndex,
-        readArchetypeVariantsSync(archetype)
-      )
-    : null;
-  const hasAnyExercise = draft.workouts.some((workout) => workout.exercises.length > 0);
-  const hasExercises = activeWorkout.exercises.length > 0;
-  const canPrefillFromStack =
-    activeWorkout.selectedMuscleGroups.length === 0 && activeWorkout.exercises.length === 0;
-  const selectedIds = new Set(activeWorkout.exercises.map((exercise) => exercise.id));
-  const displayName = getWorkoutDisplayName(activeWorkout);
-  const contextWorkoutIndex = contextMenu
-    ? draft.workouts.findIndex((workout) => workout.id === contextMenu.workoutId)
-    : -1;
+  useEffect(() => () => useCustomSplitDraftStore.getState().closeDraft(), []);
+  const headerOptions = useMemo(() => {
+    const disabled = loading || !state.draft || conflict || !!error;
+    const openReview = () => router.push('/custom-split/review');
+    const review = <Action title="Review routine" compact pill disabled={disabled} onPress={openReview} />;
+    return { headerShown: true, title: state.source === 'stack' ? 'Edit Stack’s plan' : state.editingSplitId !== null ? 'Edit routine' : 'New routine',
+      headerBackButtonDisplayMode: 'minimal' as const,
+      headerLeft: Platform.OS === 'ios' ? undefined : () => <Action title="Back" compact
+        icon={<ChevronLeft color={c.bone} size={20} />} onPress={() => router.back()} />,
+      unstable_headerLeftItems: Platform.OS === 'ios' ? () => [{ type: 'button' as const,
+        label: 'Back', accessibilityLabel: 'Back to Your routines',
+        icon: { type: 'sfSymbol' as const, name: 'chevron.left' as const }, onPress: () => router.back() }] : undefined,
+      headerRight: () => review,
+      // UIKit supplies the single pill background and its native press/accessibility behavior.
+      unstable_headerRightItems: Platform.OS === 'ios' ? () => [{ type: 'button' as const,
+        label: 'Review routine', accessibilityLabel: 'Review routine', variant: 'plain' as const,
+        labelStyle: { fontFamily: f.uiSemiBold, fontSize: 15 }, tintColor: c.bone,
+        disabled, onPress: openReview }] : undefined };
+  }, [state.editingSplitId, state.source, state.draft, loading, conflict, error, router]);
+  const workout = state.draft?.workouts.find(day => day.id === state.activeWorkoutId);
+  if (loading || !state.hydrated || !workout || !state.draft || error) return <SafeAreaView edges={['left', 'right', 'bottom']} style={ui.screen}>
+    <Stack.Screen options={headerOptions} />
+    <View style={ui.content}>{error || state.storageError ? <><Text style={ui.error}>{error ?? state.storageError}</Text><Action title="Try again" onPress={() => { setLoading(true); setError(null); if (!state.hydrated) void useCustomSplitDraftStore.persist.rehydrate(); else setRetry(value => value + 1); }} /></> : <ActivityIndicator color={c.ash} accessibilityLabel="Loading your routine" />}</View>
+  </SafeAreaView>;
 
-  const openWorkoutMenu = (workoutId: string, event: GestureResponderEvent) => {
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    selectWorkout(workoutId);
-    setContextMenu({
-      workoutId,
-      anchorX: event.nativeEvent.pageX,
-      anchorY: Math.max(
-        180,
-        Math.min(event.nativeEvent.pageY + 42, Math.max(180, windowHeight - 360))
-      ),
-    });
+  const index = state.draft.workouts.indexOf(workout);
+  const title = getWorkoutDisplayName(workout) || workoutEntryLabel(index);
+  const add = () => { state.openPicker(workout.id); router.push('/custom-split/exercises'); };
+  const removeDay = () => {
+    if (state.draft!.workouts.length <= 1) return;
+    const remove = () => state.deleteWorkout(workout.id);
+    if (!workout.exercises.length) remove();
+    else Alert.alert(`Delete ${title}?`, 'This removes the workout from your draft. Saved workout history stays intact.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete workout', style: 'destructive', onPress: remove }]);
   };
-
-  const normalizedExerciseQuery = exerciseQuery.trim().toLowerCase();
-  const catalogByGroup = CUSTOM_SPLIT_MUSCLE_GROUPS.reduce<
-    Record<CustomSplitMuscleGroup, DraftExercise[]>
-  >((groups, group) => {
-    groups[group] = catalog.filter(
-      (exercise) =>
-        getMuscleGroupForExercise(exercise) === group &&
-        !selectedIds.has(exercise.id) &&
-        exercise.name.toLowerCase().includes(normalizedExerciseQuery)
-    );
-    return groups;
-  }, {} as Record<CustomSplitMuscleGroup, DraftExercise[]>);
-
-  const handlePrefill = () => {
-    if (!recommendation) return;
-    void Haptics.selectionAsync();
-    if (activeWorkout.prefillEnabled) {
-      setPrefillEnabled(activeWorkout.id, false);
+  const recover = () => {
+    if (state.drafts.new) {
+      Alert.alert('Finish your other draft first', 'Your new routine draft is also saved. Finish or discard it in Your routines before recovering this edit as a new routine.');
       return;
     }
-    mergePrefill(
-      activeWorkout.id,
-      readArchetypeTemplateCatalogSync(recommendation.archetype, recommendation.variant)
-    );
+    state.recoverAsNew(); setConflict(false);
+    router.setParams({ splitId: undefined });
   };
-
-  return (
-    <SafeAreaView style={styles.safeArea}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.screen}>
-        <View style={styles.header}>
-          <Pressable
-            accessibilityLabel={
-              editingSplitId === null ? 'Back to split choice' : 'Back to your splits'
-            }
-            accessibilityRole="button"
-            hitSlop={8}
-            onPress={() => {
-              discardDraft();
-              router.back();
-            }}
-            style={styles.circleButton}
-          >
-            <ChevronLeft color={redesignColors.bone} size={22} strokeWidth={2.3} />
-          </Pressable>
-          <Text numberOfLines={1} style={styles.splitName}>{draft.name}</Text>
-          <Pressable
-            accessibilityLabel="Review custom split"
-            accessibilityRole="button"
-            accessibilityState={{ disabled: !hasAnyExercise }}
-            disabled={!hasAnyExercise}
-            onPress={() => {
-              void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              router.push('/custom-split/review');
-            }}
-            style={[
-              styles.completeButton,
-              hasAnyExercise && styles.completeButtonEnabled,
-            ]}
-          >
-            <Check
-              color={hasAnyExercise ? redesignColors.ink : redesignColors.ashDim}
-              size={27}
-              strokeWidth={3}
-            />
-          </Pressable>
+  return <SafeAreaView edges={['left', 'right', 'bottom']} style={ui.screen}>
+    <Stack.Screen options={headerOptions} />
+    <WorkoutTabs workouts={state.draft.workouts} activeWorkoutId={workout.id}
+      onSelect={state.selectWorkout} onAdd={state.addWorkout} />
+    <View ref={scrollArea} style={{ flex: 1 }}>
+      <Animated.ScrollView ref={scrollRef} onScroll={onScroll} scrollEventThrottle={16} scrollEnabled={!reordering}
+        onLayout={event => { viewportHeight.current = event.nativeEvent.layout.height; }}
+        onContentSizeChange={(_w, height) => { maxScrollOffset.value = Math.max(0, height - viewportHeight.current); }}
+        contentContainerStyle={ui.content}>
+        {state.storageError ? <View><Text accessibilityRole="alert" style={ui.error}>{state.storageError}</Text><Action title="Retry saving draft" onPress={() => useCustomSplitDraftStore.setState({})} /></View> : null}
+        {conflict ? <View style={ui.card}><Text style={ui.subtitle}>Your saved routine changed</Text><Text style={ui.body}>This draft is safe. Save it as a new routine to keep both versions.</Text><Action title="Recover draft" onPress={recover} /><Action title="Discard this draft" onPress={() => Alert.alert('Discard this draft?', 'Your saved routine and workout history stay intact.', [
+          { text: 'Keep draft', style: 'cancel' }, { text: 'Discard', style: 'destructive', onPress: () => { state.discardDraft(); router.replace('/your-splits'); } },
+        ])} /></View> : null}
+        <View style={ui.section}>
+          <Text style={ui.label}>{state.draft.name} · {workoutEntryLabel(index)} of {state.draft.workouts.length}</Text>
+          <Text accessibilityRole="header" style={ui.title}>{title}</Text>
+          <View style={[ui.wrap, { justifyContent: 'space-between' }]}>
+            <Action title="Settings" secondary icon={<SlidersHorizontal color={c.ash} size={18} />}
+              onPress={() => router.push('/custom-split/personalize')} />
+            <Pressable accessibilityRole="button" accessibilityLabel={`More actions for ${title}`}
+              style={({ pressed }) => [ui.iconButton, pressed && ui.pressed]}
+              onPress={() => showActions(title, [
+                { title: 'Duplicate workout', onPress: () => state.duplicateWorkout(workout.id) },
+                ...(state.draft!.workouts.length > 1 ? [{ title: 'Delete workout', destructive: true, onPress: removeDay }] : []),
+              ])}><MoreHorizontal color={c.ash} size={22} /></Pressable>
+          </View>
         </View>
-
-        <WorkoutTabs
-          activeWorkoutId={activeWorkout.id}
-          contextWorkoutId={contextMenu?.workoutId ?? null}
-          onAdd={addWorkout}
-          onLongPress={openWorkoutMenu}
-          onSelect={selectWorkout}
-          workouts={draft.workouts}
-        />
-
-        <View ref={scrollAreaRef} style={styles.scrollArea}>
-          <Animated.ScrollView
-            contentContainerStyle={styles.scrollContent}
-            keyboardShouldPersistTaps="handled"
-            onContentSizeChange={(_width, height) => {
-              scrollContentHeight.current = height;
-              maxScrollOffset.value = Math.max(0, height - scrollViewportHeight.current);
-            }}
-            onLayout={(event) => {
-              scrollViewportHeight.current = event.nativeEvent.layout.height;
-              maxScrollOffset.value = Math.max(0, scrollContentHeight.current - scrollViewportHeight.current);
-            }}
-            onScroll={handleScroll}
-            ref={scrollRef}
-            scrollEnabled={!reordering}
-            scrollEventThrottle={16}
-            showsVerticalScrollIndicator={false}
-            style={styles.scroll}
-          >
-            {canPrefillFromStack ? (
-              <PrefillControl
-                enabled={activeWorkout.prefillEnabled}
-                onToggle={handlePrefill}
-                unavailable={!recommendation}
-                workoutLetter={workoutLetter}
-              />
-            ) : null}
-
-            <WorkoutName
-              customName={activeWorkout.customName}
-              displayName={displayName}
-              hasExercises={hasExercises}
-              key={activeWorkout.id}
-              onChange={(value) => setWorkoutCustomName(activeWorkout.id, value)}
-            />
-
-            {!hasExercises ? <Text style={styles.muscleLabel}>MUSCLE GROUPS</Text> : null}
-            <MuscleFilters
-              onToggle={(group) => toggleMuscleGroup(activeWorkout.id, group)}
-              selected={activeWorkout.selectedMuscleGroups}
-            />
-
-            <SelectedExerciseList
-              scrollRef={scrollRef}
-              scrollOffset={scrollOffset}
-              maxScrollOffset={maxScrollOffset}
-              exercises={activeWorkout.exercises}
-              // Namespaced: the sibling WorkoutName is already keyed by the
-              // raw workout id, and sibling keys must be unique.
-              key={`selected-${activeWorkout.id}`}
-              measureViewport={measureScrollViewport}
-              onAdd={() => router.push({
-                pathname: '/custom-split/new-exercise',
-                params: { workoutId: activeWorkout.id },
-              })}
-              onDragStateChange={setReordering}
-              onRemove={(exerciseId) => removeExercise(activeWorkout.id, exerciseId)}
-              onReorder={(fromIndex, toIndex) =>
-                reorderExercise(activeWorkout.id, fromIndex, toIndex)
-              }
-            />
-
-            {activeWorkout.selectedMuscleGroups.length === 0 ? (
-              <View style={styles.emptyState}>
-                <List color={redesignColors.ashDim} size={32} strokeWidth={1.8} />
-                <Text style={styles.emptyStateText}>
-                  Pick a muscle group and its{`\n`}exercises appear here.
-                </Text>
-              </View>
-            ) : (
-              <>
-                <ExerciseSearchInput value={exerciseQuery} onChangeText={setExerciseQuery} />
-                {activeWorkout.selectedMuscleGroups.every((group) => catalogByGroup[group].length === 0) ? (
-                  <Text style={styles.emptyStateText}>
-                    {normalizedExerciseQuery
-                      ? 'No matching exercises in the selected muscle groups.'
-                      : 'All exercises in the selected muscle groups are already in this workout.'}
-                  </Text>
-                ) : null}
-                {activeWorkout.selectedMuscleGroups.map((group) =>
-                  catalogByGroup[group].length > 0 ? (
-                    <CatalogSection
-                      exercises={catalogByGroup[group]}
-                      group={group}
-                      key={group}
-                      onToggle={(exercise) => {
-                        void Haptics.selectionAsync();
-                        toggleExercise(activeWorkout.id, exercise);
-                      }}
-                      selectedIds={selectedIds}
-                    />
-                  ) : null
-                )}
-              </>
-            )}
-
-          </Animated.ScrollView>
-        </View>
-
-      </KeyboardAvoidingView>
-
-      {contextMenu && contextWorkoutIndex >= 0 ? (
-        <WorkoutContextMenu
-          anchorX={contextMenu.anchorX}
-          anchorY={contextMenu.anchorY}
-          canDelete={draft.workouts.length > 1}
-          onClose={() => setContextMenu(null)}
-          onDelete={() => {
-            void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-            deleteWorkout(contextMenu.workoutId);
-            setContextMenu(null);
-          }}
-          onDuplicate={() => {
-            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            duplicateWorkout(contextMenu.workoutId);
-            setContextMenu(null);
-          }}
-          workoutCount={draft.workouts.length}
-          workoutIndex={contextWorkoutIndex}
-        />
-      ) : null}
-    </SafeAreaView>
-  );
+        {workout.exercises.length ? <SelectedExerciseList key={workout.id} exercises={workout.exercises}
+          scrollRef={scrollRef} scrollOffset={scrollOffset} maxScrollOffset={maxScrollOffset} measureViewport={measureViewport}
+          onDragStateChange={setReordering} onRemove={id => {
+            const position = workout.exercises.findIndex(exercise => exercise.id === id);
+            setUndo({ dayId: workout.id, exercise: workout.exercises[position], index: position }); state.removeExercise(workout.id, id);
+          }} onReorder={(from, to) => state.reorderExercise(workout.id, from, to)} /> :
+          <View style={[ui.card, { padding: 24, gap: 16 }]}>
+            <StackMark />
+            <Text style={ui.subtitle}>Choose your exercises.</Text>
+            <Text style={ui.body}>Add the exercises you want to train, in the order you want to do them.</Text>
+            <Action title="Use a Stack workout" secondary onPress={() => router.push('/custom-split/template')} />
+          </View>}
+        {undo && undo.dayId === workout.id ? <View accessibilityLiveRegion="polite" style={[ui.card, ui.row]}><Text style={[ui.body, { flex: 1 }]}>{undo.exercise.name} removed</Text>
+          <Action title="Undo" onPress={() => { state.restoreExercise(undo.dayId, undo.exercise, undo.index); setUndo(null); }} /></View> : null}
+      </Animated.ScrollView>
+    </View>
+    <View style={ui.dock}><Action title="Add exercises" primary icon={<Plus color={c.ink} size={20} />} onPress={add} /></View>
+  </SafeAreaView>;
 }
-
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: redesignColors.ink },
-  screen: { flex: 1 },
-  header: {
-    height: 64,
-    paddingHorizontal: 28,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 18,
-  },
-  circleButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: redesignColors.surface,
-    borderWidth: 1.5,
-    borderColor: redesignColors.border,
-  },
-  splitName: {
-    minWidth: 0,
-    flex: 1,
-    color: redesignColors.bone,
-    fontFamily: redesignFonts.uiBold,
-    fontSize: 25,
-    lineHeight: 30,
-    letterSpacing: -0.45,
-  },
-  completeButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: redesignColors.raised,
-  },
-  completeButtonEnabled: {
-    backgroundColor: splitColors.chest,
-    shadowColor: splitColors.chest,
-    shadowOpacity: 0.34,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 6,
-  },
-  // The tab strip is a horizontal ScrollView, which clips to its own bounds —
-  // without this vertical padding the selected tab's glow is sheared off along
-  // a hard horizontal line that reads as a mask across the screen.
-  tabs: { flexGrow: 0 },
-  tabsContent: { paddingHorizontal: 28, paddingTop: 10, paddingBottom: 18, gap: 10 },
-  tabsContentCompact: { gap: 7 },
-  workoutTab: {
-    width: 50,
-    height: 50,
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: redesignColors.surface,
-    borderWidth: 1.5,
-    borderColor: redesignColors.border,
-  },
-  workoutTabSelected: {
-    backgroundColor: splitColors.chest,
-    borderColor: splitColors.chest,
-    shadowColor: splitColors.chest,
-    shadowOpacity: 0.34,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 6,
-  },
-  workoutTabContext: {
-    backgroundColor: alpha(splitColors.core, '24'),
-    borderColor: splitColors.core,
-    shadowColor: splitColors.core,
-    shadowOpacity: 0.4,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 8,
-  },
-  workoutTabCompact: { width: 45, height: 45, borderRadius: 15 },
-  workoutTabText: {
-    color: redesignColors.ash,
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 21,
-  },
-  workoutTabTextSelected: { color: redesignColors.ink },
-  workoutTabTextContext: { color: redesignColors.bone },
-  addWorkoutTab: {
-    width: 50,
-    height: 50,
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1.5,
-    borderStyle: 'dashed',
-    borderColor: redesignColors.border,
-  },
-  scrollArea: { flex: 1 },
-  scroll: { flex: 1 },
-  scrollContent: { paddingHorizontal: 28, paddingBottom: 28 },
-  prefillCard: {
-    minHeight: 96,
-    paddingHorizontal: 24,
-    paddingVertical: 16,
-    borderRadius: 22,
-    borderWidth: 1.5,
-    borderColor: redesignColors.border,
-    backgroundColor: redesignColors.surface,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 18,
-    marginBottom: 14,
-  },
-  prefillCardCompact: { minHeight: 54, paddingVertical: 10, marginTop: 12, marginBottom: 0 },
-  prefillCopy: { minWidth: 0, flex: 1 },
-  prefillTitle: {
-    color: redesignColors.bone,
-    fontFamily: redesignFonts.uiBold,
-    fontSize: 19,
-    lineHeight: 24,
-  },
-  prefillTitleCompact: { fontSize: 16, lineHeight: 20 },
-  prefillDescription: {
-    marginTop: 5,
-    color: redesignColors.ash,
-    fontFamily: redesignFonts.ui,
-    fontSize: 15,
-    lineHeight: 19,
-  },
-  unavailable: { opacity: 0.44 },
-  switchTrack: {
-    width: 56,
-    height: 34,
-    padding: 4,
-    borderRadius: 17,
-    backgroundColor: redesignColors.raised,
-    justifyContent: 'center',
-  },
-  switchTrackEnabled: { backgroundColor: alpha(splitColors.chest, '66') },
-  switchThumb: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: redesignColors.ashDim,
-  },
-  switchThumbEnabled: { alignSelf: 'flex-end', backgroundColor: splitColors.chest },
-  nameInputShell: {
-    height: 66,
-    paddingHorizontal: 24,
-    borderRadius: 22,
-    borderWidth: 1.5,
-    borderColor: redesignColors.border,
-    backgroundColor: redesignColors.ink,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-  },
-  nameInput: {
-    minWidth: 0,
-    flex: 1,
-    color: redesignColors.bone,
-    fontFamily: redesignFonts.uiSemiBold,
-    fontSize: 19,
-    // Zero vertical padding lets the shell's alignItems: 'center' place the
-    // text and caret on the same centre line as the OPTIONAL label.
-    paddingVertical: 0,
-    includeFontPadding: false,
-    textAlignVertical: 'center',
-  },
-  optionalLabel: {
-    color: redesignColors.ashDim,
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 12,
-    lineHeight: 16,
-    letterSpacing: 1.8,
-    includeFontPadding: false,
-  },
-  nameHelper: {
-    marginTop: 8,
-    marginLeft: 7,
-    color: redesignColors.ashDim,
-    fontFamily: redesignFonts.ui,
-    fontSize: 14,
-    lineHeight: 19,
-  },
-  nameDisplay: {
-    minHeight: 70,
-    paddingHorizontal: 24,
-    borderRadius: 22,
-    borderWidth: 1.5,
-    borderColor: redesignColors.border,
-    backgroundColor: redesignColors.surface,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  nameDisplayText: {
-    minWidth: 0,
-    flex: 1,
-    color: redesignColors.bone,
-    fontFamily: redesignFonts.uiBold,
-    fontSize: 24,
-    letterSpacing: -0.35,
-  },
-  renameButton: {
-    height: 44,
-    flexDirection: 'row',
-    gap: 5,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  renameText: {
-    color: splitColors.chest,
-    fontFamily: redesignFonts.uiSemiBold,
-    fontSize: 13,
-  },
-  muscleLabel: {
-    marginTop: 22,
-    color: redesignColors.ashDim,
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 13,
-    lineHeight: 18,
-    letterSpacing: 2.2,
-  },
-  filterWrap: {
-    marginTop: 12,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    columnGap: 10,
-    rowGap: 10,
-  },
-  filterChip: {
-    minHeight: 40,
-    paddingHorizontal: 17,
-    borderRadius: 20,
-    borderWidth: 1.5,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  filterChipText: { fontFamily: redesignFonts.uiSemiBold, fontSize: 16 },
-  emptyState: {
-    minHeight: 180,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 14,
-  },
-  emptyStateText: {
-    color: redesignColors.ashDim,
-    fontFamily: redesignFonts.ui,
-    fontSize: 17,
-    lineHeight: 24,
-    textAlign: 'center',
-  },
-  catalogSection: { marginTop: 24 },
-  catalogHeadingRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
-  catalogHeadingDot: { width: 8, height: 8, borderRadius: 4 },
-  catalogHeading: { fontFamily: redesignFonts.monoBold, fontSize: 13, letterSpacing: 2.1 },
-  catalogRow: {
-    minHeight: 58,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: redesignColors.border,
-  },
-  checkbox: {
-    width: 34,
-    height: 34,
-    borderRadius: 11,
-    borderWidth: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  catalogExerciseName: {
-    minWidth: 0,
-    flex: 1,
-    color: redesignColors.bone,
-    fontFamily: redesignFonts.uiSemiBold,
-    fontSize: 18,
-  },
-  equipmentText: {
-    maxWidth: 92,
-    color: redesignColors.ashDim,
-    fontFamily: redesignFonts.mono,
-    fontSize: 11,
-    letterSpacing: 0.8,
-  },
-  menuModal: { flex: 1 },
-  menuBackdrop: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0, 0, 0, 0.76)',
-  },
-  workoutMenu: {
-    position: 'absolute',
-    left: 28,
-    right: 28,
-    paddingHorizontal: 14,
-    paddingTop: 18,
-    paddingBottom: 20,
-    borderRadius: 23,
-    borderCurve: 'continuous',
-    borderWidth: 1.5,
-    borderColor: redesignColors.border,
-    backgroundColor: redesignColors.raised,
-    shadowColor: '#000000',
-    shadowOpacity: 0.38,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 14 },
-    elevation: 14,
-  },
-  menuArrow: {
-    position: 'absolute',
-    top: -8,
-    width: 18,
-    height: 18,
-    transform: [{ rotate: '45deg' }],
-    borderLeftWidth: 1.5,
-    borderTopWidth: 1.5,
-    borderColor: redesignColors.border,
-    backgroundColor: redesignColors.raised,
-  },
-  menuAction: {
-    minHeight: 58,
-    paddingHorizontal: 12,
-    borderRadius: 15,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 18,
-  },
-  menuActionText: {
-    color: redesignColors.bone,
-    fontFamily: redesignFonts.uiBold,
-    fontSize: 19,
-  },
-  menuDivider: {
-    height: StyleSheet.hairlineWidth,
-    marginHorizontal: 8,
-    marginVertical: 8,
-    backgroundColor: redesignColors.border,
-  },
-  deleteAction: {
-    minHeight: 62,
-    paddingHorizontal: 12,
-    borderRadius: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 18,
-    backgroundColor: alpha(splitColors.core, '1F'),
-  },
-  deleteActionDisabled: { opacity: 0.42 },
-  deleteActionText: {
-    color: splitColors.core,
-    fontFamily: redesignFonts.uiBold,
-    fontSize: 19,
-  },
-  deleteExplanation: {
-    marginTop: 8,
-    paddingHorizontal: 16,
-    color: redesignColors.ash,
-    fontFamily: redesignFonts.ui,
-    fontSize: 15,
-    lineHeight: 21,
-  },
-});

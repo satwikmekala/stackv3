@@ -20,16 +20,18 @@ export const formatWeight = (kgValue: number, unit: WeightUnit): string => {
 
 // Returns the step already in the active unit — callers never convert.
 export const getWeightIncrement = (
-  profile: Pick<UserProfile, 'weightUnit' | 'weightIncrement' | 'weightIncrementLbs'>
-): number => (profile.weightUnit === 'lbs' ? profile.weightIncrementLbs : profile.weightIncrement);
+  profile: Pick<UserProfile, 'weightUnit' | 'weightIncrement' | 'weightIncrementLbs'>,
+  unit: WeightUnit = profile.weightUnit
+): number => (unit === 'lbs' ? profile.weightIncrementLbs : profile.weightIncrement);
 
 // Progression and persistence operate on kg-canonical values, even when the
 // configured increment is native to the user's display unit.
 export const getWeightIncrementKg = (
-  profile: Pick<UserProfile, 'weightUnit' | 'weightIncrement' | 'weightIncrementLbs'>
+  profile: Pick<UserProfile, 'weightUnit' | 'weightIncrement' | 'weightIncrementLbs'>,
+  unit: WeightUnit = profile.weightUnit
 ): number => {
-  const increment = getWeightIncrement(profile);
-  return profile.weightUnit === 'lbs' ? lbsToKg(increment) : increment;
+  const increment = getWeightIncrement(profile, unit);
+  return unit === 'lbs' ? lbsToKg(increment) : increment;
 };
 
-export const unitLabel = (unit: WeightUnit): string => (unit === 'lbs' ? 'lbs' : 'kg');
+export const unitLabel = (unit: WeightUnit): string => (unit === 'lbs' ? 'lb' : 'kg');
