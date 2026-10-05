@@ -1,0 +1,12 @@
+{
+  "bundle": "com.liftwithstack.onboardingpreview",
+  "schema": 22,
+  "counts": {
+    "profile": 1,
+    "sessions": 0,
+    "session_exercises": 0,
+    "sets": 0,
+    "custom_splits": 0
+  },
+  "seed": "No-program QA profile; isolated container only"
+}

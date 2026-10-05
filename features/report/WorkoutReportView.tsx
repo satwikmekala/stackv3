@@ -49,7 +49,7 @@ function Tags({ set, accent }: { set: ReportSet; accent: string }) {
       {set.record ? (
         <View style={[styles.tag, styles.tagRecord]}>
           <View style={[styles.tagDot, { backgroundColor: accent }]} />
-          <Text {...T} style={[styles.tagText, styles.tagRecordText]}>NEW BEST</Text>
+          <Text {...T} accessibilityLabel="Personal record" style={[styles.tagText, styles.tagRecordText]}>PR</Text>
         </View>
       ) : null}
     </>
@@ -90,7 +90,7 @@ function ExerciseHeader({ exercise, showHint }: { exercise: ReportExercise; show
         ) : null}
       </View>
       {exercise.skipped ? (
-        <Text {...T} style={styles.exerciseAside}>Skipped</Text>
+        <Text {...T} style={styles.exerciseAside}>{exercise.notLogged ? 'Not logged' : 'Skipped'}</Text>
       ) : exercise.volume ? (
         <Text {...T} style={styles.exerciseAside}>{exercise.volume}</Text>
       ) : null}
@@ -129,7 +129,7 @@ function CompactSets({ exercise, accent }: { exercise: ReportExercise; accent: s
           {set.record ? (
             <View style={styles.cellTagRow}>
               <View style={[styles.tagDot, { backgroundColor: accent }]} />
-              <Text {...T} style={[styles.cellTag, styles.tagRecordText]}>NEW BEST</Text>
+              <Text {...T} accessibilityLabel="Personal record" style={[styles.cellTag, styles.tagRecordText]}>PR</Text>
             </View>
           ) : set.kind !== 'working' && !set.skipped ? (
             <Text {...T} style={styles.cellTag}>{REPORT_SET_TAGS[set.kind]}</Text>
@@ -162,7 +162,7 @@ export const WorkoutReportView = forwardRef<View, WorkoutReportViewProps>(functi
       collapsable={false}
       onLayout={onLayout}
       accessible
-      accessibilityLabel={workoutReportText(report)}
+      accessibilityLabel={workoutReportText(report, true)}
       style={styles.page}
     >
       <View style={[styles.band, { backgroundColor: report.accent }]} />
@@ -203,6 +203,14 @@ export const WorkoutReportView = forwardRef<View, WorkoutReportViewProps>(functi
             ) : (
               <ComfortableSets exercise={exercise} accent={report.accent} />
             )}
+            {exercise.notes.length > 0 ? (
+              <View style={styles.exerciseNotes}>
+                <Text {...T} style={styles.exerciseNotesLabel}>NOTES</Text>
+                {exercise.notes.map((note, noteIndex) => (
+                  <Text {...T} key={noteIndex} style={styles.exerciseNote}>{note}</Text>
+                ))}
+              </View>
+            ) : null}
           </View>
         ))}
       </View>
@@ -210,7 +218,7 @@ export const WorkoutReportView = forwardRef<View, WorkoutReportViewProps>(functi
       <View style={styles.footer}>
         <Text {...T} style={styles.wordmark}>stack</Text>
         {weighed ? (
-          <Text {...T} style={styles.footerMeta}>{report.unit === 'lbs' ? 'Weights in lbs' : 'Weights in kg'}</Text>
+          <Text {...T} style={styles.footerMeta}>{report.unit === 'lbs' ? 'Weights in lb' : 'Weights in kg'}</Text>
         ) : null}
       </View>
     </View>
@@ -353,6 +361,23 @@ const styles = StyleSheet.create({
     fontFamily: redesignFonts.mono,
     fontSize: 11,
     lineHeight: 21,
+  },
+  exerciseNotes: {
+    marginLeft: ORDINAL_WIDTH,
+    marginTop: 12,
+    gap: 6,
+  },
+  exerciseNotesLabel: {
+    color: REPORT_PAPER.soft,
+    fontFamily: redesignFonts.monoBold,
+    fontSize: 8.5,
+    letterSpacing: 1.2,
+  },
+  exerciseNote: {
+    color: REPORT_PAPER.ink,
+    fontFamily: redesignFonts.ui,
+    fontSize: 13,
+    lineHeight: 19,
   },
   setList: {
     marginTop: 6,

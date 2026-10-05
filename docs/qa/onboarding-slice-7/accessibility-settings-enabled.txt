@@ -1,0 +1,17 @@
+{
+    AXSSystemUIProcessAppSmartInvertEnabledPreference = 0;
+    AXSTeachableMomentsNotificationSeen =     {
+        DisplayTextSize = "26.0";
+    };
+    AccessibilityEnabled = 1;
+    ApplicationAccessibilityEnabled = 1;
+    DarkenSystemColors = 1;
+    EnhancedBackgroundContrastEnabled = 1;
+    GrayscaleDisplay = 0;
+    HearingAidCompliance = 0;
+    InvertColorsEnabled = 0;
+    PointerAllowAppCustomizationEnabled = 0;
+    PointerEffectScalingEnabled = 0;
+    PointerIncreasedContrastEnabled = 1;
+    ReduceMotionEnabled = 1;
+}

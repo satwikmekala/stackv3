@@ -1,3 +1,4 @@
+import { getProgramFrequency } from '@/store/trainingPreferences';
 import { useMemo, useState } from 'react';
 import {
   Pressable,
@@ -10,7 +11,7 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Check } from 'lucide-react-native';
 import Animated from 'react-native-reanimated';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/services/haptics';
 import {
   OnboardingBackButton,
   OnboardingNextButton,
@@ -118,7 +119,7 @@ export default function SplitChoiceScreen() {
   const workoutLabels = useMemo(() => {
     if (!profile) return [];
     return getWorkoutLabels(
-      getWeeklyArchetypeSequence(profile.weeklyGoal, profile.experienceLevel)
+      getWeeklyArchetypeSequence(getProgramFrequency(profile), profile.threeDayStructure)
     );
   }, [profile]);
 
@@ -132,7 +133,7 @@ export default function SplitChoiceScreen() {
     }
 
     if (!profile) return;
-    updateProfile({ activeSplitId: null, onboardingCompleted: true });
+    updateProfile({ programMode: 'stack', activeSplitId: null, onboardingCompleted: true });
     router.replace('/(tabs)');
   };
 

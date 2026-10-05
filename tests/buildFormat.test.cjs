@@ -22,16 +22,16 @@ function load(file) {
 const f = load('features/build/buildFormat.ts');
 
 test('dates: day, spoken day, weekday', () => {
-  assert.equal(f.formatDay('2026-09-14'), '14 SEP');
+  assert.equal(f.formatDay('2026-09-14'), "14 Sep");
   assert.equal(f.formatDayA11y('2026-09-14'), '14 September');
   assert.equal(f.formatWeekday('2026-09-14'), 'Mon');
   assert.equal(f.formatWeekday('2026-09-20T18:30:00'), 'Sun');
 });
 
 test('date ranges: same month, across months, across years, and the spoken form', () => {
-  assert.equal(f.formatDateRange('2026-09-14', '2026-09-20'), '14–20 SEP');
-  assert.equal(f.formatDateRange('2026-09-28', '2026-10-04'), '28 SEP–4 OCT');
-  assert.equal(f.formatDateRange('2026-12-28', '2027-01-03'), '28 DEC–3 JAN');
+  assert.equal(f.formatDateRange('2026-09-14', '2026-09-20'), "14–20 Sep");
+  assert.equal(f.formatDateRange('2026-09-28', '2026-10-04'), "28 Sep–4 Oct");
+  assert.equal(f.formatDateRange('2026-12-28', '2027-01-03'), "28 Dec–3 Jan");
   assert.equal(f.formatDateRangeA11y('2026-09-14', '2026-10-04'), '14 September to 4 October');
 });
 
@@ -41,34 +41,34 @@ test('spelled counts: words for 0–99, digits from 100', () => {
 });
 
 test('pluralisation: singular, plural, zero, explicit plural', () => {
-  assert.equal(f.countLabel(1, 'piece'), '1 piece');
-  assert.equal(f.countLabel(3, 'piece'), '3 pieces');
-  assert.equal(f.countLabel(0, 'piece'), '0 pieces');
+  assert.equal(f.countLabel(1, 'block'), "1 block");
+  assert.equal(f.countLabel(3, 'block'), "3 blocks");
+  assert.equal(f.countLabel(0, 'block'), "0 blocks");
   assert.equal(f.countLabel(2, 'PR', 'PRs'), '2 PRs');
   assert.deepEqual([1, 2].map(f.recordLabel), ['1 PR', '2 PRs']);
 });
 
 test('week accessibility label', () => {
   const week = { weekStart: '2026-09-14', weekEnd: '2026-09-20', pieces: [1, 2, 3, 4], metrics: { records: 1 } };
-  assert.equal(f.weekAccessibilityLabel(week), 'Week of 14 September (14–20 SEP), 4 pieces, 1 PR');
-  assert.equal(f.weekAccessibilityLabel({ ...week, pieces: [1], metrics: { records: 0 } }), 'Week of 14 September (14–20 SEP), 1 piece');
+  assert.equal(f.weekAccessibilityLabel(week), "Week of 14 September (14–20 Sep), 4 blocks, 1 personal record");
+  assert.equal(f.weekAccessibilityLabel({ ...week, pieces: [1], metrics: { records: 0 } }), "Week of 14 September (14–20 Sep), 1 block");
 });
 
 test('moved: session never uses tonnes, aggregate does; lb whole pounds; zero is null', () => {
-  assert.equal(f.formatMovedSession(5240, 'kg'), '5,240 KG');
-  assert.equal(f.formatMovedSession(840.4, 'kg'), '840 KG');
-  assert.equal(f.formatMovedSession(5240, 'lbs'), '11,552 LB');
-  assert.equal(f.formatMovedAggregate(5240, 'kg'), '5.2 T');
-  assert.equal(f.formatMovedAggregate(138200, 'kg'), '138.2 T');
-  assert.equal(f.formatMovedAggregate(999, 'kg'), '999 KG');
-  assert.equal(f.formatMovedAggregate(5240, 'lbs'), '11,552 LB');
+  assert.equal(f.formatMovedSession(5240, 'kg'), "5,240 kg");
+  assert.equal(f.formatMovedSession(840.4, 'kg'), "840 kg");
+  assert.equal(f.formatMovedSession(5240, 'lbs'), "11,552 lb");
+  assert.equal(f.formatMovedAggregate(5240, 'kg'), '5.2 t');
+  assert.equal(f.formatMovedAggregate(138200, 'kg'), '138.2 t');
+  assert.equal(f.formatMovedAggregate(999, 'kg'), "999 kg");
+  assert.equal(f.formatMovedAggregate(5240, 'lbs'), "11,552 lb");
   for (const format of [f.formatMovedSession, f.formatMovedAggregate]) { assert.equal(format(0, 'kg'), null); assert.equal(format(0, 'lbs'), null); }
 });
 
 test('load × reps: trims zeros, converts lb, bodyweight', () => {
   assert.equal(f.formatLoadReps(85, 5, 'kg'), '85 kg × 5');
   assert.equal(f.formatLoadReps(47.5, 8, 'kg'), '47.5 kg × 8');
-  assert.equal(f.formatLoadReps(85, 8, 'lbs'), '187.4 lbs × 8');
+  assert.equal(f.formatLoadReps(85, 8, 'lbs'), "187.4 lb × 8");
   assert.equal(f.formatLoadReps(0, 15, 'kg'), 'Bodyweight × 15');
 });
 

@@ -1,0 +1,63 @@
+{
+  "fill" : {
+    "solid" : "srgb:0.00000,0.00000,0.00000,1.00000"
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "glass" : false,
+          "hidden" : false,
+          "image-name" : "logo hard.png",
+          "name" : "logo hard",
+          "position" : {
+            "scale" : 1.8,
+            "translation-in-points" : [
+              -30.7783667755063,
+              -33.68751249389226
+            ]
+          }
+        },
+        {
+          "blend-mode" : "normal",
+          "glass" : false,
+          "image-name" : "logo medium.png",
+          "name" : "logo medium",
+          "position" : {
+            "scale" : 1.8,
+            "translation-in-points" : [
+              1.964477853277117,
+              2.9512313214958112
+            ]
+          }
+        },
+        {
+          "glass" : false,
+          "image-name" : "logo light.png",
+          "name" : "logo light",
+          "position" : {
+            "scale" : 1.8,
+            "translation-in-points" : [
+              30.778366775506242,
+              33.6875124938922
+            ]
+          }
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : false,
+        "value" : 0.5
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}

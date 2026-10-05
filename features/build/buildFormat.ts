@@ -6,7 +6,7 @@ import { workoutMeta } from '../../constants/workouts';
 
 /** The one set of text formatters shared by every Build surface (Monolith, casting, fusion, Case). */
 
-const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const FULL_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const ONES = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
@@ -36,7 +36,7 @@ export function formatDateRange(start: string, end: string) {
 export function formatDateRangeTitle(start: string, end: string) {
   const first = parseSessionDate(start);
   const last = parseSessionDate(end);
-  const [firstMonth, lastMonth] = [FULL_MONTHS[first.getMonth()], FULL_MONTHS[last.getMonth()]];
+  const [firstMonth, lastMonth] = [MONTHS[first.getMonth()], MONTHS[last.getMonth()]];
   return firstMonth === lastMonth ? `${first.getDate()}–${last.getDate()} ${lastMonth}` : `${first.getDate()} ${firstMonth}–${last.getDate()} ${lastMonth}`;
 }
 
@@ -65,8 +65,8 @@ export const recordLabel = (count: number) => countLabel(count, 'PR', 'PRs');
 
 /** Spoken summary of a week: "Week of 14 September (14–20 SEP), 4 pieces, 1 PR". */
 export function weekAccessibilityLabel(week: { weekStart: string; weekEnd: string; pieces: readonly unknown[]; metrics: { records: number } }) {
-  const pieces = countLabel(week.pieces.length, 'piece', 'pieces');
-  const records = week.metrics.records ? `, ${recordLabel(week.metrics.records)}` : '';
+  const pieces = countLabel(week.pieces.length, 'block', 'blocks');
+  const records = week.metrics.records ? `, ${countLabel(week.metrics.records, 'personal record')}` : '';
   return `Week of ${formatDayA11y(week.weekStart)} (${formatDateRange(week.weekStart, week.weekEnd)}), ${pieces}${records}`;
 }
 
@@ -78,11 +78,11 @@ export function formatMoved(kg: number, unit: WeightUnit, scope: 'session' | 'ag
   if (!(kg > 0)) return null;
   if (unit === 'lbs') {
     const rounded = Math.round(Number(formatWeight(kg, 'lbs')));
-    return rounded > 0 ? `${rounded.toLocaleString('en-US')} LB` : null;
+    return rounded > 0 ? `${rounded.toLocaleString('en-US')} lb` : null;
   }
-  if (scope === 'aggregate' && kg >= 1000) return `${(kg / 1000).toFixed(1)} T`;
+  if (scope === 'aggregate' && kg >= 1000) return `${(kg / 1000).toFixed(1)} t`;
   const rounded = Math.round(kg);
-  return rounded > 0 ? `${rounded.toLocaleString('en-US')} KG` : null;
+  return rounded > 0 ? `${rounded.toLocaleString('en-US')} kg` : null;
 }
 export const formatMovedSession = (kg: number, unit: WeightUnit) => formatMoved(kg, unit, 'session');
 export const formatMovedAggregate = (kg: number, unit: WeightUnit) => formatMoved(kg, unit, 'aggregate');

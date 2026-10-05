@@ -1,0 +1,18 @@
+5 Oct 2026 — Stack content refactor
+
+node --test tests/*.test.cjs
+33 test files; 656 tests; 654 pass; 2 fail; 0 skipped; 0 cancelled
+Failures: onboardingCore Welcome/Name busy-state expectations, preserved outside this content pass.
+
+npm run typecheck
+Passed.
+
+npm run lint
+21 errors, 0 warnings.
+18 react-hooks/refs and 3 react-hooks/set-state-in-effect errors reproduced from the pre-content snapshot.
+
+git diff --check
+Passed.
+
+Visual QA: refreshed iPhone 17 Pro preview; Train, logger, Progress, Settings, unit picker, routines, Your Stack discovery.
+No sets logged, routines activated or training history modified.

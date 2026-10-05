@@ -29,7 +29,7 @@ To reuse this session's existing native build:
 STACK_BUILD_DERIVED_DATA=/tmp/stack-build-derived npm run build:sandbox:ios -- --skip-build
 ```
 
-The feature requires `__DEV__`, iOS, and `EXPO_PUBLIC_BUILD_SANDBOX=1`. Ordinary `npm run dev` keeps it disabled. When enabled, Settings also contains an object-sandbox entry. A direct sandbox link can bypass onboarding in development, without creating a profile or marking onboarding completed.
+The feature is enabled automatically in iOS development sessions, including ordinary `npm run dev`; `EXPO_PUBLIC_BUILD_SANDBOX=1` also enables it for the isolated sandbox app and signed iOS builds. Android and web remain disabled. When enabled, Settings also contains an object-sandbox entry. A direct sandbox link can bypass onboarding in development, without creating a profile or marking onboarding completed.
 
 ## What to inspect
 

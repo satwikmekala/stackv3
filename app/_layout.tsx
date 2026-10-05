@@ -1,5 +1,7 @@
+import { loadMuscleColors } from '@/store/muscleColors';
+import { loadAppPreferences } from '@/store/appPreferences';
 import { useEffect, useRef, useState } from 'react';
-import { Linking } from 'react-native';
+import { Linking, Platform } from 'react-native';
 import { Stack, usePathname, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -23,6 +25,9 @@ import { startWorkoutLiveActivityInteractions } from '@/services/liveActivity/in
 import '@/global.css';
 import { BUILD_DEMO_ENABLED } from '@/features/build/config';
 import { splitImportRouteFromUrl } from '@/features/sharing/splitLinkRouting';
+import { redesignColors } from '@/constants/theme';
+import { FIRST_RUN_ROUTE, ONBOARDING_PREVIEW_ENABLED } from '@/features/onboarding/config';
+import { clearOnboardingDraft } from '@/store/onboardingDraft';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -43,6 +48,10 @@ export default function RootLayout() {
   // A received link can be previewed and saved before first-run setup. Keep
   // its payload on this route instead of losing it to the onboarding redirect.
   const inSplitImport = pathname === '/import-split';
+  const inHevyImport = pathname === '/bring-workouts' || pathname === '/hevy-import' || pathname === '/hevy-file-import';
+  const inOnboardingPreview = ONBOARDING_PREVIEW_ENABLED &&
+    (pathname === '/onboarding-preview' || pathname.startsWith('/onboarding-preview/') ||
+      pathname === '/program-setup' || pathname.startsWith('/program-setup/'));
   const onSplash = pathname === '/' && segments[0] !== '(tabs)';
   const inBuildSandbox = BUILD_DEMO_ENABLED && (pathname === '/build-sandbox' || pathname === '/build' || pathname === '/build-casting'
     || pathname === '/build-case' || pathname.startsWith('/build-case/'));
@@ -53,13 +62,15 @@ export default function RootLayout() {
     !inOnboarding &&
     !inCustomSplitFlow &&
     !inSplitImport &&
+    !inHevyImport &&
     !inBuildSandbox &&
+    !inOnboardingPreview &&
     !onSplash;
   const needsAppRedirect =
     initialLinkRead && !initialImport &&
     isHydrated &&
     Boolean(profile?.onboardingCompleted) &&
-    (inOnboarding || onSplash);
+    (inOnboarding || onSplash && !ONBOARDING_PREVIEW_ENABLED);
   const redirectPending = !initialLinkRead || Boolean(initialImport && !inSplitImport && !hydrationError) ||
     needsOnboardingRedirect || needsAppRedirect;
 
@@ -81,10 +92,18 @@ export default function RootLayout() {
   });
 
   useEffect(() => {
+    void loadMuscleColors();
+    void loadAppPreferences();
     void initializeWorkoutStore().catch((error) => {
       console.error('Failed to initialize workout database', error);
     });
   }, []);
+
+  useEffect(() => {
+    // Retry cleanup after a crash or failed AsyncStorage removal following a
+    // committed profile. Completed users still enter the app directly.
+    if (isHydrated && profile?.onboardingCompleted) void clearOnboardingDraft().catch(() => {});
+  }, [isHydrated, profile?.onboardingCompleted]);
 
   useEffect(() => {
     let cancelled = false;
@@ -141,7 +160,7 @@ export default function RootLayout() {
     if (hydrationError && !onSplash) {
       target = '/';
     } else if (needsOnboardingRedirect) {
-      target = '/(onboarding)/welcome';
+      target = FIRST_RUN_ROUTE;
     } else if (needsAppRedirect) {
       target = '/(tabs)';
     }
@@ -190,18 +209,34 @@ export default function RootLayout() {
             animationTypeForReplace: 'pop',
           })}
         />
+        <Stack.Screen name="workout-unit" options={{ headerShown: false, presentation: 'formSheet',
+          sheetAllowedDetents: 'fitToContents', sheetGrabberVisible: true, contentStyle: { backgroundColor: redesignColors.ink } }} />
         <Stack.Screen name="build-casting" options={{ headerShown: false, gestureEnabled: false, animation: 'fade' }} />
         <Stack.Screen
           name="workout-summary"
-          options={({ route }) => ({
-            headerShown: false,
-            gestureEnabled: false,
-            animation:
-              route.params && 'source' in route.params && route.params.source === 'history'
-                ? 'slide_from_right'
-                : 'fade',
-            animationTypeForReplace: 'push',
-          })}
+          options={({ route }) => {
+            const fromHistory = !!(route.params && 'source' in route.params && route.params.source === 'history');
+            return {
+              headerShown: true,
+              title: 'Workout summary',
+              // iOS: content scrolls under a transparent bar that softens it away (Apple's
+              // soft scroll edge on iOS 26, a thin material before) instead of a hard cut.
+              ...(Platform.OS === 'ios' ? {
+                headerTransparent: true,
+                headerStyle: { backgroundColor: 'transparent' },
+                ...(Number.parseInt(String(Platform.Version), 10) >= 26
+                  ? { scrollEdgeEffects: { top: 'soft', bottom: 'hidden', left: 'hidden', right: 'hidden' } as const }
+                  : { headerBlurEffect: 'systemThinMaterialDark' as const }),
+              } : { headerStyle: { backgroundColor: redesignColors.ink } }),
+              headerTintColor: redesignColors.bone,
+              headerShadowVisible: false,
+              headerBackButtonDisplayMode: 'minimal',
+              headerBackVisible: fromHistory,
+              gestureEnabled: fromHistory,
+              animation: fromHistory ? 'slide_from_right' : 'fade',
+              animationTypeForReplace: 'push',
+            };
+          }}
         />
         <Stack.Screen
           name="records"
@@ -213,22 +248,43 @@ export default function RootLayout() {
         />
         <Stack.Screen
           name="history"
-          options={{ headerShown: false, animation: 'slide_from_right' }}
+          options={{
+            headerShown: true,
+            title: 'History',
+            headerBackTitle: 'Progress',
+            // Keep the system glass/back glyph legible on Stack's dark surface.
+            unstable_nativeProps: { headerConfig: { experimental_userInterfaceStyle: 'dark' } },
+            headerStyle: { backgroundColor: redesignColors.ink },
+            headerTintColor: redesignColors.bone,
+            headerShadowVisible: false,
+            headerBackButtonDisplayMode: 'minimal',
+            animation: 'slide_from_right',
+          }}
         />
         <Stack.Screen
           name="history-week"
-          options={{ headerShown: false, animation: 'slide_from_right' }}
+          options={{
+            headerShown: true,
+            title: 'Weekly history',
+            headerBackTitle: 'History',
+            unstable_nativeProps: { headerConfig: { experimental_userInterfaceStyle: 'dark' } },
+            headerStyle: { backgroundColor: redesignColors.ink },
+            headerTintColor: redesignColors.bone,
+            headerShadowVisible: false,
+            headerBackButtonDisplayMode: 'minimal',
+            animation: 'slide_from_right',
+          }}
         />
         <Stack.Screen
           name="your-splits"
           options={{ headerShown: false, animation: 'slide_from_right' }}
         />
         <Stack.Screen name="import-split" options={{ headerShown: false, animation: 'slide_from_right' }} />
-        <Stack.Screen name="settings" options={{ headerShown: false, presentation: 'modal' }} />
+        <Stack.Screen name="settings" options={{ headerShown: true, presentation: 'card', animation: 'slide_from_right' }} />
         <Stack.Screen name="+not-found" />
       </Stack>
-      {/* Keep the import actions unobstructed while the workout stays active. */}
-      {!inSplitImport && <ActiveWorkoutBar />}
+      {/* Keep import and recap actions unobstructed while a workout stays active. */}
+      {!inSplitImport && pathname !== '/workout-summary' && pathname !== '/settings' && pathname !== '/workout-unit' && <ActiveWorkoutBar />}
       <StatusBar style="light" />
     </GestureHandlerRootView>
   );

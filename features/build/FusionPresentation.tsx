@@ -1,6 +1,6 @@
 import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AccessibilityInfo, AppState, BackHandler, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/services/haptics';
 import { SafeAreaProvider, SafeAreaView, initialWindowMetrics } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { redesignColors as c, redesignFonts as f } from '../../constants/theme';
@@ -131,18 +131,18 @@ export function FusionPresentation({ snapshot, unit, onFinish, onCommit, onRelea
     return () => clearInterval(tick);
   }, [sealed, steps, mode]);
   const built = copy ? builtCount(copy.stack, mode === 'static' ? 1 : sealed ? countProgress : 0) : 0;
-  const header = <View style={styles.header}><Text style={styles.brand}>YOUR STACK{snapshot.example ? ' · PREVIEW' : ''}</Text>{mode !== 'static' && <Pressable accessibilityRole="button" accessibilityLabel="Skip weekly fusion" onPress={skip} style={styles.skip}><Text style={styles.link}>Skip</Text></Pressable>}</View>;
+  const header = <View style={styles.header}><Text style={styles.brand}>MY STACK{snapshot.example ? ' · PREVIEW' : ''}</Text>{mode !== 'static' && <Pressable accessibilityRole="button" accessibilityLabel="Skip to weekly summary" onPress={skip} style={styles.skip}><Text style={styles.link}>Skip</Text></Pressable>}</View>;
   const sealedCopy = copy && <>
     <Text style={styles.kicker}>{copy.sealed.kicker}</Text>
     <Text maxFontSizeMultiplier={mode === 'static' ? undefined : 1.4} style={styles.title}>{copy.sealed.title}</Text>
     <Text maxFontSizeMultiplier={mode === 'static' ? undefined : 1.4} style={styles.summary}>{copy.sealed.summary}</Text>
     {copy.sealed.thickest && <Text maxFontSizeMultiplier={mode === 'static' ? undefined : 1.4} style={styles.caption}>{copy.sealed.thickest}</Text>}
   </>;
-  const stackCount = <View accessible accessibilityLabel={copy ? `Your Stack, ${weeksBuilt(copy.stack.after)}` : undefined}>
+  const stackCount = <View accessible accessibilityLabel={copy ? `My Stack, ${weeksBuilt(copy.stack.after)}` : undefined}>
     <Text style={styles.label}>{copy?.stack.label}</Text>
     <Text maxFontSizeMultiplier={mode === 'static' ? undefined : 1.4} style={styles.built}>{weeksBuilt(built)}</Text>
   </View>;
-  const done = <Pressable accessibilityRole="button" accessibilityLabel={snapshot.example ? 'Done, return to sandbox' : 'Done, back to your Stack'} onPress={finish} style={styles.continue}><Text style={styles.link}>Done</Text></Pressable>;
+  const done = <Pressable accessibilityRole="button" accessibilityLabel={snapshot.example ? 'Done, return to sandbox' : 'Done, back to My Stack'} onPress={finish} style={styles.continue}><Text style={styles.link}>Done</Text></Pressable>;
   const sealedIndex = slabs.findIndex((slab) => slab.id === snapshot.weekId);
   return <Modal visible animationType="none" presentationStyle="fullScreen" onRequestClose={skip}>
     <SafeAreaProvider initialMetrics={initialWindowMetrics}><SafeAreaView style={styles.screen}>
@@ -165,7 +165,7 @@ export function FusionPresentation({ snapshot, unit, onFinish, onCommit, onRelea
             </ScrollView>
           </View> : <View>{sealedCopy}</View>}
         </View>
-        <View style={styles.stage} accessible accessibilityLabel={`${phase}. ${week?.pieces.length ?? 0} workout pieces becoming one weekly block. ${week?.metrics.records ?? 0} records preserved.`}>
+        <View style={styles.stage} accessible accessibilityLabel={`${week?.pieces.length ?? 0} workout blocks becoming one weekly layer${week?.metrics.records ? `, ${week.metrics.records} personal ${week.metrics.records === 1 ? 'record' : 'records'}` : ''}.`}>
           <LinearGradient colors={['#13110E', '#2C1D12', '#13110E']} style={StyleSheet.absoluteFill} />
           <FusionBoundary onFinish={fail}>{mode === 'playing' && week && <BuildScene slabs={slabs} tuning={DEFAULT_TUNING} lamination="strata" overview={false} reducedMotion={false} paused={paused} fusion={fusion} onError={fail} benchmark={0} onStats={setStats} />}</FusionBoundary>
         </View>

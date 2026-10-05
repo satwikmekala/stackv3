@@ -19,10 +19,7 @@ export function StatusPill({ label, color, muted = false }: StatusPillProps) {
           : { borderColor: `${pillColor}99`, backgroundColor: `${pillColor}16` },
       ]}
     >
-      <Text
-        allowFontScaling={false}
-        style={[styles.label, { color: muted ? redesignColors.ash : pillColor }]}
-      >
+      <Text style={[styles.label, { color: muted ? redesignColors.ash : pillColor }]}>
         {label.toUpperCase()}
       </Text>
     </View>

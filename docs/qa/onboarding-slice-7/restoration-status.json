@@ -1,0 +1,11 @@
+{
+  "device": "718B70FD-1214-4F70-9133-22796E292490",
+  "deviceName": "Stack Onboarding Slice 7 Narrow QA",
+  "contentSize": "large (restored; simctl readback)",
+  "increaseContrast": "disabled (restored; simctl readback)",
+  "reduceMotion": "off (restored; native Settings control checked)",
+  "reduceTransparency": "off (restored; native Settings control checked)",
+  "originalProSettings": "unchanged",
+  "physicalDeviceCheck": "iPhone 14 Pro lists paired/available but detailed connection fails; tunnel disconnected, cached developer mode disabled and developer services unavailable. No physical test or security setting change.",
+  "backupApp": "Stopped to close Files picker, then reopened for native receipt recovery and left in Your Splits. No native restore performed."
+}

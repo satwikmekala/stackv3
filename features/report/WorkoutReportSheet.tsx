@@ -10,14 +10,14 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/services/haptics';
 import { X } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { redesignColors, redesignFonts } from '@/constants/theme';
 import type { WorkoutReport } from '@/features/report/workoutReport';
 import { REPORT_WIDTH, WorkoutReportView } from '@/features/report/WorkoutReportView';
-import { captureWorkoutReport, shareWorkoutReportImage } from '@/features/report/shareWorkoutReport';
+import { shareWorkoutReportPdf } from '@/features/report/shareWorkoutReport';
 
 interface WorkoutReportSheetProps {
   visible: boolean;
@@ -28,15 +28,12 @@ interface WorkoutReportSheetProps {
 type Status = 'idle' | 'sharing' | 'error';
 
 /**
- * Shows the full report as it will be exported, then hands the image to the
- * system share sheet. Deliberately separate from the social ShareSheet: that
- * one is for expressive stickers, this one is for the complete record.
+ * Optional in-app report preview. Sharing exports the complete record as a PDF.
  */
 export function WorkoutReportSheet({ visible, report, onClose }: WorkoutReportSheetProps) {
   const insets = useSafeAreaInsets();
   const { width: screenWidth } = useWindowDimensions();
-  const captureRef = useRef<View>(null);
-  const heightRef = useRef(0);
+  const sharingRef = useRef(false);
   const [status, setStatus] = useState<Status>('idle');
 
   const previewWidth = Math.min(REPORT_WIDTH, screenWidth - 32);
@@ -44,20 +41,22 @@ export function WorkoutReportSheet({ visible, report, onClose }: WorkoutReportSh
   const [previewHeight, setPreviewHeight] = useState(0);
 
   const handleShare = useCallback(async () => {
-    if (status === 'sharing' || !captureRef.current || heightRef.current === 0) return;
+    if (sharingRef.current) return;
+    sharingRef.current = true;
     setStatus('sharing');
     if (Platform.OS !== 'web') void Haptics.selectionAsync();
     try {
-      const uri = await captureWorkoutReport(captureRef.current, heightRef.current);
-      await shareWorkoutReportImage(uri, `${report.title} — workout report`);
+      await shareWorkoutReportPdf(report);
       setStatus('idle');
     } catch {
       if (Platform.OS !== 'web') {
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       }
       setStatus('error');
+    } finally {
+      sharingRef.current = false;
     }
-  }, [report.title, status]);
+  }, [report]);
 
   return (
     <Modal
@@ -84,7 +83,7 @@ export function WorkoutReportSheet({ visible, report, onClose }: WorkoutReportSh
           contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 110 }]}
           showsVerticalScrollIndicator={false}
         >
-          {/* Scaled preview; the full-size copy below is the one captured. */}
+          {/* The document exporter uses the same report data as this preview. */}
           <View style={[styles.previewFrame, { width: previewWidth, height: previewHeight * previewScale || undefined }]}>
             <View
               style={{ transform: [{ scale: previewScale }], transformOrigin: 'top left' }}
@@ -95,20 +94,12 @@ export function WorkoutReportSheet({ visible, report, onClose }: WorkoutReportSh
           </View>
         </ScrollView>
 
-        {/* Off-screen, unscaled and outside any scroll view, so the capture is never clipped. */}
-        <View pointerEvents="none" style={styles.offscreen}>
-          <WorkoutReportView
-            ref={captureRef}
-            report={report}
-            onLayout={(event) => { heightRef.current = event.nativeEvent.layout.height; }}
-          />
-        </View>
-
         <View style={[styles.dock, { paddingBottom: Math.max(insets.bottom, 14) }]}>
           {status === 'error' ? (
             <Text allowFontScaling={false} style={styles.error}>Couldn’t share the report. Try again.</Text>
           ) : null}
           <Pressable
+            cssInterop={false}
             accessibilityRole="button"
             accessibilityLabel="Share workout report"
             disabled={status === 'sharing'}
@@ -118,7 +109,7 @@ export function WorkoutReportSheet({ visible, report, onClose }: WorkoutReportSh
             {status === 'sharing' ? (
               <ActivityIndicator color={redesignColors.ink} />
             ) : (
-              <Text allowFontScaling={false} style={styles.shareText}>Share report</Text>
+              <Text allowFontScaling={false} style={styles.shareText}>Share PDF</Text>
             )}
           </Pressable>
         </View>
@@ -161,12 +152,6 @@ const styles = StyleSheet.create({
   previewFrame: {
     overflow: 'hidden',
     borderRadius: 10,
-  },
-  offscreen: {
-    position: 'absolute',
-    left: -10000,
-    top: 0,
-    width: REPORT_WIDTH,
   },
   dock: {
     position: 'absolute',

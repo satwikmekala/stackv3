@@ -1,4 +1,5 @@
-import { splitColors } from '@/constants/theme';
+import { displayExerciseName } from '@/constants/exerciseNames';
+import { getMuscleColor } from '@/constants/muscleColors';
 
 export type ExerciseInfoCategory = 'Arms' | 'Legs' | 'Chest' | 'Back' | 'Shoulders';
 
@@ -14,11 +15,11 @@ export interface ExerciseInfoData {
 }
 
 export const exerciseInfoAccents: Record<ExerciseInfoCategory, string> = {
-  Arms: splitColors.arms,
-  Legs: splitColors.legs,
-  Chest: splitColors.chest,
-  Back: splitColors.back,
-  Shoulders: splitColors.shoulders,
+  get Arms() { return getMuscleColor('arms'); },
+  get Legs() { return getMuscleColor('legs'); },
+  get Chest() { return getMuscleColor('chest'); },
+  get Back() { return getMuscleColor('back'); },
+  get Shoulders() { return getMuscleColor('shoulders'); },
 };
 
 // Static requires allow Metro to bundle the original transparent PNGs directly.
@@ -202,7 +203,8 @@ for (const info of exerciseInfo) {
 }
 
 export function getExerciseInfo(name: string): ExerciseInfoData | undefined {
-  return exerciseInfoByName.get(normalizeExerciseName(name));
+  const info = exerciseInfoByName.get(normalizeExerciseName(name));
+  return info ? { ...info, title: displayExerciseName(name) } : undefined;
 }
 
 export function hasExerciseInfo(name: string): boolean {

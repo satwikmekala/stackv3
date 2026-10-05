@@ -1,3 +1,4 @@
+import { displayExerciseName } from '@/constants/exerciseNames';
 import type { WeightUnit } from '../../store/weightUnits';
 import type { BuildPiece, BuildState, BuildWeek } from './evidence';
 import type { CaseCard } from './caseModel';
@@ -16,8 +17,8 @@ export function caseHeader(state: BuildState) {
   // Same count as "weeks built" on the Monolith: every finished week with a session in it.
   const shelved = state.sealedWeeks.filter((week) => week.pieces.length > 0).length;
   return {
-    title: 'Your Case',
-    count: shelved === 0 ? null : `${shelved} ${shelved === 1 ? 'WEEK' : 'WEEKS'}`,
+    title: 'Past weeks',
+    count: shelved === 0 ? null : `${shelved} ${shelved === 1 ? 'week' : 'weeks'}`,
     note: shelved === 0 ? 'Every finished week is kept here.' : null,
   };
 }
@@ -25,14 +26,14 @@ export function caseHeader(state: BuildState) {
 export function caseCardCopy(card: CaseCard, unit: WeightUnit): { title: string; detail: string; a11y: string } {
   if (card.kind === 'empty') {
     return card.weeks === 1
-      ? { title: formatDateRange(card.start, card.end), detail: 'NO SESSIONS', a11y: `Week of ${formatDayA11y(card.start)}, no sessions` }
-      : { title: formatDateRange(card.start, card.end), detail: 'NO SESSIONS', a11y: `${formatDateRangeA11y(card.start, card.end)}, no sessions` };
+      ? { title: formatDateRange(card.start, card.end), detail: 'No workouts', a11y: `Week of ${formatDayA11y(card.start)}, no workouts` }
+      : { title: formatDateRange(card.start, card.end), detail: 'No workouts', a11y: `${formatDateRangeA11y(card.start, card.end)}, no workouts` };
   }
   const { week } = card;
-  const stacks = countLabel(week.pieces.length, 'stack');
+  const stacks = countLabel(week.pieces.length, 'block');
   return week.sealed
     ? { title: formatDateRange(week.weekStart, week.weekEnd), detail: join([stacks, formatMovedSession(week.metrics.volumeKg, unit)]), a11y: `Week of ${formatDayA11y(week.weekStart)}, ${stacks}` }
-    : { title: 'THIS WEEK', detail: `${stacks} · OPEN`, a11y: `This week, open, ${stacks}` };
+    : { title: 'This week', detail: `${stacks} · Open`, a11y: `This week, open, ${stacks}` };
 }
 
 /** An unpacked week: its dates as the heading, then moved (in full), stacks and PRs as tiles. */
@@ -44,9 +45,9 @@ export function unpackedHeader(week: BuildWeek, unit: WeightUnit) {
   return {
     title: week.sealed ? formatDateRangeTitle(week.weekStart, week.weekEnd) : 'This week',
     tiles: [
-      ...(moved ? [{ value: moved.slice(0, split), label: `${moved.slice(split + 1)} MOVED` }] : []),
-      { value: String(count), label: count === 1 ? 'STACK' : 'STACKS' },
-      ...(records > 0 ? [{ value: String(records), label: records === 1 ? 'PR' : 'PRS' }] : []),
+      ...(moved ? [{ value: moved.slice(0, split), label: `${moved.slice(split + 1)} moved` }] : []),
+      { value: String(count), label: count === 1 ? 'BLOCK' : 'BLOCKS' },
+      ...(records > 0 ? [{ value: String(records), label: records === 1 ? 'PR' : 'PRs' }] : []),
     ],
   };
 }
@@ -54,13 +55,13 @@ export function unpackedHeader(week: BuildWeek, unit: WeightUnit) {
 /** A workout row: its name and weekday, then what it moved (or Bodyweight) and any PRs. */
 export function pieceCardCopy(piece: BuildPiece, name: string, unit: WeightUnit) {
   const moved = formatMovedSession(piece.metrics.volumeKg, unit);
-  const records = piece.records.map((record) => `${record.exerciseName} · ${formatLoadReps(record.current.weight, record.current.reps, unit)}`);
+  const records = piece.records.map((record) => `${displayExerciseName(record.exerciseName)} · ${formatLoadReps(record.current.weight, record.current.reps, unit)}`);
   return {
     title: `${name} · ${formatWeekday(piece.date)}`,
     detail: join([
       moved ? `${moved.toLowerCase()} moved` : 'Bodyweight',
       records.length ? `${records.length === 1 ? 'PR' : 'PRs'}: ${records.join(', ')}` : null,
     ]),
-    a11y: `View ${name} summary, ${formatDayA11y(piece.date)}`,
+    a11y: `Open ${name} summary, ${formatDayA11y(piece.date)}`,
   };
 }

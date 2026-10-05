@@ -1,9 +1,11 @@
+import { displayExerciseName } from '@/constants/exerciseNames';
+import { useMuscleColors } from '@/store/muscleColors';
 /** @jsxImportSource react */
 // This StyleSheet-only screen uses native Pressable callbacks, including the unchanged FilterChip.
 import { useMemo, useState } from 'react';
 import { FlatList, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/services/haptics';
 import { ChevronLeft, ChevronRight, Search, CircleX } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { redesignColors, redesignFonts } from '@/constants/theme';
@@ -46,6 +48,7 @@ function FilterChip({
 }
 
 export default function PersonalRecords() {
+  useMuscleColors(state => state.preferences);
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const sessions = useWorkoutStore((state) => state.sessions);
@@ -92,9 +95,9 @@ export default function PersonalRecords() {
                 <ChevronLeft color={redesignColors.bone} size={23} />
               </Pressable>
               <View style={styles.headerCopy}>
-                <Text accessibilityRole="header" style={styles.title}>Personal Records</Text>
+                <Text accessibilityRole="header" style={styles.title}>Personal records</Text>
                 <Text accessibilityLiveRegion="polite" style={[styles.subtitle, filtering && styles.accent]}>
-                  {filtering ? `${visibleRecords.length} OF ${records.length} SHOWING` : `${records.length} EXERCISES TRACKED`}
+                  {filtering ? `${visibleRecords.length} OF ${records.length} SHOWING` : `${records.length} ${records.length === 1 ? 'EXERCISE' : 'EXERCISES'} TRACKED`}
                 </Text>
               </View>
             </View>
@@ -129,19 +132,19 @@ export default function PersonalRecords() {
           </>
         }
         renderItem={({ item }) => (
-          <Pressable accessibilityRole="button" accessibilityLabel={`View ${item.name} recent lifts`}
+          <Pressable accessibilityRole="button" accessibilityLabel={`View ${displayExerciseName(item.name)} recent lifts`}
             onPress={() => tap(() => router.push({ pathname: '/record-detail', params: { exerciseName: item.name } }))}
             style={({ pressed }) => [styles.recordRow, pressed && styles.pressed]}>
             <View style={[styles.dot, { backgroundColor: MUSCLE_GROUPS[item.muscle].color }]} />
             <Text style={styles.exerciseName}>
-              {highlightExerciseName(item.name, normalizedQuery).map((part, index) => (
+              {highlightExerciseName(displayExerciseName(item.name), normalizedQuery).map((part, index) => (
                 <Text key={index} style={part.matched ? { backgroundColor: `${MUSCLE_GROUPS[item.muscle].color}40` } : undefined}>
                   {part.text}
                 </Text>
               ))}
             </Text>
             <Text style={styles.performance}>
-              {item.best.weight === 0 ? 'BW' : formatWeight(item.best.weight, weightUnit)}
+              {item.best.weight === 0 ? 'Bodyweight' : formatWeight(item.best.weight, weightUnit)}
               <Text style={styles.muted}>{item.best.weight === 0 ? '' : ` ${unitLabel(weightUnit)}`} × {item.best.reps}</Text>
             </Text>
             <ChevronRight size={16} color={redesignColors.ashDim} />

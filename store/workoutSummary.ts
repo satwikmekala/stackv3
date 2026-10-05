@@ -1,3 +1,4 @@
+import { longContentDate } from '@/utils/content';
 import { ARCHETYPE_COMPOSITIONS, getSessionWorkoutDisplay } from '@/constants/archetypes';
 import { workoutMeta } from '@/constants/workouts';
 import type {
@@ -9,6 +10,7 @@ import type {
 import { performedSets, formatRepScheme } from '@/store/liftLog';
 import { formatDuration, formatDurationScheme, getExerciseMetric, type ExerciseMetric } from '@/store/exerciseMeasurement';
 import { formatWeight, kgToLbs, unitLabel, type WeightUnit } from '@/store/weightUnits';
+import { parseSessionDate } from '@/store/workoutCalendar';
 
 export type WorkoutSummaryExercise = {
   name: string;
@@ -20,7 +22,7 @@ export type WorkoutSummaryExercise = {
   repsBySet: number[];
   /** Duration-metric only, in seconds. */
   durationsBySet: number[];
-  /** Canonical kg per performed set, for weighted timed exercises. */
+  /** Canonical kg per performed set, in the same order as reps or durations. */
   weightsBySet: number[];
   /** weight × reps; timed exercises have no traditional volume. */
   volumeKg: number;
@@ -108,7 +110,7 @@ export function deriveWorkoutSummary(
 
   return {
     id: session.id,
-    title: session.origin === 'adhoc' ? getSessionWorkoutDisplay(session).label :
+    title: session.imported ? session.imported.name : session.origin === 'adhoc' ? getSessionWorkoutDisplay(session).label :
       titleOverride?.trim() ||
       (primaryArchetype
         ? secondaryArchetype
@@ -116,7 +118,7 @@ export function deriveWorkoutSummary(
           : primaryArchetype.shortLabel
         : legacyMeta?.label ?? 'Workout'),
     accent: session.origin === 'adhoc' ? getSessionWorkoutDisplay(session).color : primaryArchetype?.color ?? legacyMeta?.color ?? '#FF7A3D',
-    date: new Date(session.date),
+    date: parseSessionDate(session.date),
     intensity: session.intensity ?? 'medium',
     setCount: allPerformedSets.length,
     exerciseCount: exercises.length,
@@ -141,11 +143,7 @@ export function formatSummaryNumber(value: number): string {
 }
 
 export function formatSummaryDate(date: Date): string {
-  return new Intl.DateTimeFormat('en-US', {
-    weekday: 'long',
-    month: 'short',
-    day: 'numeric',
-  }).format(date);
+  return longContentDate(date);
 }
 
 export function intensitySummaryLabel(intensity: IntensityLevel): string {
@@ -166,11 +164,11 @@ export function specialSetSummaryLabel(
 
   if (entries.length === 1) {
     const [type, count] = entries[0];
-    const name = type === 'pr' ? 'PR' : type === 'dropset' ? 'DROP' : 'EXTRA';
-    return `${count} ${name} SET${count === 1 ? '' : 'S'} LOGGED`;
+    const name = type === 'pr' ? 'PR attempt' : type === 'dropset' ? 'Drop set' : 'Extra set';
+    return `${count} ${name}${count === 1 ? '' : 's'} logged`;
   }
 
-  return `${total} SPECIAL SET${total === 1 ? '' : 'S'} LOGGED`;
+  return `${total} bonus set${total === 1 ? '' : 's'} logged`;
 }
 
 /** Load carried through timed sets: "30 kg", or "30–32.5 kg" when it varied. */
@@ -180,6 +178,37 @@ function formatLoadRange(weightsKg: readonly number[], unit: WeightUnit): string
     ? formatWeight(low, unit)
     : `${formatWeight(low, unit)}–${formatWeight(high, unit)}`;
   return `${range} ${unitLabel(unit)}`;
+}
+
+/** A recognisable load/reps result, never accumulated tonnage. Varied sets
+ * use the same top-set rule as Progress: heaviest, then most reps at that load.
+ * Timed results always keep the load paired with its actual duration. */
+export function formatExercisePerformance(
+  exercise: WorkoutSummaryExercise,
+  unit: WeightUnit
+): { value: string; context: string } {
+  const timed = exercise.metric === 'duration';
+  const amounts = timed ? exercise.durationsBySet : exercise.repsBySet;
+  if (amounts.length === 0) return { value: 'No sets logged', context: '' };
+  const loaded = exercise.loadType === 'external_weight'
+    && exercise.weightsBySet.some((weight) => weight > 0);
+  const weightAt = (index: number) => loaded ? exercise.weightsBySet[index] ?? 0 : 0;
+  const uniform = amounts.every((amount, index) => amount === amounts[0] && weightAt(index) === weightAt(0));
+  const top = amounts.reduce((best, amount, index) =>
+    weightAt(index) > weightAt(best) || (weightAt(index) === weightAt(best) && amount > amounts[best])
+      ? index : best, 0);
+  const amount = timed ? formatDuration(amounts[top]) : String(amounts[top]);
+  const load = weightAt(top) > 0 ? `${formatWeight(weightAt(top), unit)} ${unitLabel(unit)}` : null;
+  if (uniform) {
+    return {
+      value: `${amounts.length} × ${amount}${load ? ` at ${load}` : ''}`,
+      context: timed ? 'Time per set' : loaded ? 'Sets × reps' : 'Bodyweight · sets × reps',
+    };
+  }
+  return {
+    value: load ? `${load} ${timed ? '·' : '×'} ${amount}` : timed ? amount : `Bodyweight × ${amount}`,
+    context: `${timed && !loaded ? 'Longest hold' : 'Top set'} · ${exercise.setCount} ${exercise.setCount === 1 ? 'set' : 'sets'}`,
+  };
 }
 
 /**
@@ -211,5 +240,5 @@ export function exerciseRecapAccessibilityLabel(exercise: WorkoutSummaryExercise
     const load = formatExerciseRecap(exercise, unit).volume;
     return `${exercise.setCount} sets, ${exercise.durationsBySet.map(formatDuration).join(', ')}${load ? `, ${load}` : ''}`;
   }
-  return `${exercise.setCount} sets, ${exercise.repCount} reps, ${formatSummaryNumber(displayVolume(exercise.volumeKg, unit))} ${unitLabel(unit)} volume`;
+  return `${exercise.setCount} sets, ${exercise.repCount} reps, ${formatSummaryNumber(displayVolume(exercise.volumeKg, unit))} ${unitLabel(unit)} moved`;
 }

@@ -1,6 +1,6 @@
 import { getSessionWorkoutDisplay } from '../../constants/archetypes';
 import { compareSetPerformance, getCurrentBest, type RecordSet } from '../../store/personalRecords';
-import { getVerifiedSessions } from '../../store/verifiedSessions';
+import { getBuildSessions } from '../../store/verifiedSessions';
 import { getExerciseMetric } from '../../store/exerciseMeasurement';
 import { getStartOfWeek, parseSessionDate, toLocalCalendarDate } from '../../store/workoutCalendar';
 import type { ExerciseLoadType, ExerciseSet, WorkoutSession } from '../../store/workoutStore';
@@ -88,7 +88,7 @@ export function deriveBuildState(sessions: readonly WorkoutSession[], now: Date,
   const currentWeekStart = toLocalCalendarDate(getStartOfWeek(now));
   const issues: BuildState['issues'] = [];
   const unique = new Map<string, WorkoutSession>();
-  for (const session of getVerifiedSessions(sessions)) {
+  for (const session of getBuildSessions(sessions)) {
     const existing = unique.get(session.id);
     if (existing) {
       // One bad row must never take a surface down: keep the first and report conflicts in development.

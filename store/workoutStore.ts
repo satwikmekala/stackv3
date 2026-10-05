@@ -1,5 +1,7 @@
+import { saveActionErrorCopy } from '@/utils/content';
 import { toLocalCalendarDate, parseSessionDate, getSessionLocalDate, getStartOfWeek } from '@/store/workoutCalendar';
 import { Alert } from 'react-native';
+import { getProgramFrequency, weeklyTrainingProgress } from '@/store/trainingPreferences';
 import { create } from 'zustand';
 
 import type { Archetype } from '@/constants/archetypes';
@@ -18,6 +20,9 @@ import {
 } from '@/store/customSplits';
 
 import {
+  addExerciseNoteSync,
+  deleteExerciseNoteSync,
+  readSessionByIdSync,
   EXERCISE_SEEDS,
   SPLIT_TEMPLATE_SEEDS,
   type ExerciseCatalogItem,
@@ -33,6 +38,7 @@ import {
   createCustomExerciseSync,
   createCustomSplitSync,
   deleteCustomSplitSync,
+  writeProfileReplacingStackPlanSync,
   deleteWorkoutSync,
   deleteExercise as deleteExerciseRecord,
   discardCurrentSession,
@@ -70,6 +76,7 @@ import {
   startWorkoutFromArchetype as persistWorkoutFromArchetype,
   startWorkoutFromCustomWorkout as persistWorkoutFromCustomWorkout,
   setActiveSplitSync,
+  chooseNoProgramSync,
   updateCurrentSet,
   updateCurrentSets,
   readCurrentSetTarget,
@@ -84,6 +91,8 @@ import {
 } from '@/store/workoutProgression';
 import { getWeightIncrementKg, type WeightUnit } from '@/store/weightUnits';
 import { getActiveSetIndex, getCurrentWorkoutExerciseIndex } from '@/utils/workoutResume';
+import { resolveProgramPreferences, type ProgramPreferences, type ThreeDayStructure } from '@/store/programPreferences';
+import { validateProgram } from '@/features/program/lineup';
 import { projectSetToggle, getNextIncompleteExerciseIndex, isExerciseComplete, type WorkoutSetAction, type WorkoutSetActionResult, type WorkoutSetTarget, type WorkoutSetEditTarget, type WorkoutSetValueAction, sameSetTarget } from '@/store/workoutSetActions';
 
 export { toLocalCalendarDate, parseSessionDate, getSessionLocalDate, getStartOfWeek } from '@/store/workoutCalendar';
@@ -118,12 +127,17 @@ export interface Exercise {
  * history keeps its meaning even if the catalog row changes later.
  */
 export interface SessionExercise extends Exercise {
+  /** Stable catalog identity, distinct from a session exercise/set target ID. */
+  exerciseId?: number;
+  notes?: import('@/store/exerciseNotes').ExerciseNote[];
   entryUnit: WeightUnit;
 }
 
 export type SetValueOrigin = 'template' | 'history' | 'propagated' | 'user';
 
 export interface ExerciseSet {
+  /** Original imported kind; warmups never seed working sets or records. */
+  sourceKind?: string;
   /** Explicit edits protect the whole set from automatic propagation. */
   valueOrigin?: SetValueOrigin;
   /** Rep-metric sets only. Duration sets store a neutral 0 here. */
@@ -142,6 +156,8 @@ export interface ExerciseSet {
 export type SessionOrigin = 'archetype' | 'custom' | 'adhoc' | 'legacy';
 
 export interface WorkoutSession {
+  /** Full whitelisted source facts. Unsupported measurements remain readable in history. */
+  imported?: import('@/features/import/persistence').ImportedWorkoutFacts;
   origin: SessionOrigin;
   id: string;
   date: string;
@@ -161,9 +177,11 @@ export interface WorkoutSession {
   customSplitWorkoutId?: number | null;
 }
 
-export interface UserProfile {
+export interface UserProfile extends ProgramPreferences {
   name: string;
   weeklyGoal: number;
+  /** Independent automatic-program frequency. Legacy profiles inherit their old goal once. */
+  programWeeklyGoal?: number;
   experienceLevel: ExperienceLevel;
   trainingDays: number[];
   onboardingCompleted: boolean;
@@ -176,7 +194,16 @@ export interface UserProfile {
 
 // Kept only at the setProfile call boundary so the existing onboarding caller
 // can pass its former dead counter without that value entering state or SQLite.
-type UserProfileInput = UserProfile & { workoutsCompletedThisWeek?: number };
+type UserProfileInput = Omit<UserProfile, keyof ProgramPreferences> & Partial<ProgramPreferences> & { workoutsCompletedThisWeek?: number };
+
+/** Inactive automatic defaults are preferences, never a program acceptance. */
+export const createNoProgramProfile = (): UserProfile => ({
+  name: '', weeklyGoal: 0, programWeeklyGoal: 3, experienceLevel: 'intermediate',
+  trainingDays: [], onboardingCompleted: false, autoIncreaseWeight: false,
+  weightIncrement: 0.5, weightUnit: 'kg', weightIncrementLbs: 5,
+  activeSplitId: null, programMode: 'none', threeDayStructure: 'full-body',
+  weightUnitConfirmed: false,
+});
 
 export type WorkoutFocus = { workoutId: string; exerciseIndex: number; exerciseId?: string };
 
@@ -195,14 +222,25 @@ interface WorkoutStore {
   setWorkoutExerciseIndex: (exerciseIndex: number) => void;
   setExerciseEntryUnit: (target: WorkoutSetTarget, unit: WeightUnit) => WorkoutSetActionResult;
   getActiveSetTarget: () => WorkoutSetTarget | null;
-  applyActiveSetAction: (target: WorkoutSetTarget, action: WorkoutSetAction, expectedWeightStepKg?: number) => WorkoutSetActionResult;
+  /**
+   * `advanceFocus` (default true) moves focus to the next incomplete exercise when this set finishes
+   * the exercise. The Live Activity relies on it; the app passes false so its wrap-up can review
+   * the sets and offer another one first.
+   */
+  applyActiveSetAction: (target: WorkoutSetTarget, action: WorkoutSetAction, expectedWeightStepKg?: number,
+    options?: { advanceFocus?: boolean }) => WorkoutSetActionResult;
   splitTemplates: Record<WorkoutType, Exercise[]>;
   customSplits: CustomSplitSummary[];
   currentCustomSplit: CustomSplit | null;
   isHydrated: boolean;
   hydrationError: string | null;
 
+  addExerciseNote: (workoutId: string, exerciseId: number, text: string) => void;
+  deleteExerciseNote: (exerciseId: number, noteId: number) => void;
   setProfile: (profile: UserProfileInput) => void;
+  completeNoProgramOnboarding: (name?: string, weightUnit?: 'kg' | 'lbs') => UserProfile;
+  confirmWorkoutWeightUnit: (unit: 'kg' | 'lbs') => UserProfile;
+  acceptStackProgram: (frequency: number, structure: ThreeDayStructure, context: 'onboarding' | 'configuration', name?: string) => UserProfile;
   updateProfile: (updates: Partial<UserProfile>) => void;
 
   refreshCustomSplits: () => Promise<void>;
@@ -224,11 +262,13 @@ interface WorkoutStore {
     name: string,
     workoutType: WorkoutType,
     primaryMuscle: string,
-    equipment: string,
+    equipment: string | null,
     loadType?: ExerciseLoadType,
     metric?: ExerciseMetric
   ) => number | undefined;
+  activateSharedRoutine: (splitId: number) => UserProfile;
   setActiveSplit: (splitId: number | null) => void;
+  chooseNoProgram: () => void;
   saveCustomSplitDraft: (
     name: string,
     workouts: CustomSplitDraftWorkoutInput[],
@@ -244,7 +284,7 @@ interface WorkoutStore {
   saveAdhocRoutine: (sessionId: string, name: string) => number | undefined;
   startEmptyWorkout: () => boolean;
   startWorkout: (workoutTypes: WorkoutType[]) => void;
-  startWorkoutFromArchetype: (archetypes: Archetype[]) => void;
+  startWorkoutFromArchetype: (archetypes: Archetype[], variants?: string[]) => void;
   startWorkoutFromCustomWorkout: (splitId: number, workoutId: number) => boolean;
   logArchetypeCompletedRetroactively: (archetypes: Archetype[], date: string) => void;
   /** `durationS` is required for, and only used by, duration-metric exercises. */
@@ -345,6 +385,7 @@ export const deriveDefaultSlots = (goal: number): number[] => {
 const normalizeProfile = (profile: UserProfileInput): UserProfile => ({
   name: profile.name,
   weeklyGoal: profile.weeklyGoal,
+  programWeeklyGoal: getProgramFrequency(profile),
   experienceLevel: profile.experienceLevel,
   trainingDays: profile.trainingDays,
   onboardingCompleted: profile.onboardingCompleted,
@@ -353,6 +394,7 @@ const normalizeProfile = (profile: UserProfileInput): UserProfile => ({
   weightUnit: profile.weightUnit,
   weightIncrementLbs: profile.weightIncrementLbs,
   activeSplitId: profile.activeSplitId ?? null,
+  ...resolveProgramPreferences({ ...profile, activeSplitId: profile.activeSplitId ?? null }),
 });
 
 const runGuardedAction = <T>(actionName: string, action: () => T): T | undefined => {
@@ -360,7 +402,7 @@ const runGuardedAction = <T>(actionName: string, action: () => T): T | undefined
     return action();
   } catch (error) {
     console.error(`[workoutStore] ${actionName} failed`, error);
-    Alert.alert("Couldn't save", 'Something went wrong. Please try again.');
+    Alert.alert('Couldn’t save', saveActionErrorCopy(actionName));
     return undefined;
   }
 };
@@ -373,7 +415,7 @@ const runGuardedAsyncAction = async <T>(
     return await action();
   } catch (error) {
     console.error(`[workoutStore] ${actionName} failed`, error);
-    Alert.alert("Couldn't save", 'Something went wrong. Please try again.');
+    Alert.alert('Couldn’t save', saveActionErrorCopy(actionName));
     return undefined;
   }
 };
@@ -397,6 +439,19 @@ const customSplitStateEqual = (left: unknown, right: unknown): boolean =>
   left === right || JSON.stringify(left) === JSON.stringify(right);
 
 export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
+  addExerciseNote: (workoutId, exerciseId, text) => {
+    if (get().currentSession?.id !== workoutId) throw new Error('This workout is no longer active.');
+    addExerciseNoteSync(workoutId, exerciseId, text);
+    set({ currentSession: readSessionByIdSync(Number(workoutId)) ?? null });
+  },
+  deleteExerciseNote: (exerciseId, noteId) => {
+    deleteExerciseNoteSync(exerciseId, noteId);
+    const current = get().currentSession;
+    set({
+      currentSession: current ? readSessionByIdSync(Number(current.id)) ?? null : null,
+      sessions: readCompletedSessionsSync(),
+    });
+  },
   profile: null,
   sessions: [],
   currentSession: null,
@@ -477,7 +532,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
       return null;
     }
   },
-  applyActiveSetAction: (target, action, expectedWeightStepKg) => {
+  applyActiveSetAction: (target, action, expectedWeightStepKg, options) => {
     const state = get();
     if (!state.isHydrated || state.hydrationError || !state.profile) return { status: 'unavailable' };
     return runGuardedAction('applyActiveSetAction', (): WorkoutSetActionResult => {
@@ -495,7 +550,8 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
         const next = getNextIncompleteExerciseIndex(exercises, exerciseIndex);
         // Persist completion, propagation and automatic focus advance together.
         // A failed focus write cannot strand the widget on a finished exercise.
-        const focus = updateCurrentSets(exerciseIndex, updates, completedExercise && next !== -1
+        const advance = options?.advanceFocus !== false && completedExercise && next !== -1;
+        const focus = updateCurrentSets(exerciseIndex, updates, advance
           ? { workoutId: session.id, exerciseIndex: next } : undefined);
         set({ currentSession: { ...session, exercises },
           workoutFocus: focus ?? get().workoutFocus,
@@ -566,19 +622,66 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
     set({ profile: nextProfile });
   }),
 
+  // This acceptance boundary intentionally propagates failures to the setup
+  // screen. Publish completion only after the single profile upsert commits.
+  completeNoProgramOnboarding: (name = '', weightUnit) => {
+    const existing = get().profile;
+    if (existing?.onboardingCompleted) return existing;
+    const profile = { ...createNoProgramProfile(), name: name.trim(), onboardingCompleted: true,
+      ...(weightUnit ? { weightUnit, weightUnitConfirmed: true } : {}) };
+    writeProfile(profile);
+    set({ profile });
+    return profile;
+  },
+
+  confirmWorkoutWeightUnit: (unit) => {
+    if (unit !== 'kg' && unit !== 'lbs') throw Error('Choose kilograms or pounds.');
+    const existing = get().profile;
+    if (!existing) throw Error('A profile is required to confirm units.');
+    if (existing.weightUnitConfirmed && existing.weightUnit === unit) return existing;
+    const profile = { ...existing, weightUnit: unit, weightUnitConfirmed: true };
+    writeProfile(profile);
+    set({ profile });
+    return profile;
+  },
+
+  acceptStackProgram: (frequency, structure, context, name = '') => {
+    validateProgram(frequency, structure);
+    const existing = get().profile;
+    if (context === 'onboarding' && existing?.onboardingCompleted) return existing;
+    if (context === 'configuration' && !existing?.onboardingCompleted) throw Error('Finish setup before configuring a program.');
+    const base = context === 'configuration' ? existing! : { ...createNoProgramProfile(), name: name.trim() };
+    if (base.programMode === 'stack' && base.programWeeklyGoal === frequency && base.threeDayStructure === structure && base.onboardingCompleted) return base;
+    const profile: UserProfile = { ...base, programWeeklyGoal: frequency, threeDayStructure: structure,
+      programMode: 'stack', activeSplitId: null, onboardingCompleted: true };
+    // A newly generated plan replaces an edited Stack's plan rather than leaving a stale copy.
+    if (context === 'configuration') writeProfileReplacingStackPlanSync(profile);
+    else writeProfile(profile);
+    set({ profile, currentCustomSplit: null });
+    if (context === 'configuration') void get().refreshCustomSplits();
+    return profile;
+  },
+
   updateProfile: (updates) => runGuardedAction('updateProfile', () => {
     const profile = get().profile;
     if (!profile) return;
-    const nextProfile = { ...profile, ...updates };
+    const nextProfile = normalizeProfile({ ...profile, ...updates });
     writeProfile(nextProfile);
     set({ profile: nextProfile });
   }),
 
   refreshCustomSplits: async () => {
-    await runGuardedAsyncAction('refreshCustomSplits', async () => {
-      const requestedActiveSplitId = get().profile?.activeSplitId ?? null;
+    try {
+      const requestedProfile = get().profile;
+      const requestedActiveSplitId = requestedProfile?.activeSplitId ?? null;
       const refreshed = await readCustomSplitState(requestedActiveSplitId);
       const state = get();
+      if (requestedProfile?.programMode === 'custom' &&
+          state.profile?.programMode === 'custom' && state.profile.activeSplitId === requestedActiveSplitId &&
+          refreshed.currentCustomSplit === null) {
+        chooseNoProgramSync();
+        set({ profile: readProfileSync() });
+      }
       const customSplits = customSplitStateEqual(state.customSplits, refreshed.customSplits)
         ? state.customSplits
         : refreshed.customSplits;
@@ -600,18 +703,38 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
       ) {
         set({ customSplits, currentCustomSplit });
       }
-    });
+    } catch (error) {
+      console.error('[workoutStore] refreshCustomSplits failed', error);
+      Alert.alert('Couldn’t load your routines', 'Your active plan stays the same. Try again.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Retry', onPress: () => { void get().refreshCustomSplits(); } },
+      ]);
+    }
   },
 
-  loadCustomSplit: (splitId) =>
-    runGuardedAsyncAction('loadCustomSplit', async () => {
+  loadCustomSplit: async (splitId) => {
+    const requestedProfile = get().profile;
+    try {
       const currentCustomSplit = await getCustomSplitDetailAsync(splitId);
       const state = get();
-      if (!customSplitStateEqual(state.currentCustomSplit, currentCustomSplit)) {
+      if (currentCustomSplit === null && requestedProfile?.programMode === 'custom' &&
+          requestedProfile.activeSplitId === splitId && state.profile === requestedProfile) {
+        chooseNoProgramSync();
+        set({ profile: readProfileSync() });
+      }
+      if (state.profile === requestedProfile && !customSplitStateEqual(state.currentCustomSplit, currentCustomSplit)) {
         set({ currentCustomSplit });
       }
       return currentCustomSplit;
-    }),
+    } catch (error) {
+      console.error('[workoutStore] loadCustomSplit failed', error);
+      Alert.alert('Couldn’t load this routine', 'Your active plan stays the same. Try again.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Retry', onPress: () => { void get().loadCustomSplit(splitId); } },
+      ]);
+      return undefined;
+    }
+  },
 
   createSplit: (name) =>
     runGuardedAsyncAction('createSplit', async () => {
@@ -632,11 +755,12 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
   deleteSplit: async (splitId) => {
     await runGuardedAsyncAction('deleteSplit', async () => {
       deleteCustomSplitSync(splitId);
+      set({ profile: readProfileSync() });
       const currentSplitId = get().currentCustomSplit?.id === splitId
         ? null
         : get().currentCustomSplit?.id ?? null;
-      const customSplitState = await readCustomSplitState(currentSplitId);
-      set({ ...customSplitState, profile: readProfileSync() });
+      if (currentSplitId === null) set({ currentCustomSplit: null });
+      await get().refreshCustomSplits();
     });
   },
 
@@ -700,16 +824,35 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
       createCustomExerciseSync(name, workoutType, primaryMuscle, equipment, loadType, metric)
     ),
 
+  activateSharedRoutine: (splitId) => {
+    const existing = get().profile;
+    if (!existing?.onboardingCompleted) throw Error('Finish setup before using this routine.');
+    if (!Number.isSafeInteger(splitId) || splitId <= 0) throw Error('This routine is no longer available.');
+    setActiveSplitSync(splitId);
+    const profile: UserProfile = { ...existing, programMode: 'custom', activeSplitId: splitId };
+    set({ profile, currentCustomSplit: null });
+    void get().refreshCustomSplits();
+    return profile;
+  },
+
   setActiveSplit: (splitId) => runGuardedAction('setActiveSplit', () => {
     setActiveSplitSync(splitId);
+    set({ profile: readProfileSync() });
+  }),
+
+  chooseNoProgram: () => runGuardedAction('chooseNoProgram', () => {
+    chooseNoProgramSync();
     set({ profile: readProfileSync() });
   }),
 
   saveCustomSplitDraft: (name, workouts, options) =>
     runGuardedAsyncAction('saveCustomSplitDraft', async () => {
       const splitId = saveCustomSplitDraftSync(name, workouts, options);
-      const customSplitState = await readCustomSplitState(splitId);
-      set({ ...customSplitState, profile: readProfileSync() });
+      const profile = readProfileSync();
+      // The transaction has committed. A later read failure must not turn a
+      // successful save into a retry that creates a duplicate routine.
+      set({ profile });
+      await get().refreshCustomSplits();
       return splitId;
     }),
 
@@ -762,7 +905,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
       completed: false,
       retroactive: false,
     });
-    set({ currentSession: newSession, workoutFocus: readCurrentWorkoutFocusSync(), selectedSet: null });
+    set({ currentSession: readSessionByIdSync(Number(newSession.id)) ?? newSession, workoutFocus: readCurrentWorkoutFocusSync(), selectedSet: null });
   },
 
   startEmptyWorkout: () => runGuardedAction('startEmptyWorkout', () => {
@@ -772,16 +915,16 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
     return true;
   }) === true,
 
-  startWorkoutFromArchetype: (archetypes) => runGuardedAction('startWorkoutFromArchetype', () => {
-    const newSession = persistWorkoutFromArchetype(archetypes);
-    set({ currentSession: newSession, workoutFocus: readCurrentWorkoutFocusSync(), selectedSet: null });
+  startWorkoutFromArchetype: (archetypes, variants) => runGuardedAction('startWorkoutFromArchetype', () => {
+    const newSession = persistWorkoutFromArchetype(archetypes, variants);
+    set({ currentSession: readSessionByIdSync(Number(newSession.id)) ?? newSession, workoutFocus: readCurrentWorkoutFocusSync(), selectedSet: null });
   }),
 
   startWorkoutFromCustomWorkout: (splitId, workoutId) =>
     runGuardedAction('startWorkoutFromCustomWorkout', () => {
       try {
         const newSession = persistWorkoutFromCustomWorkout(splitId, workoutId);
-        set({ currentSession: newSession, workoutFocus: readCurrentWorkoutFocusSync(), selectedSet: null });
+        set({ currentSession: readSessionByIdSync(Number(newSession.id)) ?? newSession, workoutFocus: readCurrentWorkoutFocusSync(), selectedSet: null });
         return true;
       } catch (error) {
         if (!(error instanceof EmptyCustomWorkoutError)) throw error;
@@ -894,9 +1037,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
     );
 
     replaceCurrentSessionExercise(exerciseIndex, replacement);
-    const exercises = [...session.exercises];
-    exercises[exerciseIndex] = replacement;
-    set({ currentSession: { ...session, exercises }, selectedSet: null });
+    set({ currentSession: readSessionByIdSync(Number(session.id)) ?? session, selectedSet: null });
   }),
 
   appendExerciseToSession: (name, expectedSessionId) => runGuardedAction('appendExerciseToSession', () => {
@@ -924,7 +1065,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 
     appendCurrentSessionExercise(newExercise, session.id, session.origin === 'adhoc');
     set({
-      currentSession: {
+      currentSession: readSessionByIdSync(Number(session.id)) ?? {
         ...session,
         workoutTypes: session.workoutTypes.includes(type)
           ? session.workoutTypes
@@ -1053,7 +1194,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
     const sessionsThisWeek = readCompletedSessionsSync().filter((session) =>
       weekDates.includes(getSessionLocalDate(session.date))
     );
-    return { completed: sessionsThisWeek.length, goal: profile.weeklyGoal };
+    return weeklyTrainingProgress(sessionsThisWeek, weekDates, profile.weeklyGoal);
   },
 
   getWeekStreak: () => {

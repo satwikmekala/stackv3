@@ -1,0 +1,20 @@
+{
+  "fullRegression": {
+    "command": "node --test tests/*.test.cjs",
+    "passed": 641,
+    "failed": 0,
+    "skipped": 0,
+    "note": "Rerun after final layout/navigation and transaction-backed import-recovery source changes."
+  },
+  "typecheck": "passed",
+  "changedCodeLint": "passed",
+  "diffCheck": "passed",
+  "cutover": "deferred",
+  "remaining": [
+    "Actual VoiceOver and physical device",
+    "Complete touch scrolling and effects matrix",
+    "Native Files restore",
+    "Actual network-disconnected operation"
+  ],
+  "receiptRecovery": "Passed SQLite rollback/reopen/restore tests and native simulated missing handoff result; no timed kill in the write window."
+}

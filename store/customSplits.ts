@@ -1,3 +1,4 @@
+import type { DayColor } from '@/features/custom-split/colors';
 import type { ExerciseLoadType, ExerciseMetric, WorkoutType } from '@/store/workoutStore';
 
 export const EMPTY_CUSTOM_WORKOUT_MESSAGE =
@@ -11,6 +12,9 @@ export class EmptyCustomWorkoutError extends Error {
 }
 
 export interface CustomSplitSummary {
+  hasHevyDetails?: boolean;
+  /** The edited Stack's plan. Shown as Stack's plan, never in the routine library. */
+  isStackPlan?: boolean;
   id: number;
   name: string;
   createdAt: string;
@@ -24,10 +28,12 @@ export interface CustomSplit {
   name: string;
   createdAt: string;
   updatedAt: string;
+  isStackPlan?: boolean;
   workouts: CustomSplitWorkout[];
 }
 
 export interface CustomSplitWorkout {
+  color?: DayColor | null;
   id: number;
   splitId: number;
   name: string;

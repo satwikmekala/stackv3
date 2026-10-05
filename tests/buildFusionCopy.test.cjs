@@ -35,16 +35,16 @@ const copyOf = (sessions, state, weekId, { unit = 'kg', builtBefore = 0 } = {}) 
 });
 const memory = () => { let value = null; return { getItem: async () => value, setItem: async (_key, next) => { value = next; } }; };
 
-test('one-piece week: singular title, one row, PIECE and no PR segment', () => {
+test("one-block week: singular title, one row, BLOCK and no PR segment", () => {
   const sessions = [session(1, '2026-09-15', [lift('Bench press', [set(60, 8), set(60, 6)])])];
   const state = derive(sessions);
   const copy = copyOf(sessions, state, 'week:2026-09-14', { builtBefore: 0 });
-  assert.deepEqual(copy.week, { range: '14–20 SEP', title: 'One piece.', rows: [{ title: 'Push · Tue', detail: '840 kg' }] });
-  assert.deepEqual(copy.sealed, { kicker: '14–20 SEP · SEALED', title: 'One week.\nOne layer.', summary: '1 PIECE · 840 KG MOVED', thickest: null });
-  assert.deepEqual(copy.stack, { label: 'YOUR STACK', before: 0, after: 1 });
+  assert.deepEqual(copy.week, { range: "14–20 Sep", title: "One block.", rows: [{ title: 'Push · Tue', detail: '840 kg' }] });
+  assert.deepEqual(copy.sealed, { kicker: "14–20 Sep · COMPLETE", title: 'One week.\nOne layer.', summary: "1 BLOCK · 840 kg MOVED", thickest: null });
+  assert.deepEqual(copy.stack, { label: 'MY STACK', before: 0, after: 1 });
 });
 
-test('multi-piece week with lifts up and PRs: chronological rows, aggregate tonnes, PRS', () => {
+test("multi-block week with lifts up and PRs: chronological rows, aggregate tonnes, PRs", () => {
   const sessions = [
     session(1, '2026-09-08', [lift('Bench press', [set(80, 8)]), lift('Squat', [set(100, 5)])]),
     session(2, '2026-09-18', [lift('Bench press', [set(85, 8)]), lift('Squat', [set(105, 5)])]),
@@ -53,31 +53,31 @@ test('multi-piece week with lifts up and PRs: chronological rows, aggregate tonn
   ];
   const state = derive(sessions);
   const copy = copyOf(sessions, state, 'week:2026-09-14', { builtBefore: 1 });
-  assert.equal(copy.week.title, 'Three pieces.');
+  assert.equal(copy.week.title, "Three blocks.");
   assert.deepEqual(copy.week.rows, [
     { title: 'Pull · Mon', detail: '640 kg' },
     { title: 'Legs · Wed', detail: '500 kg' },
     { title: 'Push · Fri', detail: '1,205 kg · 2 lifts up · PRs' },
   ]);
-  assert.equal(copy.sealed.summary, '3 PIECES · 2.3 T MOVED · 2 PRS');
-  assert.equal(copy.sealed.kicker, '14–20 SEP · SEALED');
-  assert.deepEqual(copy.stack, { label: 'YOUR STACK', before: 1, after: 2 });
+  assert.equal(copy.sealed.summary, "3 BLOCKS · 2.3 t MOVED · 2 PRs");
+  assert.equal(copy.sealed.kicker, "14–20 Sep · COMPLETE");
+  assert.deepEqual(copy.stack, { label: 'MY STACK', before: 1, after: 2 });
 });
 
 test('a single PR shows "PR" in its row and "1 PR" in the summary', () => {
   const sessions = [session(1, '2026-09-08', [lift('Bench press', [set(80, 8)])]), session(2, '2026-09-15', [lift('Bench press', [set(80, 9)])])];
   const copy = copyOf(sessions, derive(sessions), 'week:2026-09-14');
   assert.deepEqual(copy.week.rows, [{ title: 'Push · Tue', detail: '720 kg · 1 lift up · PR' }]);
-  assert.equal(copy.sealed.summary, '1 PIECE · 720 KG MOVED · 1 PR');
+  assert.equal(copy.sealed.summary, "1 BLOCK · 720 kg MOVED · 1 PR");
 });
 
-test('a zero-piece week never triggers, and an empty week has no copy', () => {
+test("a zero-block week never triggers, and an empty week has no copy", () => {
   const state = derive([session(1, '2026-09-08', [lift('Bench press', [set(60, 8)])])], '2026-09-23');
   assert.equal(reconcileFusion(state, { version: 1, observedWeek: '2026-09-14' }).weekId, null);
   assert.equal(copyOf([], state, 'week:2026-09-14'), null);
 });
 
-test('several unseen weeks: only the most recent with pieces plays, the rest are seen, count includes them', async () => {
+test("several unseen weeks: only the most recent with blocks plays, the rest are seen, count includes them", async () => {
   const sessions = [
     session(1, '2026-08-25', [lift('Bench press', [set(60, 8)])]),
     session(2, '2026-09-01', [lift('Bench press', [set(60, 8)])]),
@@ -92,9 +92,9 @@ test('several unseen weeks: only the most recent with pieces plays, the rest are
   const claimed = await coordinator.claim(state);
   assert.deepEqual(claimed, { weekId: 'week:2026-09-21', builtBefore: 1 });
   const copy = copyOf(sessions, state, claimed.weekId, { builtBefore: claimed.builtBefore });
-  assert.deepEqual(copy.stack, { label: 'YOUR STACK', before: 1, after: 4 });
+  assert.deepEqual(copy.stack, { label: 'MY STACK', before: 1, after: 4 });
   assert.deepEqual([0, 0.34, 0.67, 1].map((progress) => builtCount(copy.stack, progress)), [1, 2, 3, 4]);
-  assert.equal(weeksBuilt(builtCount(copy.stack, 1)), '4 weeks built');
+  assert.equal(weeksBuilt(builtCount(copy.stack, 1)), "4 layers built");
   assert.equal(await coordinator.claim(state), null, 'silent weeks are marked seen');
 });
 
@@ -130,10 +130,10 @@ test('"Your thickest layer yet." only when strictly thicker than every earlier s
 });
 
 test('date ranges match the Monolith, including across months', () => {
-  assert.equal(weekRange('2026-09-14', '2026-09-20'), '14–20 SEP');
-  assert.equal(weekRange('2026-09-28', '2026-10-04'), '28 SEP–4 OCT');
+  assert.equal(weekRange('2026-09-14', '2026-09-20'), "14–20 Sep");
+  assert.equal(weekRange('2026-09-28', '2026-10-04'), "28 Sep–4 Oct");
   const sessions = [session(1, '2026-09-29', [lift('Bench press', [set(60, 8)])])];
-  assert.equal(copyOf(sessions, derive(sessions, '2026-10-07'), 'week:2026-09-28').sealed.kicker, '28 SEP–4 OCT · SEALED');
+  assert.equal(copyOf(sessions, derive(sessions, '2026-10-07'), 'week:2026-09-28').sealed.kicker, "28 Sep–4 Oct · COMPLETE");
 });
 
 test('lb profiles: full pounds per session, lb aggregate in the summary', () => {
@@ -143,9 +143,9 @@ test('lb profiles: full pounds per session, lb aggregate in the summary', () => 
   ];
   const copy = copyOf(sessions, derive(sessions), 'week:2026-09-14', { unit: 'lbs' });
   assert.deepEqual(copy.week.rows.map((row) => row.detail), ['2,205 lb', '1,984 lb']);
-  assert.equal(copy.sealed.summary, '2 PIECES · 4,189 LB MOVED');
+  assert.equal(copy.sealed.summary, "2 BLOCKS · 4,189 lb MOVED");
 });
 
-test('beats: the week while pieces lift, held through the press, sealed as the block seats', () => {
+test("beats: the week while blocks lift, held through the press, sealed as the block seats", () => {
   assert.deepEqual([null, 'isolate', 'compress', 'fuse', 'seat', 'sealed'].map(fusionBeat), [1, 1, 2, 2, 3, 3]);
 });

@@ -1,6 +1,7 @@
 import { AppState, Platform } from 'react-native';
 import { requireOptionalNativeModule } from 'expo';
 import { useWorkoutStore } from '@/store/workoutStore';
+import { useAppPreferences } from '@/store/appPreferences';
 import { createWorkoutLiveActivityCoordinator } from './coordinator';
 import { deriveWorkoutLiveActivityState } from './state';
 import { deriveInteractiveWorkoutPresentation } from './presentation';
@@ -36,7 +37,10 @@ export function startWorkoutLiveActivitySync(): () => void {
         // Never interpret the pre-SQLite empty store as a discarded workout.
         if (!state.isHydrated || state.hydrationError) return;
         markLiveActivityLatency('rnPresentationDeriveBegin');
-        let payload = deriveWorkoutLiveActivityState(state);
+        const preferences = useAppPreferences.getState();
+        // An unread preference never authorizes showing workout data outside the app.
+        if (!preferences.ready) return;
+        let payload = preferences.liveActivities ? deriveWorkoutLiveActivityState(state) : null;
         const native = requireOptionalNativeModule<{ stackLiveActivityInteractionVersion?: number; getStackLiveActivityRevision?: () => number }>('ExpoWidgets');
         if (payload && version >= 17 && native?.stackLiveActivityInteractionVersion === 2) {
           try {
@@ -56,12 +60,14 @@ export function startWorkoutLiveActivitySync(): () => void {
         );
       };
       const unsubscribe = useWorkoutStore.subscribe(() => reconcile());
+      const unsubscribePreferences = useAppPreferences.subscribe(() => reconcile(true));
       refresh = () => reconcile(true, true);
       const appSubscription = AppState.addEventListener('change', (state) => {
         if (state === 'active') reconcile(true);
       });
       detach = () => {
         unsubscribe();
+        unsubscribePreferences();
         refresh = undefined;
         appSubscription.remove();
       };

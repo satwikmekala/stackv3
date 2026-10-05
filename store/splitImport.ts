@@ -40,24 +40,40 @@ const sameCustomDefinition = (local: ExerciseCatalogItem, shared: PortableCustom
 export const persistPortableSplit = (
   db: SQLiteDatabase,
   input: PortableSplit,
-  seeds: readonly ExerciseSeed[]
+  seeds: readonly ExerciseSeed[],
+  attemptId?: string
 ): ImportedSplit => {
   const serialized = serializeSharedSplit(input);
   if (!serialized.ok) throw new SplitImportError(serialized.error.message);
   const parsed = parseSharedSplitJson(serialized.value);
   if (!parsed.ok) throw new SplitImportError(parsed.error.message);
   const split = parsed.value;
+  if (attemptId !== undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(attemptId)) {
+    throw new SplitImportError('Couldn’t recover this import. Open the shared routine again.');
+  }
   const seedByKey = new Map(seeds.map((seed) => [exerciseMatchKey(seed.name), seed]));
   const reservedNames = new Set(split.workouts.flatMap((workout) =>
     workout.exercises.map((exercise) => exerciseMatchKey(exercise.name))));
   for (const workout of split.workouts) for (const exercise of workout.exercises) {
     if (exercise.kind === 'builtin' && !seedByKey.has(exerciseMatchKey(exercise.name))) {
-      throw new SplitImportError('This split uses exercises from a newer version of Stack. Update Stack to import it.');
+      throw new SplitImportError('This routine needs a newer Stack. Update to open it.');
     }
   }
 
   let result!: ImportedSplit;
   db.withTransactionSync(() => {
+    if (attemptId) {
+      const receipt = db.getFirstSync<{ payload: string; split_id: number }>(
+        'SELECT payload, split_id FROM shared_split_import_receipts WHERE attempt_id = ?', attemptId);
+      if (receipt) {
+        if (receipt.payload !== serialized.value) throw new SplitImportError('This import belongs to a different routine.');
+        const existing = db.getFirstSync<{ name: string }>('SELECT name FROM custom_splits WHERE id = ?', receipt.split_id);
+        if (!existing) throw new SplitImportError('This saved routine could not be recovered.');
+        result = { splitId: receipt.split_id, name: existing.name, workoutIds: db.getAllSync<{ id: number }>(
+          'SELECT id FROM custom_split_workouts WHERE split_id = ? ORDER BY position, id', receipt.split_id).map(row => row.id) };
+        return;
+      }
+    }
     const catalog: ExerciseCatalogItem[] = db.getAllSync<{
       id: number; name: string; workout_type: ExerciseCatalogItem['workoutType'];
       primary_muscle: string; equipment: string | null; load_type: ExerciseCatalogItem['loadType'];
@@ -121,14 +137,17 @@ export const persistPortableSplit = (
     const splitId = db.runSync('INSERT INTO custom_splits (name, created_at, updated_at) VALUES (?, ?, ?)',
       name, timestamp, timestamp).lastInsertRowId;
     const workoutIds = split.workouts.map((workout, position) => {
-      const workoutId = db.runSync('INSERT INTO custom_split_workouts (split_id, name, position) VALUES (?, ?, ?)',
-        splitId, workout.name, position).lastInsertRowId;
+      const workoutId = db.runSync('INSERT INTO custom_split_workouts (split_id, name, position, color) VALUES (?, ?, ?, ?)',
+        splitId, workout.name, position, workout.color ?? null).lastInsertRowId;
       workout.exercises.forEach((exercise, exercisePosition) => {
         db.runSync('INSERT INTO custom_split_workout_exercises (workout_id, exercise_id, position) VALUES (?, ?, ?)',
           workoutId, resolve(exercise), exercisePosition);
       });
       return workoutId;
     });
+    if (attemptId) db.runSync(
+      'INSERT INTO shared_split_import_receipts (attempt_id, payload, split_id) VALUES (?, ?, ?)',
+      attemptId, serialized.value, splitId);
     result = { splitId, name, workoutIds };
   });
   return result;

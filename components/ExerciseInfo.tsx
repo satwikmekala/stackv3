@@ -1,3 +1,4 @@
+import { useMuscleColors } from '@/store/muscleColors';
 import React, { useEffect, useRef, useState } from 'react';
 import { Image, PanResponder, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -46,6 +47,7 @@ export function ExerciseInfo({
   onHidden: () => void;
 }) {
   const { height } = useWindowDimensions();
+  useMuscleColors(state => state.preferences);
   const insets = useSafeAreaInsets();
   const progress = useSharedValue(0);
   const sheetHeight = useSharedValue(height);

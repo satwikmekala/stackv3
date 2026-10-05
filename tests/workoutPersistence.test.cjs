@@ -17,7 +17,7 @@ class Clock extends RealDate {
     return new Clock().valueOf();
   }
 }
-function harness({ schema } = {}) {
+function harness({ schema, mocks = {} } = {}) {
   const sql = new DatabaseSync(':memory:');
   const adapter = {
     getAllSync: (query, ...args) => sql.prepare(query).all(...args),
@@ -37,6 +37,7 @@ function harness({ schema } = {}) {
       }
     },
   };
+  adapter.execSync = (query) => sql.exec(query);
   adapter.execAsync = async (query) => sql.exec(query);
   adapter.runAsync = async (...args) => adapter.runSync(...args);
   adapter.withTransactionAsync = async (fn) => {
@@ -48,6 +49,7 @@ function harness({ schema } = {}) {
   const cache = new Map();
   const alerts = [];
   function load(id) {
+    if (Object.hasOwn(mocks, id)) return mocks[id];
     if (id === 'expo-sqlite') return { openDatabaseAsync: async () => adapter };
     if (id === 'react-native')
       return { Alert: { alert: (...args) => alerts.push(args) } };
@@ -122,7 +124,7 @@ function harness({ schema } = {}) {
       weightIncrementLbs: 5,
       activeSplitId: null,
     });
-  return { sql, adapter, database, store, load, alerts, lifts };
+  return { sql, adapter, database, store, load, alerts, lifts, reloadModule: id => { cache.delete(id); return load(id); } };
 }
 
 test('Build projects persisted completions identically to store history without changing SQLite', () => {
@@ -330,7 +332,7 @@ test('bodyweight history seeds reps without carrying or progressing a hidden wei
   let sets = h.store.getState().currentSession.exercises[0].sets;
   assert.equal(sets[0].weight, 0);
   assert.equal(sets[1].weight, 0);
-  assert.equal(sets[1].reps, 8);
+  assert.equal(sets[1].reps, 10);
 
   h.store.getState().updateProfile({ autoIncreaseWeight: false });
   h.store.getState().updateExerciseSet(0, 1, 12, 40);
@@ -346,7 +348,7 @@ test('bodyweight history seeds reps without carrying or progressing a hidden wei
   h.sql.close();
 });
 
-test('Increase Between Sets on preserves progression from a manually edited baseline', () => {
+test('legacy auto-increase preference no longer increases a manually edited baseline', () => {
   const h = harness();
   h.store.getState().startWorkoutFromArchetype(['push']);
   const before = h.store.getState().currentSession.exercises[0].sets;
@@ -359,8 +361,8 @@ test('Increase Between Sets on preserves progression from a manually edited base
   const sets = h.store.getState().currentSession.exercises[0].sets;
   assert.equal(sets[0].completed, true);
   assert.equal(sets[1].reps, originalSecondSetReps);
-  assert.equal(sets[1].weight, 55.5);
-  assert.equal(sets[1].targetWeight, 55.5);
+  assert.equal(sets[1].weight, 55);
+  assert.equal(sets[1].targetWeight, 55);
   assert.equal(sets[0].reps, startingReps);
   h.sql.close();
 });
@@ -743,7 +745,7 @@ test('rapid increments serialize without lost updates; duplicate event IDs do no
   h.sql.close();
 });
 
-test('double Done completes only the referenced set, preserves Increase Between Sets', () => {
+test('double Done completes only the referenced set, carries the same values forward', () => {
   const h = actionHarness();
   h.store.getState().updateExerciseSet(0, 0, 12, 40.5);
   const old = h.store.getState().getActiveSetTarget();
@@ -753,10 +755,10 @@ test('double Done completes only the referenced set, preserves Increase Between 
   h.drain();
   const sets = h.store.getState().currentSession.exercises[0].sets;
   assert.equal(sets.filter((s) => s.completed).length, 1);
-  assert.equal(sets[1].weight, 41);
+  assert.equal(sets[1].weight, 40.5);
   assert.equal(h.applied.length, 1);
   assert.equal(h.store.getState().getActiveSetTarget().setIndex, 1);
-  assert.equal(h.sql.prepare('SELECT target_weight FROM sets WHERE id = ?').get(Number(h.store.getState().getActiveSetTarget().setId)).target_weight, 41);
+  assert.equal(h.sql.prepare('SELECT target_weight FROM sets WHERE id = ?').get(Number(h.store.getState().getActiveSetTarget().setId)).target_weight, 40.5);
   h.sql.close();
 });
 
@@ -976,7 +978,7 @@ test('Done renders the domain-derived next set immediately; rapid old Done canno
   const doneTarget = local.actionTarget + 'completeSet';
   local = press(local, 'completeSet');
   assert.equal(local.setNumber, 3);
-  assert.equal(local.weight, '85');
+  assert.equal(local.weight, '82.5');
   assert.equal(local.completionPending, true);
   assert.equal(local.actions.completeSet, undefined);
   assert.equal(localWidget().press(local, doneTarget), undefined);
@@ -1315,7 +1317,7 @@ test('v15 migration preserves legacy values, protects ambiguous edits, restores 
   const values = h.sql.prepare('SELECT id, reps, weight, target_reps, target_weight, completed, skipped FROM sets').all();
   h.sql.exec('ALTER TABLE sets DROP COLUMN value_origin; ALTER TABLE sessions DROP COLUMN focus_session_exercise_id; PRAGMA user_version = 14;');
   await h.database.testReopenDatabase();
-  assert.equal(h.sql.prepare('PRAGMA user_version').get().user_version, 18);
+  assert.equal(h.sql.prepare('PRAGMA user_version').get().user_version, h.database.CURRENT_SCHEMA_VERSION);
   assert.deepEqual(h.sql.prepare('SELECT id, reps, weight, target_reps, target_weight, completed, skipped FROM sets').all(), values);
   assert.ok(h.sql.prepare('SELECT value_origin FROM sets').all().every((s) => s.value_origin === 'user'));
   const focus = h.database.readCurrentWorkoutFocusSync();
@@ -1333,6 +1335,24 @@ test('dangerous unused split mutation APIs are removed from both store and datab
   for (const name of ['removeExerciseFromSplit', 'moveExerciseInSplit']) assert.equal(h.store.getState()[name], undefined);
   for (const name of ['removeExerciseFromSplitRecords', 'moveExerciseInSplitRecords']) assert.equal(h.database[name], undefined);
   h.sql.close();
+});
+
+test('in-app final set keeps focus on the finished exercise for its finisher; Live Activity still advances', () => {
+  const h = actionHarness();
+  try {
+    h.act('completeSet'); h.act('completeSet');
+    const target = h.store.getState().getActiveSetTarget();
+    const result = h.store.getState().applyActiveSetAction(target, 'completeSet', undefined, { advanceFocus: false });
+    assert.equal(result.status, 'applied');
+    assert.equal(result.completedExercise, true);
+    assert.equal(result.needsFeedback, false);
+    const focus = h.store.getState().workoutFocus;
+    assert.equal(focus.exerciseIndex, 0);
+    assert.deepEqual(h.database.readCurrentWorkoutFocusSync(), focus);
+    // The finisher's "Next exercise" is the explicit advance.
+    h.store.getState().setWorkoutExerciseIndex(1);
+    assert.equal(h.store.getState().getActiveSetTarget().exerciseIndex, 1);
+  } finally { h.sql.close(); }
 });
 
 test('automatic focus advance rolls back together with final-set completion on persistence failure', () => {
@@ -1462,7 +1482,7 @@ test('lb absolute input stays canonical and round trips without rounding saved w
     assert.equal(exercise.sets[0].weight, 100);
     assert.equal(exercise.entryUnit, 'lbs');
     assert.equal(formatWeight(exercise.sets[0].weight, exercise.entryUnit), '220.5');
-    assert.equal(formatWeight(exercise.sets[1].weight, exercise.entryUnit), formatWeight(100.5, 'lbs'));
+    assert.equal(formatWeight(exercise.sets[1].weight, exercise.entryUnit), formatWeight(100, 'lbs'));
   } finally { h.sql.close(); }
 });
 
@@ -1483,13 +1503,13 @@ test('per-exercise +/- and between-set propagation use entry unit even after Set
     assert.ok(Math.abs(h.active().weight - lbsToKg(180)) < 1e-10);
     h.store.getState().updateProfile({ weightUnit: 'lbs' });
     h.act('completeSet');
-    assert.ok(Math.abs(h.active().weight - lbsToKg(185)) < 1e-10);
+    assert.ok(Math.abs(h.active().weight - lbsToKg(180)) < 1e-10);
     h.store.getState().setWorkoutExerciseIndex(0);
     const edit = h.store.getState().getSetEditTarget();
     assert.equal(h.store.getState().applySetValueAction(edit, 'increaseWeight').status, 'applied');
     assert.equal(h.active().weight, 100.5);
     h.act('completeSet');
-    assert.equal(h.active().weight, 101);
+    assert.equal(h.active().weight, 100.5);
   } finally { h.sql.close(); }
 });
 
@@ -1500,7 +1520,7 @@ test('Live Activity changes label, weight, action step and optimistic next exerc
     changeEntryUnit(h, 1, 'lbs');
     h.store.getState().updateExerciseSet(1, 0, 8, lbsToKg(180));
     let payload = interactive(h);
-    assert.equal(payload.unit, 'lbs');
+    assert.equal(payload.unit, "lb");
     assert.equal(payload.weight, '180');
     assert.equal(payload.interaction.weightStepKg, lbsToKg(5));
     assert.equal(press(payload, 'increaseWeight').weight, '185');
@@ -1514,7 +1534,7 @@ test('Live Activity changes label, weight, action step and optimistic next exerc
     h.act('completeSet'); h.act('completeSet');
     const finalSet = interactive(h);
     const preview = press(finalSet, 'completeSet');
-    assert.equal(preview.unit, 'lbs');
+    assert.equal(preview.unit, 'lb');
     assert.equal(preview.weight, '180');
     assert.equal(preview.interaction.weightStepKg, lbsToKg(5));
     h.act('completeSet');
@@ -1559,7 +1579,7 @@ for (const displayUnit of ['kg', 'lbs']) {
       assert.deepEqual(completed.exercises.map((exercise) => exercise.entryUnit), ['kg', 'lbs']);
       let unit = h.store.getState().profile.weightUnit;
       let log = deriveLiftLog(completed, [], unit).lines;
-      assert.deepEqual(log.map((row) => row.unit), [unit, unit]);
+      assert.deepEqual(log.map((row) => row.unit), [unit === 'lbs' ? 'lb' : 'kg', unit === 'lbs' ? 'lb' : 'kg']);
       assert.deepEqual(log.map((row) => row.value), [formatWeight(100, unit), formatWeight(lbsToKg(180), unit)]);
       const summary = deriveWorkoutSummary(completed);
       assert.ok(Math.abs(summary.volumeKg - (100 + lbsToKg(180)) * 8) < 1e-9);
@@ -1571,7 +1591,7 @@ for (const displayUnit of ['kg', 'lbs']) {
       h.store.getState().updateProfile({ weightUnit: unit === 'kg' ? 'lbs' : 'kg' });
       unit = h.store.getState().profile.weightUnit;
       log = deriveLiftLog(history[0], [], unit).lines;
-      assert.deepEqual(log.map((row) => row.unit), [unit, unit]);
+      assert.deepEqual(log.map((row) => row.unit), [unit === 'lbs' ? 'lb' : 'kg', unit === 'lbs' ? 'lb' : 'kg']);
       assert.equal(log[1].value, formatWeight(lbsToKg(180), unit));
       assert.deepEqual(h.sql.prepare('SELECT * FROM sets ORDER BY id').all(), snapshot);
     } finally { h.sql.close(); }
@@ -1637,9 +1657,9 @@ for (const preference of ['kg', 'lbs']) {
       const profile = h.sql.prepare('SELECT * FROM profile').get();
       const oldExercises = h.sql.prepare('SELECT id, session_id, exercise_id, position FROM session_exercises ORDER BY id').all();
       await h.database.testReopenDatabase();
-      assert.equal(h.sql.prepare('PRAGMA user_version').get().user_version, 18);
+      assert.equal(h.sql.prepare('PRAGMA user_version').get().user_version, h.database.CURRENT_SCHEMA_VERSION);
       assert.deepEqual(h.sql.prepare(legacySets).all(), values);
-      assert.deepEqual(h.sql.prepare('SELECT * FROM profile').get(), profile);
+      assert.deepEqual({ ...h.sql.prepare('SELECT * FROM profile').get() }, { ...profile, program_weekly_goal: 3, program_mode: 'stack', three_day_structure: 'push-pull-legs', weight_unit_confirmed: 1 });
       assert.deepEqual(h.sql.prepare('SELECT id, session_id, exercise_id, position FROM session_exercises ORDER BY id').all(), oldExercises);
       assert.ok(h.sql.prepare('SELECT entry_unit FROM session_exercises').all().every((row) => row.entry_unit === preference));
       assert.equal(h.database.readCompletedSessionsSync()[0].completedAt, null);
@@ -1660,7 +1680,7 @@ for (const preference of ['kg', 'lbs']) {
   });
 }
 
-test('real v14 schema (last committed) migrates straight to v18 with every column, backfill and an idempotent reopen', async () => {
+test('real v14 schema (last committed) migrates straight to the current schema with every column, backfill and an idempotent reopen', async () => {
   const columns = (sql) => Object.fromEntries(['exercises', 'split_templates', 'archetype_templates', 'sessions', 'session_exercises', 'sets', 'profile']
     .map((table) => [table, sql.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name).sort()]));
   const fresh = harness();
@@ -1690,7 +1710,7 @@ test('real v14 schema (last committed) migrates straight to v18 with every colum
     const legacyRows = h.sql.prepare('SELECT id, session_exercise_id, set_index, weight, completed, skipped, bonus_type FROM sets ORDER BY id').all();
 
     await h.database.testReopenDatabase();
-    assert.equal(h.sql.prepare('PRAGMA user_version').get().user_version, 18);
+    assert.equal(h.sql.prepare('PRAGMA user_version').get().user_version, h.database.CURRENT_SCHEMA_VERSION);
     assert.deepEqual(columns(h.sql), freshColumns);
     assert.deepEqual(h.sql.prepare("SELECT type, name FROM sqlite_master WHERE type IN ('index', 'trigger') ORDER BY name").all(), freshObjects);
     assert.deepEqual(h.sql.prepare('SELECT origin, completed_at FROM sessions ORDER BY id').all().map((r) => [r.origin, r.completed_at]),
@@ -1785,7 +1805,7 @@ test('four-exercise product example retains canonical kg and reformats completed
     const { deriveLiftLog } = h.load('@/store/liftLog');
     assert.deepEqual(deriveLiftLog(completed, [], h.store.getState().profile.weightUnit).lines.map((line) => `${line.value} ${line.unit}`), ['100 kg', '81.6 kg', '25 kg', '18.1 kg']);
     h.store.getState().updateProfile({ weightUnit: 'lbs' });
-    assert.deepEqual(deriveLiftLog(saved, [], h.store.getState().profile.weightUnit).lines.map((line) => `${line.value} ${line.unit}`), ['220.5 lbs', '180 lbs', '55.1 lbs', '40 lbs']);
+    assert.deepEqual(deriveLiftLog(saved, [], h.store.getState().profile.weightUnit).lines.map((line) => `${line.value} ${line.unit}`), ["220.5 lb", "180 lb", "55.1 lb", "40 lb"]);
     assert.deepEqual(h.database.readCompletedSessionsSync()[0].exercises.map((exercise) => exercise.sets[0].weight), weights);
   } finally { h.sql.close(); }
 });
@@ -1888,7 +1908,7 @@ test('Slice 3: a user override on set 2 survives completing and correcting set 1
   } finally { h.sql.close(); }
 });
 
-test('Slice 3: hit and exceeded targets suggest one configured increment; the baseline stays', () => {
+test('Slice 3: hit and exceeded targets suggest a fixed suggestion independent of manual increments; the baseline stays', () => {
   const h = harness();
   try {
     h.store.getState().updateProfile({ weightIncrement: 2.5 });
@@ -1899,9 +1919,9 @@ test('Slice 3: hit and exceeded targets suggest one configured increment; the ba
     ] });
     startPush(h);
     assert.deepEqual(weightsOf(h), [60, 65, 70]);
-    assert.deepEqual([suggestionFor(h, 0)?.suggestedKg, suggestionFor(h, 1)?.suggestedKg, suggestionFor(h, 2)], [62.5, 67.5, null]);
+    assert.deepEqual([suggestionFor(h, 0)?.suggestedKg, suggestionFor(h, 1)?.suggestedKg, suggestionFor(h, 2)], [60.5, 65.5, null]);
     assert.equal(suggestionFor(h, 0).baselineKg, 60);
-    assert.equal(suggestionFor(h, 0).increment, 2.5);
+    assert.equal(suggestionFor(h, 0).increment, 0.5);
   } finally { h.sql.close(); }
 });
 
@@ -1944,10 +1964,10 @@ test('Slice 3: bonus sets never become working-set defaults and fewer previous s
     assert.deepEqual(exercise.sets.map((set) => set.weight), [60, 65, 65]);
     assert.deepEqual(exercise.sets.map((set) => set.valueOrigin), ['history', 'history', 'propagated']);
     assert.equal(suggestionFor(h, 2), null);
-    // The fallback is automatic, so Increase Between Sets may still recalculate it.
+    // The fallback repeats the logged value without an automatic increase.
     h.store.getState().toggleSetCompleted(0, 0);
     h.store.getState().toggleSetCompleted(0, 1);
-    assert.deepEqual(weightsOf(h), [60, 65, 65.5]);
+    assert.deepEqual(weightsOf(h), [60, 65, 65]);
   } finally { h.sql.close(); }
 });
 
@@ -1990,7 +2010,7 @@ test('Slice 3: first-ever exercise keeps template values and normal propagation'
     h.store.getState().updateExerciseSet(0, 0, 8, 50);
     h.store.getState().toggleSetCompleted(0, 0);
     const next = h.store.getState().currentSession.exercises[0].sets[1];
-    assert.deepEqual([next.weight, next.valueOrigin], [50.5, 'propagated']);
+    assert.deepEqual([next.weight, next.valueOrigin], [50, 'propagated']);
   } finally { h.sql.close(); }
 });
 
@@ -2004,7 +2024,7 @@ test('Slice 3: kg and lb suggestions step in the exercise entry unit, not global
     ] });
     startPush(h);
     let suggestion = suggestionFor(h, 1);
-    assert.deepEqual([suggestion.unit, suggestion.increment, suggestion.suggestedKg], ['kg', 2.5, 62.5]);
+    assert.deepEqual([suggestion.unit, suggestion.increment, suggestion.suggestedKg], ['kg', 0.5, 60.5]);
     // Settings stay kg; this exercise is logged in lbs.
     changeEntryUnit(h, 0, 'lbs');
     assert.equal(h.store.getState().profile.weightUnit, 'kg');
@@ -2026,7 +2046,7 @@ test('Slice 3: accepting uses the validated absolute edit; Live Activity shows t
     insertHistory(h, { date: '2026-09-14', sets: pyramid });
     startPush(h);
     const suggestion = suggestionFor(h, 0);
-    assert.equal(suggestion.suggestedKg, 62.5);
+    assert.equal(suggestion.suggestedKg, 60.5);
     const before = interactive(h);
     assert.equal(before.weight, '60');
     assert.equal(h.load('@/services/liveActivity/state').deriveWorkoutLiveActivityState(h.store.getState()).weight, '60');
@@ -2036,13 +2056,13 @@ test('Slice 3: accepting uses the validated absolute edit; Live Activity shows t
     assert.equal(h.store.getState().applySetValueAction(edit, 'setWeight', suggestion.suggestedKg).status, 'stale');
     assert.deepEqual(weightsOf(h), [60, 65, 70]);
     const next = suggestionFor(h, 1);
-    assert.equal(next.suggestedKg, 67.5);
+    assert.equal(next.suggestedKg, 65.5);
     assert.equal(h.store.getState().applySetValueAction(h.store.getState().getSetEditTarget(), 'setWeight', next.suggestedKg).status, 'applied');
     const accepted = h.store.getState().currentSession.exercises[0].sets[1];
-    assert.deepEqual([accepted.weight, accepted.valueOrigin, accepted.completed], [67.5, 'user', false]);
+    assert.deepEqual([accepted.weight, accepted.valueOrigin, accepted.completed], [65.5, 'user', false]);
     assert.equal(suggestionFor(h, 1), null);
-    assert.equal(interactive(h).weight, '67.5');
-    assert.deepEqual(weightsOf(h), [60, 67.5, 70]);
+    assert.equal(interactive(h).weight, '65.5');
+    assert.deepEqual(weightsOf(h), [60, 65.5, 70]);
   } finally { h.sql.close(); }
 });
 
@@ -2100,6 +2120,112 @@ const hydratedHarness = (options) => {
 };
 const target = (h, exerciseIndex, setIndex) => ({ ...h.database.readCurrentSetTarget(exerciseIndex, setIndex), completed: false });
 
+test('exercise stopwatch starts at zero, stops into persisted seconds, and resumes without counting the pause', () => {
+  const h = hydratedHarness();
+  try {
+    h.store.getState().startEmptyWorkout();
+    const index = appendAndFocus(h, 'Plank');
+    const t = target(h, index, 0);
+    const timer = h.load('@/store/exerciseTimer');
+    assert.equal(timer.startExerciseTimer(t, 1000), true);
+    assert.equal(timer.elapsedTimerMs(timer.useExerciseTimerStore.getState().timer, 1000), 0);
+    assert.equal(timer.elapsedTimerMs(timer.useExerciseTimerStore.getState().timer, 62500), 61500);
+    assert.equal(setRows(h, index)[0].duration_s, 30); // Ticks never change the target.
+    assert.equal(timer.stopExerciseTimer(t, 62500), true);
+    assert.equal(setRows(h, index)[0].duration_s, 61);
+    assert.equal(h.database.testReadCurrentSessionSync().exercises[index].sets[0].durationS, 61);
+    assert.equal(timer.elapsedTimerMs(timer.useExerciseTimerStore.getState().timer, 90000), 61500);
+    assert.equal(timer.startExerciseTimer(t, 100000), true);
+    assert.equal(timer.startExerciseTimer(t, 100200), true); // Duplicate Start cannot reset the clock.
+    assert.equal(timer.stopExerciseTimer(t, 103500), true);
+    assert.equal(setRows(h, index)[0].duration_s, 65);
+    assert.equal(timer.resetExerciseTimer(t), true);
+    assert.equal(timer.useExerciseTimerStore.getState().timer, null);
+    assert.equal(setRows(h, index)[0].duration_s, 30);
+  } finally { h.sql.close(); }
+});
+
+test('logging a running stopwatch saves measured time before propagating to the next timed set', () => {
+  const h = hydratedHarness();
+  try {
+    h.store.getState().startEmptyWorkout();
+    const index = appendAndFocus(h, 'Farmer Carry');
+    const t = target(h, index, 0);
+    const timer = h.load('@/store/exerciseTimer');
+    h.store.getState().applySetValueAction(t, 'setWeight', 30);
+    timer.startExerciseTimer(t, 1000);
+    assert.equal(timer.stopExerciseTimer(t, 86500), true);
+    assert.equal(h.store.getState().applyActiveSetAction(t, 'completeSet').status, 'applied');
+    assert.deepEqual(setRows(h, index).slice(0, 2).map(row => [row.weight, row.duration_s]), [[30, 85], [30, 85]]);
+    assert.equal(timer.useExerciseTimerStore.getState().timer, null);
+    const next = target(h, index, 1);
+    timer.startExerciseTimer(next, 90000);
+    assert.equal(timer.elapsedTimerMs(timer.useExerciseTimerStore.getState().timer, 90000), 0);
+  } finally { h.sql.close(); }
+});
+
+test('stopwatch respects duration bounds and reset restores the planned duration while running', () => {
+  const h = hydratedHarness();
+  try {
+    h.store.getState().startEmptyWorkout();
+    const index = appendAndFocus(h, 'Plank');
+    const t = target(h, index, 0);
+    const timer = h.load('@/store/exerciseTimer');
+    timer.startExerciseTimer(t, 1000);
+    timer.stopExerciseTimer(t, 1200);
+    assert.equal(setRows(h, index)[0].duration_s, 1);
+    timer.resetExerciseTimer(t);
+    timer.startExerciseTimer(t, 2000);
+    assert.equal(timer.resetExerciseTimer(t), true);
+    assert.equal(setRows(h, index)[0].duration_s, 30);
+    assert.equal(timer.useExerciseTimerStore.getState().timer, null);
+    timer.startExerciseTimer(t, 3000);
+    assert.equal(timer.elapsedTimerMs(timer.useExerciseTimerStore.getState().timer, 9000000), 5999000);
+    timer.stopExerciseTimer(t, 9000000);
+    assert.equal(setRows(h, index)[0].duration_s, 5999);
+  } finally { h.sql.close(); }
+});
+
+test('stopwatch survives UI inspection and rejects completed or rep-based targets', () => {
+  const h = hydratedHarness();
+  try {
+    h.store.getState().startEmptyWorkout();
+    const index = appendAndFocus(h, 'Plank');
+    const first = target(h, index, 0);
+    h.store.getState().applyActiveSetAction(first, 'completeSet');
+    const t = target(h, index, 1);
+    const timer = h.load('@/store/exerciseTimer');
+    timer.startExerciseTimer(t, 1000);
+    const started = timer.useExerciseTimerStore.getState().timer;
+    h.store.getState().selectWorkoutSet(index, 0);
+    assert.equal(timer.useExerciseTimerStore.getState().timer, started);
+    assert.equal(timer.startExerciseTimer(h.store.getState().getSetEditTarget(), 2000), false);
+    h.store.getState().clearSelectedSet();
+    assert.equal(timer.elapsedTimerMs(timer.useExerciseTimerStore.getState().timer, 46000), 45000);
+    const bench = appendAndFocus(h, 'Bench Press');
+    assert.equal(timer.useExerciseTimerStore.getState().timer, null);
+    assert.equal(timer.startExerciseTimer(target(h, bench, 0), 47000), false);
+  } finally { h.sql.close(); }
+});
+
+test('skip, swap and discard invalidate stopwatch identities so elapsed time cannot leak into another set', () => {
+  for (const action of ['skip', 'swap', 'discard']) {
+    const h = hydratedHarness();
+    try {
+      h.store.getState().startEmptyWorkout();
+      const index = appendAndFocus(h, 'Plank');
+      const t = target(h, index, 0);
+      const timer = h.load('@/store/exerciseTimer');
+      timer.startExerciseTimer(t, 1000);
+      if (action === 'skip') h.store.getState().toggleSetSkipped(index, 0);
+      if (action === 'swap') h.store.getState().swapCurrentSessionExercise(index, 'Side Plank');
+      if (action === 'discard') h.store.getState().discardWorkout();
+      assert.equal(timer.useExerciseTimerStore.getState().timer, null, action);
+      assert.equal(timer.startExerciseTimer(t, 2000), false, action);
+    } finally { h.sql.close(); }
+  }
+});
+
 test('catalog: rep exercises default to reps; only reviewed holds and carries are timed; Plank alone is legacy seconds', () => {
   const h = hydratedHarness();
   try {
@@ -2153,7 +2279,7 @@ test('real v16 schema: Plank seconds move out of reps (history, active and templ
     ]);
     addSession('2026-09-16T10:00:00.000Z', 0, [[id('Plank'), [[60, 0, 60], [60, 0, 60]]]]);
     await h.database.testReopenDatabase();
-    assert.equal(h.sql.prepare('PRAGMA user_version').get().user_version, 18);
+    assert.equal(h.sql.prepare('PRAGMA user_version').get().user_version, h.database.CURRENT_SCHEMA_VERSION);
 
     const metric = Object.fromEntries(h.sql.prepare('SELECT name, metric FROM exercises').all().map((row) => [row.name, row.metric]));
     assert.deepEqual([metric.Plank, metric['Side Plank'], metric['Bench Press'], metric['Wall Sit Hold']], ['duration', 'duration', 'reps', 'reps']);
@@ -2443,7 +2569,7 @@ test('Adhoc: v17 origin migration conservatively backfills custom/archetype/lega
       INSERT INTO sessions (date, completed) VALUES ('2026-09-14', 1);
       INSERT INTO sessions (date, completed, secondary_archetype_variant) VALUES ('2026-09-14', 0, 'b');`);
     await reloadAdhoc(h);
-    assert.equal(h.sql.prepare('PRAGMA user_version').get().user_version, 18);
+    assert.equal(h.sql.prepare('PRAGMA user_version').get().user_version, h.database.CURRENT_SCHEMA_VERSION);
     assert.deepEqual(h.sql.prepare('SELECT origin FROM sessions ORDER BY id').all().map(r => r.origin), ['custom', 'archetype', 'legacy', 'archetype']);
     const snapshot = h.sql.prepare('SELECT * FROM sessions ORDER BY id').all();
     await reloadAdhoc(h);
@@ -2719,6 +2845,63 @@ test('Adhoc: Live Activity last-set completion retains session; append invalidat
   } finally { h.sql.close(); }
 });
 
+for (const count of [5, 10]) {
+  for (const [name, unit, action] of [
+    ['Bench Press', 'kg', 'increaseWeight'], ['Bench Press', 'lbs', 'decreaseWeight'],
+    ['Push-ups', 'kg', 'increaseReps'], ['Plank', 'kg', 'increaseDuration'],
+    ['Farmer Carry', 'kg', 'decreaseDuration'], ['Farmer Carry', 'lbs', 'increaseWeight'],
+  ]) {
+    test(`Live Activity: ${count} queued ${action} taps on ${name} (${unit}) match the full authoritative presentation`, () => {
+      const h = actionHarness();
+      try {
+        h.store.getState().discardWorkout();
+        h.store.getState().startEmptyWorkout();
+        addAdhoc(h, name);
+        h.store.getState().updateProfile({ weightIncrement: 2.5, weightIncrementLbs: 2.5 });
+        h.store.getState().setExerciseEntryUnit(h.store.getState().getActiveSetTarget(), unit);
+        const exercise = h.store.getState().currentSession.exercises[0];
+        h.store.getState().updateExerciseSet(0, 0, exercise.metric === 'duration' ? 0 : 8,
+          exercise.loadType === 'bodyweight' ? 0 : 80, exercise.metric === 'duration' ? 60 : undefined);
+        let local = interactive(h);
+        const savedBefore = h.database.testReadCurrentSessionSync();
+        for (let i = 0; i < count; i++) {
+          h.enqueue(action, undefined, { target: local.actionTarget + action });
+          local = press(local, action);
+        }
+        assert.deepEqual(h.database.testReadCurrentSessionSync(), savedBefore);
+        h.drain();
+        assert.equal(h.applied.length, count);
+        assert.deepEqual(h.errors, []);
+        // Compare the complete JSON payload, including identities, arithmetic
+        // and next-set preview, as the native no-op reconciliation does.
+        assert.deepEqual(local, JSON.parse(JSON.stringify(interactive(h))));
+      } finally { h.sql.close(); }
+    });
+  }
+
+  test(`Live Activity: ${count} queued old taps cannot mutate a dynamically appended focused exercise`, () => {
+    const h = actionHarness();
+    try {
+      h.store.getState().discardWorkout();
+      h.store.getState().startEmptyWorkout();
+      addAdhoc(h, 'Bench Press');
+      const old = interactive(h);
+      for (let i = 0; i < count; i++) {
+        h.enqueue('increaseWeight', undefined, { target: old.actionTarget + 'increaseWeight' });
+      }
+      addAdhoc(h, 'Farmer Carry');
+      const before = h.database.testReadCurrentSessionSync();
+      const focused = interactive(h);
+      assert.equal(localWidget().press(focused, old.actionTarget + 'increaseWeight'), undefined);
+      h.drain();
+      assert.equal(h.applied.length, 0);
+      assert.deepEqual(h.database.testReadCurrentSessionSync(), before);
+      assert.equal(h.store.getState().getActiveSetTarget().exerciseIndex, 1);
+      assert.deepEqual(interactive(h), focused);
+    } finally { h.sql.close(); }
+  });
+}
+
 test('Adhoc: explicit discard removes empty or logged sessions and all child rows', () => {
   const h = adhocHarness();
   try {
@@ -2732,7 +2915,7 @@ test('Adhoc: explicit discard removes empty or logged sessions and all child row
   } finally { h.sql.close(); }
 });
 
-test('Adhoc: mixed display stays neutral, precise routine name excludes skipped work, global history drives progression and eligible PRs', async () => {
+test('Adhoc: mixed display uses Stack orange, precise routine name excludes skipped work, global history drives progression and eligible PRs', async () => {
   const h = adhocHarness();
   try {
     h.store.getState().updateProfile({ autoIncreaseWeight: false });
@@ -2750,7 +2933,7 @@ test('Adhoc: mixed display stays neutral, precise routine name excludes skipped 
     assert.equal(h.load('@/store/adhocWorkout').defaultAdhocRoutineName(completed,h.database.readExerciseCatalogSync()),'Chest, Shoulders, Triceps');
     const display=h.load('@/constants/archetypes').getSessionWorkoutDisplay(completed);
     assert.equal(display.label,'Workout · Chest / Shoulders / Arms / Core');
-    assert.equal(display.color,h.load('@/constants/theme').redesignColors.ash);
+    assert.equal(display.color,h.load('@/constants/theme').redesignColors.accent);
     assert.equal(completed.archetype,null);
     const summary=h.load('@/store/workoutSummary').deriveWorkoutSummary(completed);
     assert.equal(summary.title,display.label);assert.equal(summary.accent,display.color);
@@ -2845,5 +3028,944 @@ test('Integration: a bodyweight duration-only ad-hoc session completes; an all-s
     assert.ok(completed);
     assert.equal(completed.exercises[1].sets[0].durationS, 30);
     assert.equal(h.load('@/store/workoutSummary').deriveWorkoutSummary(completed).volumeKg, 0);
+  } finally { h.sql.close(); }
+});
+
+test('Splits: palette migration from v18 is additive and idempotent', async () => {
+  const h = harness();
+  try {
+    const exerciseId = h.sql.prepare("SELECT id FROM exercises WHERE name = 'Bench Press'").get().id;
+    const id = h.database.saveCustomSplitDraftSync('Existing', [{ name: 'Upper', exerciseIds: [exerciseId] }]);
+    const before = await h.database.getCustomSplitDetailAsync(id);
+    h.sql.exec('ALTER TABLE custom_split_workouts DROP COLUMN color; PRAGMA user_version = 18;');
+    await h.database.testReopenDatabase();
+    const after = await h.database.getCustomSplitDetailAsync(id);
+    assert.deepEqual(after, before);
+    assert.equal(h.sql.prepare('PRAGMA user_version').get().user_version, h.database.CURRENT_SCHEMA_VERSION);
+    await h.database.testReopenDatabase();
+    assert.deepEqual(await h.database.getCustomSplitDetailAsync(id), after);
+  } finally { h.sql.close(); }
+});
+
+test('Splits: save for later leaves activation and Today detail intact; edit and duplicate preserve colors', async () => {
+  const h = harness();
+  try {
+    const exerciseId = h.sql.prepare("SELECT id FROM exercises WHERE name = 'Bench Press'").get().id;
+    const activeId = await h.store.getState().saveCustomSplitDraft('Active', [{ name: 'Upper', color: 'purple', exerciseIds: [exerciseId] }]);
+    const laterId = await h.store.getState().saveCustomSplitDraft('Later', [{ name: 'Push', color: 'blue', exerciseIds: [exerciseId] }], { activate: false });
+    assert.equal(h.database.readProfileSync().activeSplitId, activeId);
+    assert.equal(h.store.getState().currentCustomSplit.id, activeId);
+    const later = await h.database.getCustomSplitDetailAsync(laterId);
+    const dayId = later.workouts[0].id;
+    h.database.updateCustomSplitDraftSync(laterId, 'Later revised', [{ name: 'Push revised', color: 'teal', persistedWorkoutId: dayId, exerciseIds: [exerciseId] }]);
+    const revised = await h.database.getCustomSplitDetailAsync(laterId);
+    assert.equal(revised.workouts[0].id, dayId); assert.equal(revised.workouts[0].color, 'teal');
+    h.database.duplicateWorkoutSync(dayId);
+    assert.deepEqual((await h.database.getCustomSplitDetailAsync(laterId)).workouts.map(day => day.color), ['teal', 'teal']);
+    assert.equal(h.database.readProfileSync().activeSplitId, activeId);
+  } finally { h.sql.close(); }
+});
+
+test('Splits: onboarding save activates atomically even when activate is false', () => {
+  const h = harness();
+  try {
+    h.sql.exec('UPDATE profile SET onboarding_completed = 0');
+    const exerciseId = h.sql.prepare("SELECT id FROM exercises WHERE name = 'Bench Press'").get().id;
+    const id = h.database.saveCustomSplitDraftSync('First split', [{ name: 'Push', color: 'pink', exerciseIds: [exerciseId] }], { activate: false, completeOnboarding: true });
+    assert.equal(h.database.readProfileSync().activeSplitId, id);
+    assert.equal(h.database.readProfileSync().onboardingCompleted, true);
+  } finally { h.sql.close(); }
+});
+
+
+test('exercise notes persist across reopen, renaming and workout occurrences; reports only receive their session notes', async () => {
+  const h = harness();
+  try {
+    h.sql.exec('PRAGMA user_version = 19');
+    const splitId = h.database.createCustomSplitSync('Notes test');
+    const workoutId = h.database.addWorkoutToSplitSync(splitId, 'Bench day');
+    h.database.addExerciseToWorkoutSync(workoutId, h.lifts[0].id);
+    h.store.getState().startWorkoutFromCustomWorkout(splitId, workoutId);
+    const first = h.store.getState().currentSession;
+    const id = first.exercises[0].exerciseId;
+    assert.ok(Number.isInteger(id));
+    h.store.getState().addExerciseNote(first.id, id, '  Keep shoulders down.\nBetter control today.  ');
+    h.store.getState().addExerciseNote(first.id, id, 'Try a slower eccentric.');
+    assert.equal(h.store.getState().currentSession.exercises[0].notes.length, 2);
+    h.store.getState().renameExercise(id, 'Renamed bench');
+    h.store.getState().toggleSetCompleted(0, 0);
+    h.store.getState().completeWorkout('medium');
+    await h.database.testReopenDatabase();
+    assert.equal(h.database.readCompletedSessionsSync()[0].exercises[0].notes[0].text, 'Keep shoulders down.\nBetter control today.');
+    h.store.getState().startWorkoutFromCustomWorkout(splitId, workoutId);
+    const second = h.store.getState().currentSession;
+    assert.equal(second.exercises[0].exerciseId, id);
+    assert.deepEqual(second.exercises[0].notes, []);
+    assert.equal(h.database.readExerciseNotesSync(id).length, 2);
+    h.store.getState().addExerciseNote(second.id, id, 'Felt stronger today.');
+    h.store.getState().toggleSetCompleted(0, 0);
+    h.store.getState().completeWorkout('easy');
+    const reports = h.load('@/features/report/workoutReport');
+    const completed = h.database.readCompletedSessionsSync();
+    assert.deepEqual(reports.buildWorkoutReport(completed[0], { unit: 'kg' }).exercises[0].notes,
+      ['Keep shoulders down.\nBetter control today.', 'Try a slower eccentric.']);
+    assert.deepEqual(reports.buildWorkoutReport(completed[1], { unit: 'kg' }).exercises[0].notes, ['Felt stronger today.']);
+    const oldest = h.database.readExerciseNotesSync(id).at(-1);
+    h.store.getState().deleteExerciseNote(id, oldest.id);
+    assert.equal(h.database.readExerciseNotesSync(id).length, 2);
+    assert.equal(h.store.getState().sessions[0].exercises[0].notes.length, 1);
+    assert.equal(h.database.readCompletedSessionsSync()[0].exercises[0].notes.length, 1);
+  } finally { h.sql.close(); }
+});
+
+test('notes validate content and stable workout/exercise targets, isolate exercises, and survive discard', () => {
+  const h = harness();
+  try {
+    h.store.getState().startWorkoutFromArchetype(['push']);
+    const current = h.store.getState().currentSession;
+    const id = current.exercises[0].exerciseId;
+    const otherId = current.exercises[1].exerciseId;
+    assert.throws(() => h.store.getState().addExerciseNote(current.id, id, '  '));
+    assert.throws(() => h.store.getState().addExerciseNote(current.id, id, 'x'.repeat(2001)));
+    assert.throws(() => h.store.getState().addExerciseNote('99999', id, 'Stale workout'));
+    assert.throws(() => h.database.addExerciseNoteSync(current.id, 99999, 'Wrong exercise'));
+    h.store.getState().addExerciseNote(current.id, id, 'Remember the seat setting.');
+    assert.deepEqual(h.database.readExerciseNotesSync(otherId), []);
+    const note = h.database.readExerciseNotesSync(id)[0];
+    h.store.getState().deleteExerciseNote(otherId, note.id);
+    assert.equal(h.database.readExerciseNotesSync(id).length, 1);
+    h.store.getState().discardWorkout();
+    assert.equal(h.database.readExerciseNotesSync(id)[0].workoutId, null);
+    h.store.getState().resetAllData();
+    assert.equal(h.sql.prepare('SELECT COUNT(*) AS n FROM exercise_notes').get().n, 0);
+  } finally { h.sql.close(); }
+});
+
+test('notes are available for swapped and newly appended exercises with catalog identities', () => {
+  const h = harness();
+  try {
+    h.store.getState().startWorkoutFromArchetype(['push']);
+    h.store.getState().swapCurrentSessionExercise(0, 'Cable Fly');
+    let current = h.store.getState().currentSession;
+    const deadlift = h.sql.prepare("SELECT id FROM exercises WHERE name = 'Cable Fly'").get().id;
+    assert.equal(current.exercises[0].exerciseId, deadlift);
+    h.store.getState().addExerciseNote(current.id, deadlift, 'Brace first.');
+    h.store.getState().appendExerciseToSession('Plank', current.id);
+    current = h.store.getState().currentSession;
+    const plank = current.exercises.at(-1);
+    assert.ok(Number.isInteger(plank.exerciseId));
+    h.store.getState().addExerciseNote(current.id, plank.exerciseId, 'Keep breathing.');
+    assert.equal(h.database.readExerciseNotesSync(plank.exerciseId)[0].text, 'Keep breathing.');
+  } finally { h.sql.close(); }
+});
+
+test('Settings: weekly goal and optional schedule preserve automatic sequence, active workout and history', () => {
+  const h = harness();
+  try {
+    insertHistory(h, { date: '2026-09-14', sets: pyramid });
+    startPush(h);
+    const state = h.store.getState();
+    const session = JSON.stringify(state.currentSession);
+    const queueState = h.load('@/store/weeklyQueueEngine').getWeeklyQueueState;
+    const queue = queueState().sequence;
+    h.store.getState().updateProfile({ weeklyGoal: 0, trainingDays: [] });
+    assert.equal(h.store.getState().profile.programWeeklyGoal, 3);
+    assert.deepEqual(queueState().sequence, queue);
+    assert.equal(JSON.stringify(h.store.getState().currentSession), session);
+    assert.equal(h.database.readCompletedSessionsSync().length, 1);
+    assert.equal(h.sql.prepare('SELECT weekly_goal, program_weekly_goal, training_days FROM profile').get().program_weekly_goal, 3);
+  } finally { h.sql.close(); }
+});
+
+test('Settings: complete backup restores routines, notes, weights and identifiers exactly; invalid references roll back', () => {
+  const h = harness();
+  try {
+    const session = Number(insertHistory(h, { date: '2026-09-14', sets: pyramid }));
+    const split = h.database.createCustomSplitSync('Saved routine');
+    const workout = h.database.addWorkoutToSplitSync(split, 'Upper');
+    h.database.addExerciseToWorkoutSync(workout, h.lifts[0].id);
+    h.adapter.runSync('INSERT INTO exercise_notes(exercise_id, session_id, text, created_at) VALUES (?, ?, ?, ?)', h.lifts[0].id, session, 'Keep shoulder down', '2026-09-14');
+    const b = h.load('@/store/workoutBackup');
+    const snapshot = b.captureWorkoutBackup(h.adapter, h.database.CURRENT_SCHEMA_VERSION);
+    h.store.getState().updateProfile({ name: 'Changed', weeklyGoal: 7 });
+    h.adapter.runSync('DELETE FROM exercise_notes');
+    h.adapter.runSync('UPDATE sets SET weight=999');
+    b.restoreWorkoutBackup(h.adapter, JSON.parse(JSON.stringify(snapshot)), h.database.CURRENT_SCHEMA_VERSION);
+    assert.deepEqual(b.captureWorkoutBackup(h.adapter, h.database.CURRENT_SCHEMA_VERSION).tables, snapshot.tables);
+    const invalid = JSON.parse(JSON.stringify(snapshot));
+    invalid.tables.sets[0].session_exercise_id = 999999;
+    assert.throws(() => b.restoreWorkoutBackup(h.adapter, invalid, h.database.CURRENT_SCHEMA_VERSION), /references|FOREIGN KEY/);
+    assert.deepEqual(b.captureWorkoutBackup(h.adapter, h.database.CURRENT_SCHEMA_VERSION).tables, snapshot.tables);
+    const malformed = JSON.parse(JSON.stringify(snapshot)); malformed.tables.profile[0].unexpected = 'SQL';
+    assert.throws(() => b.restoreWorkoutBackup(h.adapter, malformed, h.database.CURRENT_SCHEMA_VERSION), /invalid data/);
+    assert.deepEqual(b.captureWorkoutBackup(h.adapter, h.database.CURRENT_SCHEMA_VERSION).tables, snapshot.tables);
+    const csv = b.workoutHistoryCsv(h.database.readCompletedSessionsSync());
+    assert.match(csv, /Weight \(kg\)/); assert.match(csv, /Keep shoulder down/); assert.match(csv, /"60"/);
+  } finally { h.sql.close(); }
+});
+
+test('Settings: additive migration preserves the old program once and subsequent goal edits stay independent', async () => {
+  const h = harness({ schema: fs.readFileSync(path.join(root, 'tests/fixtures/workout-v15.sql'), 'utf8') });
+  try {
+    h.store.getState().updateProfile({ weeklyGoal: 5 });
+    await h.database.testReopenDatabase();
+    const profile = h.database.readProfileSync();
+    assert.equal(profile.programWeeklyGoal, 5);
+    h.store.setState({ profile }); h.store.getState().updateProfile({ weeklyGoal: 0, trainingDays: [] });
+    await h.database.testReopenDatabase(); await h.database.testReopenDatabase();
+    assert.equal(h.database.readProfileSync().weeklyGoal, 0);
+    assert.equal(h.database.readProfileSync().programWeeklyGoal, 5);
+  } finally { h.sql.close(); }
+});
+
+test('Settings: CSV keeps timed measurements distinct and escapes spreadsheet formulas, quotes and multiline notes', () => {
+  const h = harness();
+  try {
+    const csv = h.load('@/store/workoutBackup').workoutHistoryCsv([{ id: 'csv', date: '2026-09-14', completed: true,
+      exercises: [{ name: '=formula', loadType: 'bodyweight', metric: 'duration', notes: [{ text: 'Hold "still"\nBreathe' }],
+        sets: [{ weight: 0, reps: 0, durationS: 45, completed: true }] }] },
+      { id: 'unfinished', date: '2026-09-14', completed: false, exercises: [] }]);
+    assert.match(csv, /"'=formula"/);
+    assert.match(csv, /"1","","","45","true"/);
+    assert.match(csv, /Hold ""still""\nBreathe/);
+    assert.doesNotMatch(csv, /unfinished/);
+  } finally { h.sql.close(); }
+});
+
+function onboardingHarness() {
+  const h = harness();
+  // The harness skips startup seeding; production initializes before writing.
+  h.sql.exec('PRAGMA user_version = 22;');
+  return h;
+}
+
+function downgradeProfileToSchema21(h) {
+  h.sql.exec(`ALTER TABLE profile DROP COLUMN program_mode;
+    ALTER TABLE profile DROP COLUMN three_day_structure;
+    ALTER TABLE profile DROP COLUMN weight_unit_confirmed;
+    PRAGMA user_version = 21;`);
+}
+
+for (const [selection, experience, expectedStructure] of [
+  ['stack', 'beginner', 'full-body'],
+  ['stack', 'advanced', 'push-pull-legs'],
+  ['custom', 'beginner', 'full-body'],
+  ['custom', 'intermediate', 'push-pull-legs'],
+  ['missing-custom', 'advanced', 'push-pull-legs'],
+]) {
+  test(`Onboarding state: schema-21 ${selection}/${experience} migrates without changing training data`, async () => {
+    const h = onboardingHarness();
+    try {
+      h.store.getState().updateProfile({ name: 'Existing athlete', weeklyGoal: 5, programWeeklyGoal: 3,
+        experienceLevel: experience, weightUnit: 'lbs', weightIncrement: 1.25, weightIncrementLbs: 2.5, trainingDays: [1, 3, 5] });
+      insertHistory(h, { date: '2026-09-14', sets: pyramid });
+      const splitId = h.database.saveCustomSplitDraftSync('My routine', [{ name: 'Upper', exerciseIds: [h.lifts[0].id] }], { activate: false });
+      if (selection === 'custom') h.database.setActiveSplitSync(splitId);
+      downgradeProfileToSchema21(h);
+      if (selection === 'missing-custom') {
+        h.sql.exec('PRAGMA foreign_keys = OFF; UPDATE profile SET active_split_id = 999999; PRAGMA foreign_keys = ON;');
+      }
+      const backup = h.load('@/store/workoutBackup');
+      const before = backup.captureWorkoutBackup(h.adapter, 21).tables;
+      await h.database.testReopenDatabase();
+      const expectedMode = selection === 'missing-custom' ? 'none' : selection;
+      const after = backup.captureWorkoutBackup(h.adapter, 22).tables;
+      assert.deepEqual(after.profile.map(row => ({ ...row })), [{ ...before.profile[0],
+        active_split_id: expectedMode === 'custom' ? splitId : null,
+        program_mode: expectedMode, three_day_structure: expectedStructure, weight_unit_confirmed: 1 }]);
+      // Existing catalog seeding may advance its AUTOINCREMENT counter on ignored inserts.
+      for (const table of backup.BACKUP_TABLES.filter(table => table !== 'profile' && table !== 'sqlite_sequence')) assert.deepEqual(after[table], before[table], table);
+      assert.deepEqual(after.sqlite_sequence.filter(row => row.name !== 'exercises'), before.sqlite_sequence.filter(row => row.name !== 'exercises'));
+      assert.equal(h.database.readProfileSync().onboardingCompleted, true);
+      assert.equal(h.database.readProfileSync().weightUnit, 'lbs');
+      assert.equal(h.sql.prepare('PRAGMA user_version').get().user_version, h.database.CURRENT_SCHEMA_VERSION);
+      await h.database.testReopenDatabase();
+      const reopened = backup.captureWorkoutBackup(h.adapter, 22).tables;
+      for (const table of backup.BACKUP_TABLES.filter(table => table !== 'sqlite_sequence')) assert.deepEqual(reopened[table], after[table], table);
+    } finally { h.sql.close(); }
+  });
+}
+
+test('Onboarding state: failed additive migration rolls back all three fields and can retry', async () => {
+  const h = onboardingHarness();
+  try {
+    downgradeProfileToSchema21(h);
+    const before = h.sql.prepare('SELECT * FROM profile').get();
+    const exec = h.adapter.execAsync;
+    h.adapter.execAsync = async query => {
+      if (query.startsWith('ALTER TABLE profile ADD COLUMN weight_unit_confirmed')) throw Error('Simulated migration failure');
+      return exec(query);
+    };
+    await assert.rejects(() => h.database.testReopenDatabase(), /Simulated migration failure/);
+    assert.deepEqual(h.sql.prepare('SELECT * FROM profile').get(), before);
+    assert.equal(h.sql.prepare('PRAGMA user_version').get().user_version, 21);
+    h.adapter.execAsync = exec;
+    await h.database.testReopenDatabase();
+    assert.equal(h.database.readProfileSync().programMode, 'stack');
+    assert.equal(h.database.readProfileSync().weightUnitConfirmed, true);
+  } finally { h.sql.close(); }
+});
+
+test('Onboarding state: no-program profile survives reopening and hydration; dormant preferences never activate it', async () => {
+  const h = onboardingHarness();
+  try {
+    const storeModule = h.load('@/store/workoutStore');
+    const fresh = storeModule.createNoProgramProfile();
+    assert.deepEqual([fresh.name, fresh.weeklyGoal, fresh.trainingDays, fresh.programWeeklyGoal,
+      fresh.threeDayStructure, fresh.weightUnit, fresh.weightUnitConfirmed], ['', 0, [], 3, 'full-body', 'kg', false]);
+    h.store.getState().setProfile({ ...fresh, onboardingCompleted: true });
+    h.store.getState().updateProfile({ programWeeklyGoal: 6, threeDayStructure: 'push-pull-legs', experienceLevel: 'beginner' });
+    assert.equal(h.store.getState().profile.programMode, 'none');
+    const saved = h.database.readProfileSync();
+    await h.database.testReopenDatabase();
+    h.store.setState({ profile: null, isHydrated: false });
+    await storeModule.initializeWorkoutStore();
+    assert.deepEqual(h.store.getState().profile, saved);
+    // An inactive queue must not even query history.
+    const getAll = h.adapter.getAllSync;
+    h.adapter.getAllSync = () => { throw Error('Unexpected queue query'); };
+    assert.deepEqual(h.load('@/store/weeklyQueueEngine').getWeeklyQueueState().sequence, []);
+    h.adapter.getAllSync = getAll;
+    assert.equal(h.sql.prepare('SELECT count(*) AS n FROM sessions').get().n, 0);
+    assert.equal(h.store.getState().currentSession, null);
+    h.store.getState().setActiveSplit(null);
+    assert.equal(h.database.readProfileSync().programMode, 'stack');
+    assert.equal(h.load('@/store/weeklyQueueEngine').getWeeklyQueueState().sequence.length, 6);
+    h.store.getState().updateProfile({ programWeeklyGoal: 3, threeDayStructure: 'full-body', experienceLevel: 'advanced' });
+    assert.deepEqual(h.load('@/store/weeklyQueueEngine').getWeeklyQueueState().sequence, ['full_body', 'full_body', 'full_body']);
+    h.store.getState().updateProfile({ experienceLevel: 'intermediate' });
+    assert.equal(h.database.readProfileSync().threeDayStructure, 'full-body');
+    h.store.getState().chooseNoProgram();
+    await h.database.testReopenDatabase();
+    assert.equal(h.database.readProfileSync().programMode, 'none');
+  } finally { h.sql.close(); }
+});
+
+test('Onboarding state: routine acceptance, save for later and deletion persist mode and identity together', async () => {
+  const h = onboardingHarness();
+  try {
+    h.store.getState().chooseNoProgram();
+    const workouts = [{ name: 'Upper', exerciseIds: [h.lifts[0].id] }];
+    const later = await h.store.getState().saveCustomSplitDraft('Saved for later', workouts, { activate: false });
+    assert.equal(h.database.readProfileSync().programMode, 'none');
+    const active = await h.store.getState().saveCustomSplitDraft('Accepted', workouts, { completeOnboarding: true });
+    assert.equal(h.database.readProfileSync().programMode, 'custom');
+    assert.equal(h.database.readProfileSync().activeSplitId, active);
+    assert.equal(h.database.readProfileSync().onboardingCompleted, true);
+    assert.deepEqual(h.load('@/store/weeklyQueueEngine').getWeeklyQueueState().sequence, []);
+    const accepted = await h.database.getCustomSplitDetailAsync(active);
+    h.store.getState().startWorkoutFromCustomWorkout(active, accepted.workouts[0].id);
+    h.store.getState().updateExerciseSet(0, 0, 8, 60);
+    h.store.getState().toggleSetCompleted(0, 0);
+    h.store.getState().completeWorkout('medium');
+    await h.store.getState().deleteSplit(active);
+    assert.equal(h.store.getState().profile.programMode, 'none');
+    assert.equal(h.store.getState().profile.activeSplitId, null);
+    assert.ok(await h.database.getCustomSplitDetailAsync(later));
+    h.store.getState().setActiveSplit(later);
+    assert.equal(h.database.readProfileSync().programMode, 'custom');
+    await h.database.testReopenDatabase();
+    assert.equal(h.database.readProfileSync().activeSplitId, later);
+    h.store.getState().setActiveSplit(null);
+    assert.equal(h.database.readProfileSync().programMode, 'stack');
+    assert.equal(h.database.readProfileSync().activeSplitId, null);
+    const history = h.database.readCompletedSessionsSync();
+    assert.equal(history.length, 1);
+    assert.equal(history[0].origin, 'custom');
+    assert.equal(history[0].customSplitId, active);
+    assert.equal(h.load('@/store/weeklyQueueEngine').getWeeklyQueueState().remaining.length, 3);
+    // Custom history restored without a saved-routine identity is still custom.
+    h.adapter.runSync('UPDATE sessions SET custom_split_id = NULL, custom_split_workout_id = NULL WHERE id = ?', Number(history[0].id));
+    assert.equal(h.load('@/store/weeklyQueueEngine').getWeeklyQueueState().remaining.length, 3);
+  } finally { h.sql.close(); }
+});
+
+test('Onboarding state: failed writes cannot change selection or leave a partially accepted routine', async () => {
+  const h = onboardingHarness();
+  try {
+    h.store.getState().chooseNoProgram();
+    const before = h.database.readProfileSync();
+    const b = h.load('@/store/workoutBackup');
+    const tables = b.captureWorkoutBackup(h.adapter, 22).tables;
+    h.sql.exec("CREATE TRIGGER fail_program BEFORE UPDATE ON profile BEGIN SELECT RAISE(ABORT, 'profile unavailable'); END;");
+    h.store.getState().setActiveSplit(null);
+    assert.deepEqual(h.database.readProfileSync(), before);
+    assert.deepEqual(h.store.getState().profile, before);
+    const id = await h.store.getState().saveCustomSplitDraft('Failed acceptance', [{ name: 'Upper', exerciseIds: [h.lifts[0].id] }], { completeOnboarding: true });
+    assert.equal(id, undefined);
+    assert.deepEqual(b.captureWorkoutBackup(h.adapter, 22).tables, tables);
+    h.sql.exec('DROP TRIGGER fail_program');
+    assert.throws(() => h.database.writeProfile({ ...before, programMode: 'custom', activeSplitId: null }), /Invalid program/);
+    assert.deepEqual(h.database.readProfileSync(), before);
+    h.sql.exec('DELETE FROM profile');
+    assert.throws(() => h.database.saveCustomSplitDraftSync('No profile', [{ name: 'Upper', exerciseIds: [h.lifts[0].id] }]), /profile is required/);
+    assert.equal(h.sql.prepare('SELECT count(*) AS n FROM custom_splits').get().n, 0);
+  } finally { h.sql.close(); }
+});
+
+test('Onboarding state: successful routine save remains successful when its following read fails', async () => {
+  const h = onboardingHarness();
+  try {
+    const getAll = h.adapter.getAllAsync;
+    h.adapter.getAllAsync = async query => {
+      if (query.includes('FROM custom_splits')) throw Error('Temporary read failure');
+      return getAll(query);
+    };
+    const id = await h.store.getState().saveCustomSplitDraft('Committed', [{ name: 'Upper', exerciseIds: [h.lifts[0].id] }]);
+    assert.ok(id);
+    assert.equal(h.store.getState().profile.programMode, 'custom');
+    assert.equal(h.store.getState().profile.activeSplitId, id);
+    assert.equal(h.sql.prepare('SELECT count(*) AS n FROM custom_splits').get().n, 1);
+    const retry = h.alerts.at(-1)[2].find(button => button.text === 'Retry');
+    assert.ok(retry);
+    h.adapter.getAllAsync = getAll;
+    retry.onPress();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(h.store.getState().currentCustomSplit.id, id);
+  } finally { h.sql.close(); }
+});
+
+test('Onboarding state: temporary routine load preserves selection and offers retry; missing routine chooses none', async () => {
+  const h = onboardingHarness();
+  try {
+    const id = await h.store.getState().saveCustomSplitDraft('Selected', [{ name: 'Upper', exerciseIds: [h.lifts[0].id] }]);
+    const before = h.database.readProfileSync();
+    const getFirst = h.adapter.getFirstAsync;
+    h.adapter.getFirstAsync = async query => {
+      if (query.includes('FROM custom_splits')) throw Error('Temporary detail failure');
+      return getFirst(query);
+    };
+    assert.equal(await h.store.getState().loadCustomSplit(id), undefined);
+    assert.deepEqual(h.store.getState().profile, before);
+    assert.deepEqual(h.database.readProfileSync(), before);
+    h.adapter.getFirstAsync = getFirst;
+    h.alerts.at(-1)[2].find(button => button.text === 'Retry').onPress();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(h.store.getState().currentCustomSplit.id, id);
+    h.sql.exec(`PRAGMA foreign_keys = OFF;
+      DELETE FROM custom_split_workout_exercises; DELETE FROM custom_split_workouts;
+      DELETE FROM custom_splits WHERE id = ${id}; PRAGMA foreign_keys = ON;`);
+    assert.equal(await h.store.getState().loadCustomSplit(id), null);
+    assert.equal(h.store.getState().profile.programMode, 'none');
+    assert.equal(h.database.readProfileSync().activeSplitId, null);
+    await h.database.testReopenDatabase();
+    assert.equal(h.database.readProfileSync().programMode, 'none');
+  } finally { h.sql.close(); }
+});
+
+test('Onboarding state: a stale missing-routine read cannot clear a newer selection', async () => {
+  const h = onboardingHarness();
+  try {
+    const first = await h.store.getState().saveCustomSplitDraft('First', [{ name: 'Upper', exerciseIds: [h.lifts[0].id] }]);
+    const second = await h.store.getState().saveCustomSplitDraft('Second', [{ name: 'Upper', exerciseIds: [h.lifts[0].id] }], { activate: false });
+    const getFirst = h.adapter.getFirstAsync;
+    let resolveRead;
+    h.adapter.getFirstAsync = async (query, ...args) => {
+      if (query.includes('FROM custom_splits') && args[0] === first) return new Promise(resolve => { resolveRead = resolve; });
+      return getFirst(query, ...args);
+    };
+    const pending = h.store.getState().loadCustomSplit(first);
+    await new Promise(resolve => setImmediate(resolve));
+    h.store.getState().setActiveSplit(second);
+    resolveRead(null);
+    assert.equal(await pending, null);
+    assert.equal(h.store.getState().profile.programMode, 'custom');
+    assert.equal(h.database.readProfileSync().activeSplitId, second);
+  } finally { h.sql.close(); }
+});
+
+test('Onboarding state: failed startup catalog read preserves the program and hydration retry restores it', async () => {
+  const h = onboardingHarness();
+  try {
+    const id = await h.store.getState().saveCustomSplitDraft('Existing', [{ name: 'Upper', exerciseIds: [h.lifts[0].id] }]);
+    const before = h.database.readProfileSync();
+    const getAll = h.adapter.getAllAsync;
+    h.adapter.getAllAsync = async (query, ...args) => {
+      if (query.includes('FROM custom_splits')) throw Error('Temporary startup read failure');
+      return getAll(query, ...args);
+    };
+    const initialize = h.load('@/store/workoutStore').initializeWorkoutStore;
+    await assert.rejects(initialize, /Temporary startup read failure/);
+    assert.equal(h.store.getState().isHydrated, false);
+    assert.deepEqual(h.database.readProfileSync(), before);
+    h.adapter.getAllAsync = getAll;
+    await initialize();
+    assert.equal(h.store.getState().isHydrated, true);
+    assert.equal(h.store.getState().hydrationError, null);
+    assert.equal(h.store.getState().profile.programMode, 'custom');
+    assert.equal(h.store.getState().profile.activeSplitId, id);
+  } finally { h.sql.close(); }
+});
+
+test('Onboarding state: startup proves an orphaned custom selection missing and persists none', async () => {
+  const h = onboardingHarness();
+  try {
+    h.sql.exec("PRAGMA foreign_keys = OFF; UPDATE profile SET program_mode = 'custom', active_split_id = 999999; PRAGMA foreign_keys = ON;");
+    const snapshot = await h.database.readInitialWorkoutSnapshot();
+    assert.equal(snapshot.profile.programMode, 'none');
+    assert.equal(snapshot.profile.activeSplitId, null);
+    assert.equal(snapshot.profile.onboardingCompleted, true);
+    assert.equal(h.database.readProfileSync().programMode, 'none');
+    assert.equal(h.sql.prepare('PRAGMA foreign_key_check').all().length, 0);
+  } finally { h.sql.close(); }
+});
+
+for (const [mode, experience] of [['stack', 'beginner'], ['stack', 'advanced'], ['custom', 'intermediate']]) {
+  test(`Onboarding state: schema-21 backup upgrades ${mode}/${experience} in memory and restores transactionally`, () => {
+    const h = onboardingHarness();
+    try {
+      h.store.getState().updateProfile({ experienceLevel: experience, weightUnit: 'lbs', weeklyGoal: 5, trainingDays: [1, 3, 5] });
+      const splitId = h.database.saveCustomSplitDraftSync('Original', [{ name: 'Upper', exerciseIds: [h.lifts[0].id] }], { activate: mode === 'custom' });
+      insertHistory(h, { date: '2026-09-14', sets: pyramid });
+      const b = h.load('@/store/workoutBackup');
+      const legacy = b.captureWorkoutBackup(h.adapter, 21);
+      for (const key of ['program_mode', 'three_day_structure', 'weight_unit_confirmed']) delete legacy.tables.profile[0][key];
+      const originalFile = JSON.stringify(legacy);
+      const prepared = b.prepareWorkoutBackup(legacy, h.adapter, 22);
+      assert.equal(JSON.stringify(legacy), originalFile);
+      assert.equal(prepared.schemaVersion, 22);
+      assert.equal(prepared.tables.profile[0].program_mode, mode);
+      assert.equal(prepared.tables.profile[0].three_day_structure, experience === 'beginner' ? 'full-body' : 'push-pull-legs');
+      assert.equal(prepared.tables.profile[0].weight_unit_confirmed, 1);
+      h.store.getState().chooseNoProgram();
+      h.store.getState().updateProfile({ name: 'Changed', weeklyGoal: 0 });
+      b.restoreWorkoutBackup(h.adapter, legacy, 22);
+      assert.deepEqual(JSON.parse(JSON.stringify(b.captureWorkoutBackup(h.adapter, 22).tables)), JSON.parse(JSON.stringify(prepared.tables)));
+      assert.equal(h.database.readProfileSync().activeSplitId, mode === 'custom' ? splitId : null);
+      assert.equal(h.database.readProfileSync().weightUnit, 'lbs');
+      assert.equal(JSON.stringify(legacy), originalFile);
+    } finally { h.sql.close(); }
+  });
+}
+
+test('Onboarding state: current backups preserve none and unconfirmed units; invalid versions and program states leave all data intact', () => {
+  const h = onboardingHarness();
+  try {
+    h.store.getState().setProfile(h.load('@/store/workoutStore').createNoProgramProfile());
+    const b = h.load('@/store/workoutBackup');
+    const original = b.captureWorkoutBackup(h.adapter, 22);
+    h.store.getState().setActiveSplit(null);
+    b.restoreWorkoutBackup(h.adapter, original, 22);
+    assert.equal(h.database.readProfileSync().programMode, 'none');
+    assert.equal(h.database.readProfileSync().weightUnitConfirmed, false);
+    for (const change of [
+      backup => { backup.schemaVersion = 20; },
+      backup => { backup.schemaVersion = 23; },
+      backup => { backup.tables.profile[0].program_mode = 'automatic'; },
+      backup => { backup.tables.profile[0].program_mode = 'custom'; },
+      backup => { backup.tables.profile[0].active_split_id = 999999; },
+      backup => { backup.tables.profile[0].three_day_structure = 'advanced'; },
+      backup => { backup.tables.profile[0].weight_unit_confirmed = '1'; },
+      backup => { backup.tables.profile[0].weight_unit_confirmed = 2; },
+      backup => { backup.schemaVersion = 21; }, // Legacy files cannot include the new columns.
+    ]) {
+      const malformed = JSON.parse(JSON.stringify(original)); change(malformed);
+      assert.throws(() => b.restoreWorkoutBackup(h.adapter, malformed, 22), /compatible|invalid/);
+      assert.deepEqual(b.captureWorkoutBackup(h.adapter, 22).tables, original.tables);
+    }
+    const legacy = JSON.parse(JSON.stringify(original)); legacy.schemaVersion = 21;
+    for (const key of ['program_mode', 'three_day_structure', 'weight_unit_confirmed']) delete legacy.tables.profile[0][key];
+    for (const [key, value] of [['experience_level', 'expert'], ['active_split_id', -1], ['onboarding_completed', '1']]) {
+      const malformed = JSON.parse(JSON.stringify(legacy)); malformed.tables.profile[0][key] = value;
+      assert.throws(() => b.restoreWorkoutBackup(h.adapter, malformed, 22), /invalid/);
+      assert.deepEqual(b.captureWorkoutBackup(h.adapter, 22).tables, original.tables);
+    }
+    h.sql.exec("CREATE TRIGGER fail_restore BEFORE INSERT ON profile BEGIN SELECT RAISE(ABORT, 'restore unavailable'); END;");
+    assert.throws(() => b.restoreWorkoutBackup(h.adapter, legacy, 22), /restore unavailable/);
+    assert.deepEqual(b.captureWorkoutBackup(h.adapter, 22).tables, original.tables);
+  } finally { h.sql.close(); }
+});
+
+test('Onboarding Slice 3: no-program browsing, empty launch, relaunch and completion need no saved split', async () => {
+  const h = onboardingHarness();
+  try {
+    const module = h.load('@/store/workoutStore');
+    h.store.getState().setProfile({ ...module.createNoProgramProfile(), onboardingCompleted: true });
+    await module.initializeWorkoutStore();
+    const initialProfile = h.database.readProfileSync();
+    h.load('@/store/weeklyQueueEngine').getWeeklyQueueState();
+    h.database.readCompletedSessionsSync();
+    assert.equal(h.store.getState().currentSession, null);
+    assert.equal(h.sql.prepare('SELECT count(*) AS n FROM sessions').get().n, 0);
+    assert.equal(h.store.getState().startEmptyWorkout(), true);
+    const session = h.store.getState().currentSession;
+    assert.equal(session.origin, 'adhoc');
+    assert.deepEqual(session.exercises, []);
+    assert.equal(h.store.getState().startEmptyWorkout(), true);
+    assert.equal(h.store.getState().currentSession.id, session.id);
+    assert.equal(h.sql.prepare('SELECT count(*) AS n FROM sessions').get().n, 1);
+    assert.equal(h.store.getState().appendExerciseToSession('Bench Press', session.id), true);
+    h.store.getState().updateExerciseSet(0, 0, 8, 60);
+    h.store.getState().toggleSetCompleted(0, 0);
+    await h.database.testReopenDatabase();
+    const snapshot = await h.database.readInitialWorkoutSnapshot();
+    h.store.setState({ ...snapshot, isHydrated: true });
+    assert.equal(h.store.getState().currentSession.id, session.id);
+    assert.equal(h.store.getState().currentSession.exercises[0].sets[0].completed, true);
+    const completed = h.store.getState().completeWorkout('medium');
+    assert.equal(completed.id, session.id);
+    assert.equal(h.store.getState().currentSession, null);
+    assert.equal(h.database.readCompletedSessionsSync().length, 1);
+    assert.equal(h.sql.prepare('SELECT count(*) AS n FROM custom_splits').get().n, 0);
+    assert.deepEqual(h.database.readProfileSync(), initialProfile);
+    assert.deepEqual(h.load('@/store/weeklyQueueEngine').getWeeklyQueueState().sequence, []);
+    await h.database.testReopenDatabase();
+    assert.equal((await h.database.readInitialWorkoutSnapshot()).currentSession, null);
+  } finally { h.sql.close(); }
+});
+
+test('Onboarding Slice 4: acceptance propagates failure, commits no-program defaults once and preserves saved history', () => {
+  const h = harness();
+  try {
+    h.sql.exec("DELETE FROM profile; INSERT INTO custom_splits (name,created_at,updated_at) VALUES ('Shared routine','2026-10-04','2026-10-04');");
+    h.store.setState({ profile: null });
+    h.sql.exec("CREATE TRIGGER fail_setup BEFORE INSERT ON profile BEGIN SELECT RAISE(ABORT, 'full disk'); END;");
+    assert.throws(() => h.store.getState().completeNoProgramOnboarding(), /full disk/);
+    assert.equal(h.store.getState().profile, null); assert.equal(h.database.readProfileSync(), null);
+    assert.equal(h.sql.prepare('SELECT count(*) AS n FROM sessions').get().n, 0);
+    h.sql.exec('DROP TRIGGER fail_setup');
+    const accepted = h.store.getState().completeNoProgramOnboarding();
+    const defaults = h.load('@/store/workoutStore').createNoProgramProfile();
+    assert.deepEqual(accepted, { ...defaults, onboardingCompleted: true });
+    const changes = h.sql.prepare('SELECT total_changes() AS n').get().n;
+    assert.equal(h.store.getState().completeNoProgramOnboarding(), accepted);
+    assert.equal(h.sql.prepare('SELECT total_changes() AS n').get().n, changes);
+    assert.deepEqual(h.database.readProfileSync(), accepted);
+    assert.equal(h.sql.prepare('SELECT count(*) AS n FROM custom_splits').get().n, 1);
+    for (const table of ['sessions', 'session_exercises', 'sets']) assert.equal(h.sql.prepare(`SELECT count(*) AS n FROM ${table}`).get().n, 0);
+  } finally { h.sql.close(); }
+});
+test('Onboarding nickname: both first-run completions persist the trimmed nickname', () => {
+  for (const complete of [store => store.completeNoProgramOnboarding('  Sam  '), store => store.acceptStackProgram(3, 'full-body', 'onboarding', '  Sam  ')]) {
+    const h = harness();
+    try {
+      h.sql.exec('DELETE FROM profile'); h.store.setState({ profile: null });
+      const profile = complete(h.store.getState());
+      assert.equal(profile.name, 'Sam'); assert.equal(h.database.readProfileSync().name, 'Sam');
+    } finally { h.sql.close(); }
+  }
+});
+test('Onboarding Slice 4: existing completed profiles retain all preferences and program selection without a write', () => {
+  for (const programMode of ['none', 'stack', 'custom']) {
+    const h = harness();
+    try {
+      h.sql.exec("INSERT INTO custom_splits (id,name,created_at,updated_at) VALUES (73,'Existing routine','2026-10-04','2026-10-04');");
+      const existing = { ...h.store.getState().profile, programMode, activeSplitId: programMode === 'custom' ? 73 : null,
+        threeDayStructure: 'push-pull-legs', weightUnit: 'lbs', weightUnitConfirmed: true, name: 'Retain me', weeklyGoal: 5 };
+      h.store.getState().setProfile(existing);
+      const changes = h.sql.prepare('SELECT total_changes() AS n').get().n;
+      assert.equal(h.store.getState().completeNoProgramOnboarding(), h.store.getState().profile);
+      assert.deepEqual(h.database.readProfileSync(), existing);
+      assert.equal(h.sql.prepare('SELECT total_changes() AS n').get().n, changes);
+    } finally { h.sql.close(); }
+  }
+});
+
+test('Onboarding Slice 5: all frequencies and both structures accept Stack atomically without starting workouts', () => {
+  for (const frequency of [1,2,3,4,5,6]) for (const structure of frequency === 3 ? ['full-body','push-pull-legs'] : ['full-body']) {
+    const h = harness();
+    try {
+      h.sql.exec('DELETE FROM profile'); h.store.setState({ profile: null });
+      h.sql.exec("CREATE TRIGGER fail_program BEFORE INSERT ON profile BEGIN SELECT RAISE(ABORT, 'program save failed'); END;");
+      assert.throws(() => h.store.getState().acceptStackProgram(frequency, structure, 'onboarding'), /program save failed/);
+      assert.equal(h.store.getState().profile, null); assert.equal(h.database.readProfileSync(), null);
+      h.sql.exec('DROP TRIGGER fail_program');
+      const profile = h.store.getState().acceptStackProgram(frequency, structure, 'onboarding');
+      assert.deepEqual(profile, { ...h.load('@/store/workoutStore').createNoProgramProfile(),
+        programWeeklyGoal: frequency, threeDayStructure: structure, programMode: 'stack', onboardingCompleted: true });
+      assert.deepEqual(h.database.readProfileSync(), profile);
+      const changes = h.sql.prepare('SELECT total_changes() AS n').get().n;
+      assert.equal(h.store.getState().acceptStackProgram(frequency, structure, 'onboarding'), profile);
+      assert.equal(h.sql.prepare('SELECT total_changes() AS n').get().n, changes);
+      for (const table of ['sessions','session_exercises','sets','custom_splits']) assert.equal(h.sql.prepare(`SELECT count(*) AS n FROM ${table}`).get().n, 0);
+    } finally { h.sql.close(); }
+  }
+});
+test('Onboarding Slice 5: later acceptance preserves metadata, units, schedules, habit goals, routines and active session', () => {
+  const h = harness();
+  try {
+    h.sql.exec("INSERT INTO custom_splits (id,name,created_at,updated_at) VALUES (73,'Keep routine','2026-10-05','2026-10-05')");
+    const original = { ...h.store.getState().profile, name: 'Keep my settings', programMode: 'custom', activeSplitId: 73,
+      weeklyGoal: 5, trainingDays: [1,4], weightUnit: 'lbs', weightUnitConfirmed: true, threeDayStructure: 'push-pull-legs' };
+    h.store.getState().setProfile(original); h.store.getState().startEmptyWorkout(); const session = h.store.getState().currentSession;
+    h.sql.exec("CREATE TRIGGER fail_program BEFORE INSERT ON profile BEGIN SELECT RAISE(ABORT, 'program save failed'); END;");
+    assert.throws(() => h.store.getState().acceptStackProgram(2,'full-body','configuration'), /program save failed/);
+    assert.deepEqual(h.database.readProfileSync(), original); assert.deepEqual(h.store.getState().profile, original);
+    h.sql.exec('DROP TRIGGER fail_program');
+    const accepted = h.store.getState().acceptStackProgram(2,'full-body','configuration');
+    assert.deepEqual(accepted, { ...original, programWeeklyGoal: 2, threeDayStructure: 'full-body', programMode: 'stack', activeSplitId: null });
+    assert.equal(h.store.getState().currentSession, session); assert.equal(h.sql.prepare('SELECT count(*) AS n FROM custom_splits').get().n, 1);
+    const changes = h.sql.prepare('SELECT total_changes() AS n').get().n;
+    h.store.getState().acceptStackProgram(2,'full-body','configuration'); assert.equal(h.sql.prepare('SELECT total_changes() AS n').get().n, changes);
+    for (const [f,s] of [[0,'full-body'],[7,'full-body'],[1.5,'full-body'],[3,'unknown']]) assert.throws(() => h.store.getState().acceptStackProgram(f,s,'configuration'));
+    assert.deepEqual(h.database.readProfileSync(), accepted);
+  } finally { h.sql.close(); }
+});
+test('Onboarding Slice 5: real template previews use existing variants and exercise IDs without SQL writes or history', async () => {
+  const h = harness();
+  try {
+    await h.database.testReopenDatabase();
+    const build = h.load('@/features/program/lineup').buildProgramLineup;
+    const catalog = { variants: h.database.readArchetypeVariantsSync, nextVariant: h.database.getNextArchetypeVariant, exercises: h.database.readArchetypeTemplateCatalogSync };
+    const before = h.sql.prepare('SELECT total_changes() AS n').get().n;
+    for (const f of [1,2,3,4,5,6]) for (const s of f === 3 ? ['full-body','push-pull-legs'] : ['full-body']) {
+      const days = build(f,s,catalog); assert.equal(days.length, f);
+      days.forEach(day => { assert.ok(day.exercises.length > 0); assert.deepEqual(day.exercises, catalog.exercises(day.archetype, day.variant)); });
+      if (f === 3 && s === 'full-body') assert.deepEqual(days.map(day => day.name), ['Full Body A','Full Body B','Full Body C']);
+      if (f === 3 && s === 'push-pull-legs') assert.deepEqual(days.map(day => day.archetype), ['push','pull','legs']);
+    }
+    assert.equal(h.sql.prepare('SELECT total_changes() AS n').get().n, before);
+    for (const table of ['sessions','session_exercises','sets']) assert.equal(h.sql.prepare(`SELECT count(*) AS n FROM ${table}`).get().n, 0);
+  } finally { h.sql.close(); }
+});
+
+function realLaunch(h) {
+  return h.load('@/features/workout-launch/coordinator').createWorkoutLaunchCoordinator({
+    current:h.store.getState,needsConfirmation:()=>true,confirmUnit:unit=>h.store.getState().confirmWorkoutWeightUnit(unit),
+    start:intent=>{
+      if(intent.kind==='empty')h.store.getState().startEmptyWorkout();
+      else if(intent.kind==='custom')h.store.getState().startWorkoutFromCustomWorkout(intent.splitId,intent.workoutId);
+      else h.store.getState().startWorkoutFromArchetype(intent.archetypes,intent.variants);
+    },publish(){},
+  });
+}
+for(const kind of ['empty','stack','custom'])test(`Onboarding Slice 6: ${kind} confirmation, write/start failure recovery and relaunch use real SQLite`,async()=>{
+  const h=harness();
+  try{
+    await h.database.testReopenDatabase();
+    const module=h.load('@/store/workoutStore');
+    const liftId=h.sql.prepare("SELECT id FROM exercises WHERE name='Bench Press'").get().id;
+    const splitId=kind==='custom'?h.database.saveCustomSplitDraftSync('Saved',[{name:'Chosen day',exerciseIds:[liftId]}],{activate:false}):null;
+    const workoutId=splitId===null?null:(await h.database.getCustomSplitDetailAsync(splitId)).workouts[0].id;
+    h.store.getState().setProfile({...module.createNoProgramProfile(),onboardingCompleted:true,name:'Keep',weeklyGoal:5,trainingDays:[1,4],
+      programMode:kind==='stack'?'stack':kind==='custom'?'custom':'none',activeSplitId:splitId});
+    await module.initializeWorkoutStore();
+    const before=h.database.readProfileSync();
+    const intent=kind==='stack'?{kind,archetypes:['push','pull'],variants:['b','b']}:kind==='custom'?{kind,splitId,workoutId}:{kind};
+    const launch=realLaunch(h);
+    assert.equal(launch.request(intent).kind,'confirmation');launch.selectUnit('lbs');launch.cancel();
+    assert.deepEqual(h.database.readProfileSync(),before);assert.equal(h.sql.prepare('SELECT count(*) n FROM sessions').get().n,0);
+    launch.request(intent);launch.selectUnit('lbs');
+    h.sql.exec("CREATE TRIGGER unit_unavailable BEFORE INSERT ON profile BEGIN SELECT RAISE(ABORT,'unit unavailable'); END;");
+    assert.equal(launch.confirm().kind,'failed');assert.match(launch.getState().error,/save your weight unit/);
+    assert.deepEqual(h.database.readProfileSync(),before);assert.deepEqual(h.store.getState().profile,before);assert.equal(h.sql.prepare('SELECT count(*) n FROM sessions').get().n,0);
+    h.sql.exec('DROP TRIGGER unit_unavailable;');
+    h.sql.exec("CREATE TRIGGER workout_unavailable BEFORE INSERT ON sessions BEGIN SELECT RAISE(ABORT,'session unavailable'); END;");
+    assert.equal(launch.confirm().kind,'failed');assert.match(launch.getState().error,/start your workout/);
+    assert.equal(h.database.readProfileSync().weightUnitConfirmed,true);assert.equal(h.database.readProfileSync().weightUnit,'lbs');
+    assert.equal(h.sql.prepare('SELECT count(*) n FROM sessions').get().n,0);assert.equal(h.sql.prepare('SELECT count(*) n FROM session_exercises').get().n,0);assert.equal(h.sql.prepare('SELECT count(*) n FROM sets').get().n,0);
+    const committed=h.database.readProfileSync();
+    for(const key of Object.keys(before))if(!['weightUnit','weightUnitConfirmed'].includes(key))assert.deepEqual(committed[key],before[key]);
+    h.sql.exec('DROP TRIGGER workout_unavailable;');
+    assert.equal(launch.confirm().kind,'started');assert.equal(launch.confirm().kind,'ignored');assert.equal(launch.request(intent).kind,'ignored');
+    const session=h.store.getState().currentSession;assert.ok(session);assert.equal(h.sql.prepare('SELECT count(*) n FROM sessions').get().n,1);
+    if(kind==='stack'){
+      assert.equal(session.archetype,'push');assert.equal(session.secondaryArchetype,'pull');assert.equal(session.archetypeVariant,'b');assert.equal(session.secondaryArchetypeVariant,'b');
+    }else if(kind==='custom'){assert.equal(session.customSplitId,splitId);assert.equal(session.customSplitWorkoutId,workoutId);}else assert.equal(session.origin,'adhoc');
+    assert.ok(session.exercises.every(e=>e.entryUnit==='lbs'));
+    await h.database.testReopenDatabase();await module.initializeWorkoutStore();
+    assert.equal(h.store.getState().currentSession.id,session.id);assert.equal(h.store.getState().profile.weightUnitConfirmed,true);
+    const reopened=realLaunch(h);assert.equal(reopened.request({kind:'empty'}).kind,'resume');assert.equal(h.sql.prepare('SELECT count(*) n FROM sessions').get().n,1);
+    h.store.getState().discardWorkout();reopened.resetAfterNavigation();assert.equal(reopened.request({kind:'empty'}).kind,'started');
+    assert.equal(h.store.getState().currentSession.origin,'adhoc');assert.equal(h.store.getState().profile.weightUnit,'lbs');
+  }finally{h.sql.close();}
+});
+test('Onboarding Slice 6: legacy confirmed units are idempotent and invalid units leave the profile untouched',()=>{
+  const h=harness();try{
+    const profile=h.store.getState().profile;
+    assert.equal(profile.weightUnitConfirmed,true);
+    const changes=h.sql.prepare('SELECT total_changes() n').get().n;
+    assert.equal(h.store.getState().confirmWorkoutWeightUnit(profile.weightUnit),profile);
+    assert.equal(h.sql.prepare('SELECT total_changes() n').get().n,changes);
+    assert.throws(()=>h.store.getState().confirmWorkoutWeightUnit('lb'),/Choose kilograms or pounds/);
+    assert.deepEqual(h.database.readProfileSync(),profile);
+  }finally{h.sql.close();}
+});
+test('Onboarding Slice 6: an unconfirmed resumed workout bypasses the prompt and retains its session and unit',async()=>{
+  const h=harness();try{
+    const module=h.load('@/store/workoutStore');h.store.getState().setProfile({...module.createNoProgramProfile(),onboardingCompleted:true});
+    await module.initializeWorkoutStore();h.store.getState().startEmptyWorkout();const session=h.store.getState().currentSession;
+    const profile=h.database.readProfileSync();const changes=h.sql.prepare('SELECT total_changes() n').get().n;
+    assert.equal(realLaunch(h).request({kind:'stack',archetypes:['push'],variants:['a']}).kind,'resume');
+    assert.equal(h.store.getState().currentSession.id,session.id);assert.deepEqual(h.database.readProfileSync(),profile);
+    assert.equal(h.sql.prepare('SELECT total_changes() n').get().n,changes);
+  }finally{h.sql.close();}
+});
+
+test('Onboarding Slice 6: workouts arriving before confirmation or after the unit commit resume instead of being replaced',async()=>{
+  for(const moment of ['before confirmation','after unit commit']){
+    const h=harness();try{
+      const module=h.load('@/store/workoutStore');h.store.getState().setProfile({...module.createNoProgramProfile(),onboardingCompleted:true});
+      await module.initializeWorkoutStore();let arriving;
+      const launch=h.load('@/features/workout-launch/coordinator').createWorkoutLaunchCoordinator({
+        current:h.store.getState,needsConfirmation:()=>true,
+        confirmUnit:unit=>{h.store.getState().confirmWorkoutWeightUnit(unit);h.store.getState().startEmptyWorkout();arriving=h.store.getState().currentSession;},
+        start:()=>{throw Error('The intended custom workout must never replace the arriving session.');},publish(){},
+      });
+      launch.request({kind:'custom',splitId:77,workoutId:88});launch.selectUnit('lbs');
+      if(moment==='before confirmation'){h.store.getState().startEmptyWorkout();arriving=h.store.getState().currentSession;}
+      assert.equal(launch.confirm().kind,'resume');assert.equal(h.store.getState().currentSession.id,arriving.id);
+      assert.equal(h.sql.prepare('SELECT count(*) n FROM sessions').get().n,1);assert.equal(h.store.getState().currentSession.origin,'adhoc');
+      assert.equal(h.database.readProfileSync().weightUnitConfirmed,moment==='after unit commit');
+      assert.equal(h.database.readProfileSync().weightUnit,moment==='after unit commit'?'lbs':'kg');
+    }finally{h.sql.close();}
+  }
+});
+
+const receiptAttempt = '00000000-0000-4000-8000-000000000001';
+const receiptRoutine = { name: 'Recoverable import', workouts: [{ name: 'Push', exercises: [{ kind: 'builtin', name: 'Bench Press' }] }] };
+test('Slice 7: SQLite receipt recovers an import after reopen without its saved-ID handoff; independent imports remain independent', async () => {
+  const h = onboardingHarness();
+  try {
+    h.store.getState().startEmptyWorkout();
+    const profile = h.database.readProfileSync();
+    const session = h.database.testReadCurrentSessionSync();
+    const first = h.database.importPortableSplitSync(receiptRoutine, receiptAttempt);
+    // Simulate process exit immediately after SQL commits: no handoff result
+    // is written. Reopening resolves the durable attempt to the same graph.
+    await h.database.testReopenDatabase();
+    const beforeRetry = h.sql.prepare('SELECT total_changes() AS n').get().n;
+    assert.deepEqual(h.database.importPortableSplitSync(receiptRoutine, receiptAttempt), first);
+    assert.equal(h.sql.prepare('SELECT total_changes() AS n').get().n, beforeRetry);
+    assert.equal(h.sql.prepare('SELECT count(*) AS n FROM custom_splits').get().n, 1);
+    const second = h.database.importPortableSplitSync(receiptRoutine, '00000000-0000-4000-8000-000000000002');
+    const third = h.database.importPortableSplitSync(receiptRoutine);
+    assert.notEqual(second.splitId, first.splitId); assert.notEqual(third.splitId, second.splitId);
+    assert.equal(h.sql.prepare('SELECT count(*) AS n FROM custom_splits').get().n, 3);
+    assert.deepEqual(h.database.readProfileSync(), profile);
+    assert.deepEqual(h.database.testReadCurrentSessionSync(), session);
+    assert.throws(() => h.database.importPortableSplitSync({ ...receiptRoutine, name: 'Different' }, receiptAttempt), /different routine/);
+    h.database.deleteCustomSplitSync(first.splitId);
+    assert.equal(h.sql.prepare('SELECT count(*) AS n FROM shared_split_import_receipts WHERE attempt_id = ?').get(receiptAttempt).n, 0);
+  } finally { h.sql.close(); }
+});
+test('Slice 7: receipt insertion failure rolls back the entire routine graph and retry commits once', () => {
+  const h = onboardingHarness();
+  try {
+    h.sql.exec("CREATE TRIGGER fail_receipt BEFORE INSERT ON shared_split_import_receipts BEGIN SELECT RAISE(ABORT, 'receipt unavailable'); END;");
+    const before = h.load('@/store/workoutBackup').captureWorkoutBackup(h.adapter, 22);
+    assert.throws(() => h.database.importPortableSplitSync(receiptRoutine, receiptAttempt), /receipt unavailable/);
+    assert.deepEqual(h.load('@/store/workoutBackup').captureWorkoutBackup(h.adapter, 22), before);
+    assert.equal(h.sql.prepare('SELECT count(*) AS n FROM shared_split_import_receipts').get().n, 0);
+    h.sql.exec('DROP TRIGGER fail_receipt');
+    const saved = h.database.importPortableSplitSync(receiptRoutine, receiptAttempt);
+    assert.deepEqual(h.database.importPortableSplitSync(receiptRoutine, receiptAttempt), saved);
+    assert.equal(h.sql.prepare('SELECT count(*) AS n FROM custom_splits').get().n, 1);
+  } finally { h.sql.close(); }
+});
+test('Slice 7: schema-22 bootstrap adds receipts without changing existing training or migrating preferences twice', async () => {
+  const h = onboardingHarness();
+  try {
+    h.sql.exec('DROP TABLE shared_split_import_receipts; PRAGMA user_version = 22;');
+    const b = h.load('@/store/workoutBackup');
+    const before = b.captureWorkoutBackup(h.adapter, 22);
+    await h.database.testReopenDatabase();
+    assert.equal(h.sql.prepare('SELECT count(*) AS n FROM shared_split_import_receipts').get().n, 0);
+    for (const table of b.BACKUP_TABLES.filter(table => table !== 'sqlite_sequence')) assert.deepEqual(b.captureWorkoutBackup(h.adapter, 22).tables[table], before.tables[table], table);
+    const saved = h.database.importPortableSplitSync(receiptRoutine, receiptAttempt);
+    await h.database.testReopenDatabase();
+    assert.deepEqual(h.database.importPortableSplitSync(receiptRoutine, receiptAttempt), saved);
+    assert.equal(h.sql.prepare('PRAGMA user_version').get().user_version, h.database.CURRENT_SCHEMA_VERSION);
+  } finally { h.sql.close(); }
+});
+for (const schemaVersion of [21, 22]) test(`Slice 7: schema-${schemaVersion} restore clears receipts transactionally and keeps backups free of recovery metadata`, () => {
+  const h = onboardingHarness();
+  try {
+    const b = h.load('@/store/workoutBackup');
+    h.database.importPortableSplitSync(receiptRoutine, receiptAttempt);
+    const backup = b.captureWorkoutBackup(h.adapter, 22);
+    assert.equal(Object.hasOwn(backup.tables, 'shared_split_import_receipts'), false);
+    assert.equal(backup.tables.sqlite_sequence.some(row => row.name === 'shared_split_import_receipts'), false);
+    if (schemaVersion === 21) {
+      backup.schemaVersion = 21;
+      for (const key of ['program_mode', 'three_day_structure', 'weight_unit_confirmed']) delete backup.tables.profile[0][key];
+    }
+    h.sql.exec("CREATE TRIGGER fail_profile_restore BEFORE INSERT ON profile BEGIN SELECT RAISE(ABORT, 'restore unavailable'); END;");
+    assert.throws(() => b.restoreWorkoutBackup(h.adapter, backup, 22), /restore unavailable/);
+    assert.equal(h.sql.prepare('SELECT count(*) AS n FROM shared_split_import_receipts').get().n, 1);
+    h.sql.exec('DROP TRIGGER fail_profile_restore');
+    b.restoreWorkoutBackup(h.adapter, backup, 22);
+    assert.equal(h.sql.prepare('SELECT count(*) AS n FROM shared_split_import_receipts').get().n, 0);
+    assert.equal(h.sql.prepare('SELECT count(*) AS n FROM custom_splits').get().n, 1);
+    h.database.importPortableSplitSync(receiptRoutine, receiptAttempt);
+    assert.equal(h.sql.prepare('SELECT count(*) AS n FROM custom_splits').get().n, 2, 'A cleared receipt cannot resolve an obsolete imported graph after restore');
+    h.database.resetWorkoutDatabase();
+    assert.equal(h.sql.prepare('SELECT count(*) AS n FROM shared_split_import_receipts').get().n, 0);
+    assert.equal(h.sql.prepare('SELECT count(*) AS n FROM custom_splits').get().n, 0);
+  } finally { h.sql.close(); }
+});
+
+test('Slice 7: committed SQL plus missing handoff result recovers one graph after both stores reload', async () => {
+  const disk = new Map(); let failWrite = false;
+  const h = harness({ mocks: {
+    'expo-modules-core': { uuid: { v4: () => require('node:crypto').randomUUID() } },
+    '@react-native-async-storage/async-storage': { __esModule: true, default: {
+      getItem: async key => disk.get(key) ?? null,
+      setItem: async (key, value) => { if (failWrite) throw Error('process exited before handoff result'); disk.set(key, value); },
+      removeItem: async key => { disk.delete(key); },
+    } },
+  } });
+  try {
+    h.sql.exec('PRAGMA user_version = 22;');
+    const tokenResult = h.load('@/features/sharing/splitTransport').encodeSharedSplit(receiptRoutine);
+    assert.equal(tokenResult.ok, true); const token = tokenResult.value;
+    const handoff = h.load('@/store/sharedRoutineHandoff');
+    const attempt = await handoff.prepareSharedRoutineImport(token);
+    const committed = h.database.importPortableSplitSync(receiptRoutine, attempt);
+    failWrite = true;
+    await assert.rejects(handoff.rememberSharedRoutine(token, committed));
+    assert.equal(JSON.parse(disk.get(handoff.SHARED_ROUTINE_HANDOFF_KEY)).pending.saved, null);
+    await h.database.testReopenDatabase();
+    const cold = h.reloadModule('@/store/sharedRoutineHandoff'); await cold.loadSharedRoutineHandoff();
+    assert.equal(cold.useSharedRoutineHandoff.getState().pending.saved, null);
+    failWrite = false;
+    const recovered = h.database.importPortableSplitSync(receiptRoutine, await cold.prepareSharedRoutineImport(token));
+    assert.deepEqual(recovered, committed);
+    await cold.rememberSharedRoutine(token, recovered);
+    assert.equal(cold.useSharedRoutineHandoff.getState().pending.saved.splitId, committed.splitId);
+    assert.equal(h.sql.prepare('SELECT count(*) AS n FROM custom_splits').get().n, 1);
+    assert.equal(h.sql.prepare('SELECT count(*) AS n FROM custom_split_workouts').get().n, 1);
+    assert.equal(h.sql.prepare('SELECT count(*) AS n FROM custom_split_workout_exercises').get().n, 1);
+    assert.equal(h.sql.prepare('SELECT count(*) AS n FROM sessions').get().n, 0);
+  } finally { h.sql.close(); }
+});
+
+test('Stack’s plan edits: saved once as a hidden plan, replaced atomically by a generated plan, and restorable from older backups', async () => {
+  const h = harness();
+  try {
+    h.store.getState().acceptStackProgram(3, 'full-body', 'onboarding', 'Sam');
+    const userId = h.database.saveCustomSplitDraftSync('Mine', [{ name: 'Upper', exerciseIds: [h.lifts[0].id] }], { activate: false });
+    const planId = h.database.saveCustomSplitDraftSync('Stack’s plan', [{ name: 'Upper A', exerciseIds: [h.lifts[0].id] }, { name: 'Lower A', exerciseIds: [h.lifts[1].id] }], { stackPlan: true, activate: true });
+    assert.equal(h.database.readProfileSync().programMode, 'custom'); assert.equal(h.database.readProfileSync().activeSplitId, planId);
+    const summaries = await h.database.getCustomSplitsAsync();
+    assert.equal(summaries.find(split => split.id === planId).isStackPlan, true);
+    assert.equal(Object.hasOwn(summaries.find(split => split.id === userId), 'isStackPlan'), false);
+    assert.equal((await h.database.getCustomSplitDetailAsync(planId)).isStackPlan, true);
+    assert.throws(() => h.database.saveCustomSplitDraftSync('Stack’s plan', [{ name: 'Again', exerciseIds: [h.lifts[0].id] }], { stackPlan: true }), /already been edited/);
+    assert.equal(h.sql.prepare('SELECT count(*) AS n FROM custom_splits').get().n, 2);
+
+    // Backups made before the flag existed restore their routines as library routines.
+    const b = h.load('@/store/workoutBackup');
+    const backup = b.captureWorkoutBackup(h.adapter, 23);
+    assert.equal(backup.tables.custom_splits.find(row => row.id === planId).is_stack_plan, 1);
+    const older = JSON.parse(JSON.stringify(backup));
+    for (const row of older.tables.custom_splits) delete row.is_stack_plan;
+    older.tables.profile[0].active_split_id = userId;
+    const file = JSON.stringify(older);
+    b.restoreWorkoutBackup(h.adapter, older, 23);
+    assert.equal(JSON.stringify(older), file);
+    assert.deepEqual(h.sql.prepare('SELECT is_stack_plan AS flag FROM custom_splits ORDER BY id').all().map(row => row.flag), [0, 0]);
+    b.restoreWorkoutBackup(h.adapter, backup, 23);
+    h.store.getState().setProfile(h.database.readProfileSync());
+
+    h.sql.exec("CREATE TRIGGER fail_program BEFORE INSERT ON profile BEGIN SELECT RAISE(ABORT, 'program save failed'); END;");
+    assert.throws(() => h.store.getState().acceptStackProgram(4, 'full-body', 'configuration'), /program save failed/);
+    assert.equal(h.sql.prepare('SELECT count(*) AS n FROM custom_splits WHERE is_stack_plan = 1').get().n, 1);
+    assert.equal(h.database.readProfileSync().activeSplitId, planId);
+    h.sql.exec('DROP TRIGGER fail_program');
+    const accepted = h.store.getState().acceptStackProgram(4, 'full-body', 'configuration');
+    assert.equal(accepted.programMode, 'stack'); assert.equal(accepted.activeSplitId, null);
+    assert.deepEqual(h.sql.prepare('SELECT id FROM custom_splits').all().map(row => row.id), [userId]);
+    assert.deepEqual(h.database.readProfileSync(), accepted);
   } finally { h.sql.close(); }
 });

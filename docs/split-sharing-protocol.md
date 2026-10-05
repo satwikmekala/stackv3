@@ -245,3 +245,7 @@ Recommendations:
 - `exerciseMatchKey` relies on `String.prototype.normalize`. Verify it exists
   on the production Hermes build before shipping the importer. Node tests can't
   prove that.
+
+## Optional day color
+
+V1 workouts may also carry `color`: `orange`, `blue`, `purple`, `teal`, `lime`, or `pink`. The field identifies a workout day's personal accent; it does not change muscle classification or exercise behavior. Automatic colors omit the field, preserving existing canonical payloads. Readers ignore unknown cosmetic values, and old V1 readers safely ignore this optional field. Import persists known palette identifiers and sharing exports them again.

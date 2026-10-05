@@ -1,10 +1,12 @@
+import { hasMuscleColorPreference, getWorkoutLoggingColor } from '@/constants/muscleColors';
+import { useMuscleColors } from '@/store/muscleColors';
 import { ChevronUp } from 'lucide-react-native';
 import {
   StyleSheet, Text, TouchableOpacity, View,
   type LayoutChangeEvent, type StyleProp, type ViewStyle,
 } from 'react-native';
 import { ARCHETYPE_COMPOSITIONS } from '@/constants/archetypes';
-import { redesignColors, redesignFonts, workoutLoggingColors } from '@/constants/theme';
+import { redesignColors, redesignFonts } from '@/constants/theme';
 import { useWorkoutStore, type WorkoutSession } from '@/store/workoutStore';
 import { getCurrentWorkoutExerciseIndex } from '@/utils/workoutResume';
 
@@ -14,15 +16,18 @@ export function ActiveWorkoutCard({ session, onPress, onLayout, style }: {
   onLayout?: (event: LayoutChangeEvent) => void;
   style?: StyleProp<ViewStyle>;
 }) {
+  useMuscleColors(state => state.preferences);
   const workoutFocus = useWorkoutStore((state) => state.workoutFocus);
   const exercise = session.exercises[getCurrentWorkoutExerciseIndex(session, workoutFocus)];
   const nextSetIndex = exercise?.sets.findIndex((set) => !set.completed) ?? -1;
   const progress = nextSetIndex >= 0
     ? `Set ${nextSetIndex + 1} of ${exercise.sets.length}`
     : session.exercises.length === 0 ? 'Add your first exercise' : 'Ready to finish';
-  const accent = session.origin === 'adhoc' ? redesignColors.ash : session.archetype
+  const exerciseType = exercise ? useWorkoutStore.getState().getExerciseWorkoutType(exercise.name) : null;
+  const accent = exerciseType && hasMuscleColorPreference(exerciseType)
+    ? getWorkoutLoggingColor(exerciseType) : session.origin === 'adhoc' ? redesignColors.accent : session.archetype
     ? ARCHETYPE_COMPOSITIONS[session.archetype].color
-    : workoutLoggingColors[session.workoutTypes[0]];
+    : getWorkoutLoggingColor(session.workoutTypes[0]);
 
   return (
     <TouchableOpacity

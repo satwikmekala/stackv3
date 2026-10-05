@@ -1,8 +1,9 @@
+import { spokenTrainingCopy } from '@/utils/content';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { AccessibilityInfo, ActivityIndicator, Animated, BackHandler, Platform, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ArrowRight } from 'lucide-react-native';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/services/haptics';
 import { redesignColors as c, redesignFonts as f, splitColors } from '../../constants/theme';
 import { useWorkoutStore } from '../../store/workoutStore';
 import { getStartOfWeek, toLocalCalendarDate } from '../../store/workoutCalendar';
@@ -49,12 +50,12 @@ const overviewWeeks: BuildSlab[] = OVERVIEW_WEEK_SESSIONS.map((sessions, week) =
 const overviewTower = [...introTower, ...overviewWeeks];
 /** Scene fixtures per page; the copy lives in introCopy.ts. */
 const PAGE_SLABS = [introPieces, progressPieces, introTower, pieces];
-export default function BuildEntry({ children }: { children: ReactNode }) {
+export default function BuildEntry({ children, forceIntroduction = false, onFinish }: { children: ReactNode; forceIntroduction?: boolean; onFinish?: () => void }) {
   const accessibility = useBuildAccessibility();
   const workoutHydrated = useWorkoutStore((state) => state.isHydrated);
   const [introNow] = useState(() => new Date());
   // Already known to be seen (read once into memory): go straight in without a loading frame.
-  const [show, setShow] = useState<boolean | null>(() => introduction.getSnapshot() ? false : null);
+  const [show, setShow] = useState<boolean | null>(() => forceIntroduction ? true : introduction.getSnapshot() ? false : null);
   const [page, setPage] = useState(0);
   const [visited, setVisited] = useState<ReadonlySet<number>>(() => new Set());
   const { width, height: windowHeight } = useWindowDimensions();
@@ -131,7 +132,7 @@ export default function BuildEntry({ children }: { children: ReactNode }) {
     reveal(overviewCtaOpacity, overviewCtaOffset);
     setOverviewAnimationDone(true);
   }, [overviewBodyOffset, overviewBodyOpacity, overviewCtaOffset, overviewCtaOpacity, reveal]);
-  useEffect(() => { let mounted = true; void introduction.shouldShow().then((value) => { if (mounted) setShow(value); }); return () => { mounted = false; }; }, []);
+  useEffect(() => { if (forceIntroduction) return; let mounted = true; void introduction.shouldShow().then((value) => { if (mounted) setShow(value); }); return () => { mounted = false; }; }, [forceIntroduction]);
   useEffect(() => {
     if (page === 0 && (played0 || introReducedMotion || introSceneFailed)) {
       headlineOpacity.setValue(1);
@@ -184,7 +185,7 @@ export default function BuildEntry({ children }: { children: ReactNode }) {
     const back = BackHandler.addEventListener('hardwareBackPress', () => { exitGate.exit('back'); return false; });
     return () => back.remove();
   }, [show, exitGate]);
-  const exit = (reason: IntroExit) => { exitGate.exit(reason); setShow(false); };
+  const exit = (reason: IntroExit) => { exitGate.exit(reason); setShow(false); onFinish?.(); };
   const goTo = (next: number) => {
     if (next === page) return;
     setVisited((previous) => new Set(previous).add(page));
@@ -192,7 +193,7 @@ export default function BuildEntry({ children }: { children: ReactNode }) {
   };
   const scrollTo = (next: number) => { pager.current?.scrollTo({ x: next * width, animated: !introReducedMotion }); goTo(next); };
   if (show === false) return children;
-  if (show === null) return <SafeAreaView style={s.screen}><ActivityIndicator accessibilityLabel="Opening your Stack" color={c.ash} /></SafeAreaView>;
+  if (show === null) return <SafeAreaView style={s.screen}><ActivityIndicator accessibilityLabel="Opening My Stack…" color={c.ash} /></SafeAreaView>;
   const slabs = PAGE_SLABS[page];
   const motion = [
     { headline: headlineOpacity, headlineOffset, body: bodyOpacity, bodyOffset },
@@ -201,7 +202,7 @@ export default function BuildEntry({ children }: { children: ReactNode }) {
     { headline: overviewHeadlineOpacity, headlineOffset: overviewHeadlineOffset, body: overviewBodyOpacity, bodyOffset: overviewBodyOffset },
   ];
   return <SafeAreaView style={s.screen}>
-    <View style={s.header}><View style={s.button} /><Text maxFontSizeMultiplier={1.4} style={s.brand}>YOUR STACK</Text>{showsSkip(page)
+    <View style={s.header}><View style={s.button} /><Text maxFontSizeMultiplier={1.4} style={s.brand}>MY STACK</Text>{showsSkip(page)
       ? <Pressable accessibilityRole="button" accessibilityLabel="Skip the introduction" onPress={() => exit('skip')} style={s.button}><Text style={s.link}>Skip</Text></Pressable>
       : <View style={s.button} />}</View>
     <ScrollView contentContainerStyle={s.content}>
@@ -222,7 +223,7 @@ export default function BuildEntry({ children }: { children: ReactNode }) {
         {INTRO_PAGES.map((copy, index) => <View key={index} style={[s.page, { width }]} accessibilityElementsHidden={index !== page} importantForAccessibility={index === page ? 'auto' : 'no-hide-descendants'}>
           <Text style={s.step}>{introPosition(index)}</Text>
           <Animated.Text maxFontSizeMultiplier={2} accessibilityRole="header" accessibilityLiveRegion="polite" style={[s.title, { opacity: motion[index].headline, transform: [{ translateY: motion[index].headlineOffset }] }]}>{copy.title}</Animated.Text>
-          <Animated.Text style={[s.body, { opacity: motion[index].body, transform: [{ translateY: motion[index].bodyOffset }] }]}>{copy.body}</Animated.Text>
+          <Animated.Text accessibilityLabel={spokenTrainingCopy(copy.body)} style={[s.body, { opacity: motion[index].body, transform: [{ translateY: motion[index].bodyOffset }] }]}>{copy.body}</Animated.Text>
         </View>)}
       </ScrollView>
     </ScrollView>

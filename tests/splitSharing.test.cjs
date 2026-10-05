@@ -490,3 +490,12 @@ test('a timed custom exercise never leaks logged durations or other performance 
   assert.doesNotMatch(json, /754|613|889|durationS|sets|history/);
   assert.match(json, /"metric":"duration"/);
 });
+
+test('day palette survives V1 sharing; automatic stays byte-compatible and unknown colors fall back', () => {
+  const split = ppl(); split.workouts[0].color = 'purple'; split.workouts[2].color = 'lime';
+  assert.deepEqual(roundTrip(split), split);
+  const wire = baseWire(); wire.workouts[0].color = '#ffffff';
+  assert.equal(ok(parseWire(wire)).workouts[0].color, undefined);
+  const automatic = ppl(); automatic.workouts[0].color = null;
+  assert.deepEqual(roundTrip(automatic), ppl());
+});

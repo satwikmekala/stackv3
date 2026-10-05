@@ -23,11 +23,13 @@ function evaluate(text, requireModule = require, injected = {}) {
 const dates = evaluate(source('store/workoutCalendar.ts'));
 const verified = evaluate(source('store/verifiedSessions.ts'));
 const theme = evaluate(source('constants/theme.ts'));
+const muscleColors = evaluate(source('constants/muscleColors.ts'), () => theme);
 const measurement = evaluate(source('store/exerciseMeasurement.ts'));
 const records = evaluate(source('store/personalRecords.ts'), (id) => {
   if (id.endsWith('/exerciseMeasurement')) return measurement;
   if (id.endsWith('/workoutCalendar')) return dates;
   if (id.endsWith('/verifiedSessions')) return verified;
+  if (id.endsWith('/muscleColors')) return muscleColors;
   if (id.endsWith('/theme')) return theme;
   throw new Error(`Unexpected dependency: ${id}`);
 });

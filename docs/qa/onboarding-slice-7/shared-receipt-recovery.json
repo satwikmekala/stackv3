@@ -1,0 +1,45 @@
+{
+  "kind": "Native simulated missing handoff result after real receipt-backed import; not timed process kill inside the write window.",
+  "before": {
+    "pending": {
+      "token": "eyJ0eXBlIjoic3RhY2suc3BsaXQiLCJ2IjoxLCJuYW1lIjoiU2hhcmVkIGZpcnN0IGxpbmV1cCIsIndvcmtvdXRzIjpbeyJuYW1lIjoiU2hhcmVkIHB1c2giLCJleGVyY2lzZXMiOlsiQmVuY2ggUHJlc3MiLCJPdmVyaGVhZCBQcmVzcyJdfV19",
+      "saved": {
+        "splitId": 2,
+        "name": "Shared first lineup 2",
+        "workoutIds": [
+          2
+        ]
+      },
+      "attemptId": "3dfb62ea-4aea-46d3-b543-560147206ce3"
+    },
+    "receipt": {
+      "attempt_id": "3dfb62ea-4aea-46d3-b543-560147206ce3",
+      "payload": "{\"type\":\"stack.split\",\"v\":1,\"name\":\"Shared first lineup\",\"workouts\":[{\"name\":\"Shared push\",\"exercises\":[\"Bench Press\",\"Overhead Press\"]}]}",
+      "split_id": 2
+    },
+    "routines": 2,
+    "sessions": 0
+  },
+  "simulatedDurableHandoff": {
+    "token": "eyJ0eXBlIjoic3RhY2suc3BsaXQiLCJ2IjoxLCJuYW1lIjoiU2hhcmVkIGZpcnN0IGxpbmV1cCIsIndvcmtvdXRzIjpbeyJuYW1lIjoiU2hhcmVkIHB1c2giLCJleGVyY2lzZXMiOlsiQmVuY2ggUHJlc3MiLCJPdmVyaGVhZCBQcmVzcyJdfV19",
+    "saved": null,
+    "attemptId": "3dfb62ea-4aea-46d3-b543-560147206ce3"
+  },
+  "afterRetry": {
+    "pending": {
+      "token": "eyJ0eXBlIjoic3RhY2suc3BsaXQiLCJ2IjoxLCJuYW1lIjoiU2hhcmVkIGZpcnN0IGxpbmV1cCIsIndvcmtvdXRzIjpbeyJuYW1lIjoiU2hhcmVkIHB1c2giLCJleGVyY2lzZXMiOlsiQmVuY2ggUHJlc3MiLCJPdmVyaGVhZCBQcmVzcyJdfV19",
+      "saved": {
+        "splitId": 2,
+        "name": "Shared first lineup 2",
+        "workoutIds": [
+          2
+        ]
+      },
+      "attemptId": "3dfb62ea-4aea-46d3-b543-560147206ce3"
+    },
+    "routines": 2,
+    "sessions": 0,
+    "programMode": "stack",
+    "receiptCount": 1
+  }
+}

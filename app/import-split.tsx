@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { routineLinkErrorCopy, routineImportFailureCopy } from '@/features/sharing/routineCopy';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Check, ChevronLeft, Layers } from 'lucide-react-native';
 import { redesignColors, redesignFonts } from '@/constants/theme';
@@ -10,6 +11,9 @@ import { importPortableSplitSync } from '@/store/workoutDatabase';
 import { SplitImportError, type ImportedSplit } from '@/store/splitImport';
 import { useWorkoutStore } from '@/store/workoutStore';
 import { useCustomSplitDraftStore } from '@/store/customSplitDraft';
+import { FIRST_RUN_ROUTE, ONBOARDING_PREVIEW_ENABLED } from '@/features/onboarding/config';
+
+import { loadSharedRoutineHandoff, prepareSharedRoutineImport, rememberSharedRoutine, clearSharedRoutineHandoff, useSharedRoutineHandoff } from '@/store/sharedRoutineHandoff';
 
 export default function ImportSplitScreen() {
   const { d } = useLocalSearchParams<{ d?: string | string[] }>();
@@ -25,73 +29,119 @@ export default function ImportSplitScreen() {
 
 function SplitPreview({ token }: { token: unknown }) {
   const router = useRouter();
+  const { fontScale } = useWindowDimensions();
   const parsed = useMemo(() => parseSharedSplit(token), [token]);
   const profile = useWorkoutStore((state) => state.profile);
   const refreshCustomSplits = useWorkoutStore((state) => state.refreshCustomSplits);
-  const discardDraft = useCustomSplitDraftStore((state) => state.discardDraft);
+  const closeDraft = useCustomSplitDraftStore((state) => state.closeDraft);
+  const handoff = useSharedRoutineHandoff();
+  const focused = useRef(true), leaving = useRef(false), locked = useRef(false);
+  useFocusEffect(useCallback(() => { focused.current = true; return () => { focused.current = false; }; }, []));
+  useEffect(() => () => { focused.current = false; }, []);
   const [saving, setSaving] = useState(false);
   const [added, setAdded] = useState<ImportedSplit | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [persist] = useState(() => createSplitImportAction(() => {
-    if (!parsed.ok) throw new SplitImportError(parsed.error.message);
-    return importPortableSplitSync(parsed.value);
+  const [persist] = useState(() => createSplitImportAction(async () => {
+    if (!parsed.ok) throw new SplitImportError(routineLinkErrorCopy(parsed.error));
+    const attemptId = ONBOARDING_PREVIEW_ENABLED && typeof token === 'string'
+      ? await prepareSharedRoutineImport(token) : undefined;
+    return importPortableSplitSync(parsed.value, attemptId);
   }));
 
-  const done = () => router.replace(profile?.onboardingCompleted ? '/your-splits' : '/(onboarding)/welcome');
-  const back = () => { if (router.canGoBack()) router.back(); else done(); };
+  const saved = added ?? (typeof token === 'string' && handoff.pending?.token === token ? handoff.pending.saved : null);
+  useEffect(() => {
+    if (!ONBOARDING_PREVIEW_ENABLED || !parsed.ok || typeof token !== 'string') return;
+    void (profile?.onboardingCompleted ? loadSharedRoutineHandoff() : rememberSharedRoutine(token)).catch(() => {
+      if (focused.current) setError('Couldn’t keep your shared routine. Try again.');
+    });
+  }, [parsed.ok, profile?.onboardingCompleted, token]);
+  const leave = async (backwards = false, useRoutine = false) => {
+    if (locked.current || leaving.current || !focused.current) return;
+    locked.current = true; setSaving(true); setError(null);
+    try {
+      if (ONBOARDING_PREVIEW_ENABLED && parsed.ok && typeof token === 'string') {
+        if (!useWorkoutStore.getState().profile?.onboardingCompleted) {
+          await rememberSharedRoutine(token, saved);
+          if (focused.current) { leaving.current = true; router.replace(FIRST_RUN_ROUTE); }
+          return;
+        }
+        if (useRoutine && saved) useWorkoutStore.getState().activateSharedRoutine(saved.splitId);
+        await clearSharedRoutineHandoff(token);
+      }
+      if (!focused.current) return;
+      leaving.current = true;
+      if (useRoutine) router.replace('/(tabs)');
+      else if (backwards && router.canGoBack()) router.back();
+      else router.replace(useWorkoutStore.getState().profile?.onboardingCompleted ? '/your-splits' : FIRST_RUN_ROUTE);
+    } catch { if (focused.current) setError('Couldn’t save your choice. Try again.'); }
+    finally { locked.current = false; if (focused.current) setSaving(false); }
+  };
+  const done = () => { void leave(); };
+  const back = () => { void leave(true); };
   const add = async () => {
-    if (!parsed.ok || saving || added) return;
+    if (!parsed.ok || locked.current || leaving.current || saved || !focused.current) return;
+    locked.current = true;
     setSaving(true);
     setError(null);
     try {
       const result = await persist();
       // The transaction is committed. Refresh is deliberately separate: a
       // library refresh failure must never offer a second persistence attempt.
-      setAdded(result);
+      if (focused.current) setAdded(result);
       void refreshCustomSplits();
+      if (ONBOARDING_PREVIEW_ENABLED && typeof token === 'string' && focused.current) await rememberSharedRoutine(token, result);
     } catch (failure) {
-      setError(failure instanceof SplitImportError ? failure.message : "Couldn't add this split. Please try again.");
+      if (focused.current) setError(routineImportFailureCopy(failure));
     } finally {
-      setSaving(false);
+      locked.current = false;
+      if (focused.current) setSaving(false);
     }
   };
-  const viewSplit = () => {
-    if (!added) return;
-    discardDraft();
-    router.replace({ pathname: '/custom-split', params: { source: 'library', splitId: String(added.splitId) } });
+  const viewSplit = async () => {
+    if (!saved || locked.current || !focused.current) return;
+    locked.current = true; setSaving(true);
+    try {
+      if (ONBOARDING_PREVIEW_ENABLED && typeof token === 'string') await clearSharedRoutineHandoff(token);
+      if (!focused.current) return;
+      leaving.current = true; closeDraft();
+      router.replace({ pathname: '/custom-split', params: { source: 'library', splitId: String(saved.splitId) } });
+    } catch { if (focused.current) setError('Couldn’t open your routine. Try again.'); }
+    finally { locked.current = false; if (focused.current) setSaving(false); }
   };
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={styles.header}>
+      <View key={`header:${fontScale}`} style={styles.header}>
         <Pressable accessibilityRole="button" accessibilityLabel="Back" disabled={saving}
           onPress={back} style={styles.back}>
           <ChevronLeft color={redesignColors.bone} size={22} />
         </Pressable>
-        <Text style={styles.eyebrow}>SHARED SPLIT</Text>
+        <Text style={styles.eyebrow}>SHARED ROUTINE</Text>
       </View>
       {!parsed.ok ? (
-        <View style={styles.state}>
+        <View key={`invalid:${fontScale}`} style={styles.state}>
           <Layers size={36} color={redesignColors.ash} />
-          <Text accessibilityRole="header" style={styles.title}>Can&apos;t open this Stack split.</Text>
-          <Text style={styles.copy}>{parsed.error.message}</Text>
+          <Text accessibilityRole="header" style={styles.title}>Couldn’t open this routine.</Text>
+          <Text style={styles.copy}>{routineLinkErrorCopy(parsed.error)}</Text>
           <Action label="Back to Stack" onPress={back} />
         </View>
-      ) : added ? (
-        <View style={styles.state}>
+      ) : saved ? (
+        <ScrollView key={`saved:${fontScale}`} contentContainerStyle={styles.state}>
           <View style={styles.successIcon}><Check size={32} color={redesignColors.accent} /></View>
-          <Text accessibilityRole="header" style={styles.title}>Added to Stack</Text>
-          <Text style={styles.successName}>{added.name}</Text>
+          <Text accessibilityRole="header" style={styles.title}>Added to Your routines</Text>
+          <Text style={styles.successName}>{saved.name}</Text>
           <Text style={styles.copy}>{profile?.onboardingCompleted
-            ? 'Your own editable copy is in Your Splits. Your active program is unchanged.'
-            : 'Your own editable copy is saved. Finish setting up Stack to find it in Your Splits.'}</Text>
-          {profile?.onboardingCompleted ? <Action label="View split" onPress={viewSplit} /> : null}
-          <Action label={profile?.onboardingCompleted ? 'Done' : 'Continue to Stack'}
-            onPress={done} secondary={Boolean(profile?.onboardingCompleted)} />
-        </View>
+            ? 'Your editable copy is in Your routines.'
+            : 'Routine saved. Finish setup to open Your routines.'}</Text>
+          {error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
+          {ONBOARDING_PREVIEW_ENABLED && profile?.onboardingCompleted && <Action label="Use this routine" onPress={() => { void leave(false, true); }} disabled={saving} />}
+          {profile?.onboardingCompleted ? <Action label="View routine" onPress={() => { void viewSplit(); }} disabled={saving} secondary={ONBOARDING_PREVIEW_ENABLED} /> : null}
+          <Action label={profile?.onboardingCompleted ? (ONBOARDING_PREVIEW_ENABLED ? 'Save for later' : 'Done') : 'Continue to Stack'}
+            onPress={done} disabled={saving} secondary={Boolean(profile?.onboardingCompleted)} />
+        </ScrollView>
       ) : (
         <>
-          <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <ScrollView key={`preview:${fontScale}`} style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
             <Text accessibilityRole="header" style={styles.title}>{parsed.value.name}</Text>
             <Text style={styles.meta}>{parsed.value.workouts.length} {parsed.value.workouts.length === 1 ? 'workout' : 'workouts'} · {parsed.value.workouts.reduce((total, workout) => total + workout.exercises.length, 0)} exercises</Text>
             <Text style={styles.copy}>Add your own copy, then edit it to suit you. You&apos;ll use your own weights, history and settings.</Text>
@@ -115,10 +165,10 @@ function SplitPreview({ token }: { token: unknown }) {
               </View>
             ))}
           </ScrollView>
-          <View style={styles.footer}>
+          <View key={`footer:${fontScale}`} style={styles.footer}>
             {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
-            <Action label={saving ? 'Adding…' : 'Add to Stack'} onPress={() => { void add(); }} disabled={saving} busy={saving} />
-            <Text style={styles.hint}>Saves to Your Splits. Your active program stays the same.</Text>
+            <Action label={saving ? 'Adding…' : 'Add to Your routines'} onPress={() => { void add(); }} disabled={saving} busy={saving} />
+            <Text style={styles.hint}>Saves a copy to Your routines.</Text>
             <Action label="Cancel" onPress={back} disabled={saving} secondary />
           </View>
         </>
@@ -162,7 +212,7 @@ const styles = StyleSheet.create({
   dimmed: { opacity: 0.6 },
   hint: { color: redesignColors.ash, fontFamily: redesignFonts.ui, fontSize: 12, lineHeight: 18, textAlign: 'center' },
   error: { color: redesignColors.bone, fontFamily: redesignFonts.uiMedium, fontSize: 15, lineHeight: 21 },
-  state: { flex: 1, justifyContent: 'center', padding: 24, gap: 20 },
+  state: { flexGrow: 1, justifyContent: 'center', padding: 24, gap: 20 },
   successIcon: { alignSelf: 'flex-start', padding: 16, borderRadius: 40, backgroundColor: redesignColors.surface },
   successName: { color: redesignColors.bone, fontFamily: redesignFonts.uiBold, fontSize: 22 },
 });

@@ -109,7 +109,7 @@ test('transport budget blocks valid but oversized links before native sharing', 
     assert.ok(t.buildSplitImportUrl(ok(t.encodeSharedSplit(p))).length > MAX_SPLIT_SHARE_URL_LENGTH);
     const content = prepareSplitShare(split, h.db.BUILT_IN_EXERCISE_NAMES);
     assert.equal(content.error.code, 'payload_too_large');
-    await assert.rejects(h.load('@/features/sharing/shareSavedSplit').shareSavedSplit(saved.splitId), /too large to share/);
+    await assert.rejects(h.load('@/features/sharing/shareSavedSplit').shareSavedSplit(saved.splitId), /too big to share/);
     assert.equal(h.shares.length, 0);
   } finally { h.sql.close(); }
 });
@@ -166,7 +166,7 @@ test('unknown built-in rejects whole import with Update Stack, without guessing 
   const h = harness();
   try {
     const before = snapshot(h);
-    assert.throws(() => h.db.importPortableSplitSync(program([c('New Custom'), b('Future Stack Exercise')])), /Update Stack/);
+    assert.throws(() => h.db.importPortableSplitSync(program([c('New Custom'), b('Future Stack Exercise')])), /Update to open it/);
     assert.deepEqual(snapshot(h), before);
   } finally { h.sql.close(); }
 });
@@ -474,5 +474,42 @@ test('imported built-in uses recipient global history, units and progression whe
     assert.equal(suggestion.unit, 'lbs');
     assert.equal(suggestion.increment, 5);
     assert.equal(h.db.readProfileSync().activeSplitId, historySplit.splitId);
+  } finally { h.sql.close(); }
+});
+
+test('imported day colors persist and share again without changing recipient activation', async () => {
+  const h = harness();
+  try {
+    const split = program(); split.workouts[0].color = 'purple'; split.workouts[1].color = 'teal';
+    const imported = h.db.importPortableSplitSync(split);
+    const detail = await h.db.getCustomSplitDetailAsync(imported.splitId);
+    assert.deepEqual(detail.workouts.map(day => day.color), ['purple', 'teal']);
+    const portable = h.load('@/features/sharing/customSplitAdapter').portableSplitFromCustomSplit(detail, h.db.BUILT_IN_EXERCISE_NAMES);
+    assert.deepEqual(portable, split);
+    assert.equal(h.db.readProfileSync().activeSplitId, null);
+  } finally { h.sql.close(); }
+});
+
+test('Slice 7: a saved shared routine stays dormant through setup; explicit use activates only after a durable write', async () => {
+  const h = harness({ profile: false });
+  try {
+    const saved = h.db.importPortableSplitSync(program());
+    assert.throws(() => h.store.getState().activateSharedRoutine(saved.splitId), /Finish setup/);
+    const initial = h.store.getState().completeNoProgramOnboarding();
+    assert.equal(initial.programMode, 'none'); assert.equal(initial.activeSplitId, null);
+    h.store.getState().startEmptyWorkout(); const session = h.store.getState().currentSession;
+    const before = snapshot(h);
+    h.sql.exec("CREATE TRIGGER fail_shared_use BEFORE UPDATE ON profile BEGIN SELECT RAISE(ABORT, 'write failed'); END;");
+    assert.throws(() => h.store.getState().activateSharedRoutine(saved.splitId), /write failed/);
+    assert.deepEqual(snapshot(h), before); assert.deepEqual(h.store.getState().profile, initial);
+    h.sql.exec('DROP TRIGGER fail_shared_use');
+    const used = h.store.getState().activateSharedRoutine(saved.splitId);
+    assert.deepEqual(used, { ...initial, programMode: 'custom', activeSplitId: saved.splitId });
+    assert.deepEqual(h.db.readProfileSync(), used); assert.equal(h.store.getState().currentSession, session);
+    for (const table of tables.filter(t => t !== 'profile')) assert.deepEqual(snapshot(h)[table], before[table], table);
+    await h.store.getState().refreshCustomSplits();
+    assert.equal(h.store.getState().currentCustomSplit.id, saved.splitId);
+    assert.throws(() => h.store.getState().activateSharedRoutine(99999), /not found/);
+    assert.deepEqual(h.db.readProfileSync(), used);
   } finally { h.sql.close(); }
 });

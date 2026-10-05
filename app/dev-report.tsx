@@ -30,7 +30,7 @@ export default function DevReportPreview() {
         ))}
         {(['kg', 'lbs'] as const).map((value) => (
           <Pressable key={value} onPress={() => setUnit(value)} style={[styles.chip, value === unit && styles.chipOn]}>
-            <Text style={[styles.chipText, value === unit && styles.chipTextOn]}>{value}</Text>
+            <Text style={[styles.chipText, value === unit && styles.chipTextOn]}>{value === 'lbs' ? 'lb' : value}</Text>
           </Pressable>
         ))}
       </View>

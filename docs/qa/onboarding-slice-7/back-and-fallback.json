@@ -1,0 +1,26 @@
+{
+  "bundle": "com.liftwithstack.onboardingpreview7narrow",
+  "counts": {
+    "profile": 0,
+    "sessions": 0,
+    "session_exercises": 0,
+    "sets": 0,
+    "custom_splits": 0
+  },
+  "profile": null,
+  "drafts": {
+    "stack-onboarding-draft-v1": {
+      "version": 1,
+      "draft": {
+        "step": "welcome",
+        "choice": null,
+        "frequency": null,
+        "structure": "full-body"
+      }
+    }
+  },
+  "templateDigest": "17dbfa55c08c106ef6eb5c65ef0b851892abcd7d3e471a7eabaa0b16a0f8d745",
+  "sessions": [],
+  "exerciseUnits": [],
+  "timerKeys": {}
+}

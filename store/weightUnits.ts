@@ -34,4 +34,4 @@ export const getWeightIncrementKg = (
   return unit === 'lbs' ? lbsToKg(increment) : increment;
 };
 
-export const unitLabel = (unit: WeightUnit): string => (unit === 'lbs' ? 'lbs' : 'kg');
+export const unitLabel = (unit: WeightUnit): string => (unit === 'lbs' ? 'lb' : 'kg');

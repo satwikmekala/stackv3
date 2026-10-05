@@ -517,14 +517,14 @@ test('reduced effects persist, publish to all screens and serialize rapid toggle
   await cold.load();
   assert.equal(cold.getSnapshot().reduceEffects, true);
 });
-test('late preference reads cannot overwrite an explicit choice; failed storage remains usable', async () => {
+test('late preference reads cannot overwrite a choice; failed writes revert and remain usable', async () => {
   let resolve;
   const prefs = createBuildPreferences({ getItem: () => new Promise((done) => { resolve = done; }), setItem: async () => { throw Error('disk unavailable'); } });
   const load = prefs.load();
-  await prefs.setReduceEffects(true);
+  await assert.rejects(prefs.setReduceEffects(true), /disk unavailable/);
   resolve('0');
   await load;
-  assert.deepEqual(prefs.getSnapshot(), { ready: true, reduceEffects: true });
+  assert.deepEqual(prefs.getSnapshot(), { ready: true, reduceEffects: false });
 });
 test('all accessibility reward exits bypass the timeline without changing training evidence', () => {
   assert.equal(shouldSkipBuildReward(false, false, false, 1), false);

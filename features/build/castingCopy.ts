@@ -1,3 +1,4 @@
+import { displayExerciseName } from '@/constants/exerciseNames';
 import { CASTING_PHASE_STARTS, type CastingHold, type CastingPhase } from './casting';
 import type { BuildPiece, ImprovedSet } from './evidence';
 import { formatWeight, unitLabel, type WeightUnit } from '../../store/weightUnits';
@@ -47,14 +48,14 @@ export function progressRow(exercise: string, set: ImprovedSet, unit: WeightUnit
     const after = formatWeight(set.current.weightKg, unit);
     // Subtract the values as displayed so the delta always matches the two numbers beside it.
     const delta = Math.round((Number(after) - Number(before)) * 10) / 10;
-    return { delta: `+${trim(delta)} ${units}`, exercise, change: `${before} → ${after} ${units}` };
+    return { delta: `+${trim(delta)} ${units}`, exercise: displayExerciseName(exercise), change: `${before} → ${after} ${units}` };
   }
   const reps = set.current.reps - set.previous.reps;
-  return { delta: `+${countLabel(reps, 'rep')}`, exercise, change: `${set.previous.reps} → ${set.current.reps}` };
+  return { delta: `+${countLabel(reps, 'rep')}`, exercise: displayExerciseName(exercise), change: `${set.previous.reps} → ${set.current.reps}` };
 }
 
 export const recordLine = (record: BuildPiece['records'][number], unit: WeightUnit) =>
-  `${record.exerciseName} · ${formatLoadReps(record.current.weight, record.current.reps, unit)}`;
+  `${displayExerciseName(record.exerciseName)} · ${formatLoadReps(record.current.weight, record.current.reps, unit)}`;
 
 export function castingCopy({ piece, category, weekPosition, firstEver, unit }: {
   piece: BuildPiece; category: string; weekPosition: number; firstEver: boolean; unit: WeightUnit;
@@ -71,22 +72,22 @@ export function castingCopy({ piece, category, weekPosition, firstEver, unit }: 
   const metrics: CastingMetric[] = [
     ...(moved ? [{ value: moved, label: 'MOVED' }] : []),
     ...(piece.metrics.liftsUp > 0 ? [{ value: String(piece.metrics.liftsUp), label: 'LIFTS UP' }] : []),
-    ...(piece.metrics.records > 0 ? [{ value: String(piece.metrics.records), label: piece.metrics.records >= 2 ? 'PRS' : 'PR' }] : []),
+    ...(piece.metrics.records > 0 ? [{ value: String(piece.metrics.records), label: piece.metrics.records >= 2 ? 'PRs' : 'PR' }] : []),
   ];
   return {
     beats,
     pieceLabel: `${category.toUpperCase()} · DONE`,
     progress: { title: 'Better than\nlast time.', heading: 'WHAT MADE IT THICKER', rows, more: hidden > 0 ? `+${hidden} more` : null },
     record: {
-      heading: piece.records.length > 1 ? 'NEW RECORDS' : 'NEW RECORD',
+      heading: piece.records.length > 1 ? 'PRs' : 'PR',
       lines: piece.records.map((record) => recordLine(record, unit)),
       closing: 'Your best yet.',
     },
     landing: {
       title: 'Stacked.',
-      subtitle: firstEver ? 'Your first piece.' : `${pieceOrdinal(weekPosition)} piece this week.`,
+      subtitle: firstEver ? 'Your first block.' : `${pieceOrdinal(weekPosition)} block this week.`,
       metrics,
-      baseline: firstEver ? 'Every lift today sets your baseline.' : null,
+      baseline: firstEver ? 'Your first logged sets start your history.' : null,
     },
   };
 }
@@ -136,9 +137,9 @@ export function castingStaticContent(copy: CastingCopy) {
 export function castingAnnouncement(copy: CastingCopy) {
   const { record } = castingStaticContent(copy);
   return spoken([
-    ...(record ? [record.heading, ...record.lines, record.closing] : []),
+    ...(record ? [record.heading.replace(/PRs/g, 'personal records').replace(/PR/g, 'personal record'), ...record.lines, record.closing] : []),
     copy.landing.title, copy.landing.subtitle,
-    ...copy.landing.metrics.map((metric) => `${metric.value} ${metric.label}`),
+    ...copy.landing.metrics.map((metric) => `${metric.value} ${metric.label.replace(/PRs/g, 'personal records').replace(/PR/g, 'personal record').toLowerCase()}`),
     copy.landing.baseline,
   ]);
 }

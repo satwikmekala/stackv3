@@ -1,0 +1,31 @@
+{
+  "bundle": "com.liftwithstack.onboardingpreview6stack",
+  "counts": {
+    "profile": 1,
+    "sessions": 0,
+    "session_exercises": 0,
+    "sets": 0,
+    "custom_splits": 0
+  },
+  "profile": {
+    "id": 1,
+    "name": "",
+    "weekly_goal": 0,
+    "program_weekly_goal": 3,
+    "experience_level": "intermediate",
+    "training_days": "[]",
+    "onboarding_completed": 1,
+    "auto_increase_weight": 0,
+    "weight_increment": 0.5,
+    "weight_unit": "kg",
+    "weight_increment_lbs": 5.0,
+    "active_split_id": null,
+    "program_mode": "stack",
+    "three_day_structure": "full-body",
+    "weight_unit_confirmed": 0
+  },
+  "drafts": {},
+  "templateDigest": "17dbfa55c08c106ef6eb5c65ef0b851892abcd7d3e471a7eabaa0b16a0f8d745",
+  "sessions": [],
+  "timerKeys": {}
+}

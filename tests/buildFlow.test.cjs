@@ -157,28 +157,28 @@ const piece = ({ records = [], liftsUp = 0 } = {}) => ({
 const record = (exerciseName, weight, reps) => ({ exerciseName, previous: { weight: weight - 5, reps }, current: { weight, reps } });
 const casting = (options, context = {}) => castingCopy({ piece: piece(options), category: 'Push', weekPosition: 2, firstEver: false, unit: 'kg', ...context });
 
-test('static casting: baseline (first piece) shows Beat 4 only, with the baseline line', () => {
+test("static casting: baseline (first block) shows Beat 4 only, with the baseline line", () => {
   const copy = casting({}, { firstEver: true, weekPosition: 1 });
   const content = castingStaticContent(copy);
   assert.equal(content.record, null);
-  assert.deepEqual(content.landing, { title: 'Stacked.', subtitle: 'Your first piece.', metrics: [{ value: '5,240 KG', label: 'MOVED' }], baseline: 'Every lift today sets your baseline.' });
-  assert.equal(castingAnnouncement(copy), 'Stacked. Your first piece. 5,240 KG MOVED. Every lift today sets your baseline.');
+  assert.deepEqual(content.landing, { title: 'Stacked.', subtitle: "Your first block.", metrics: [{ value: "5,240 kg", label: 'MOVED' }], baseline: 'Your first logged sets start your history.' });
+  assert.equal(castingAnnouncement(copy), "Stacked. Your first block. 5,240 kg moved. Your first logged sets start your history.");
 });
 
 test('static casting: a PR shows the NEW RECORD block above Beat 4; progression rows are omitted', () => {
   const copy = casting({ records: [record('Bench press', 100, 5)], liftsUp: 2 });
   const content = castingStaticContent(copy);
-  assert.deepEqual(content.record, { heading: 'NEW RECORD', lines: ['Bench press · 100 kg × 5'], closing: 'Your best yet.' });
+  assert.deepEqual(content.record, { heading: "PR", lines: ['Bench press · 100 kg × 5'], closing: 'Your best yet.' });
   assert.deepEqual(Object.keys(content), ['record', 'landing'], 'no progression rows');
-  assert.deepEqual(content.landing.metrics, [{ value: '5,240 KG', label: 'MOVED' }, { value: '2', label: 'LIFTS UP' }, { value: '1', label: 'PR' }]);
+  assert.deepEqual(content.landing.metrics, [{ value: "5,240 kg", label: 'MOVED' }, { value: '2', label: 'LIFTS UP' }, { value: '1', label: 'PR' }]);
   assert.equal(content.landing.baseline, null);
-  assert.equal(castingAnnouncement(copy), 'NEW RECORD. Bench press · 100 kg × 5. Your best yet. Stacked. Second piece this week. 5,240 KG MOVED. 2 LIFTS UP. 1 PR.');
+  assert.equal(castingAnnouncement(copy), "personal record. Bench press · 100 kg × 5. Your best yet. Stacked. Second block this week. 5,240 kg moved. 2 lifts up. 1 personal record.");
 });
 
-test('static casting: no PR and not the first piece is Beat 4 alone', () => {
+test("static casting: no PR and not the first block is Beat 4 alone", () => {
   const content = castingStaticContent(casting({ liftsUp: 1 }));
   assert.equal(content.record, null);
-  assert.equal(content.landing.subtitle, 'Second piece this week.');
+  assert.equal(content.landing.subtitle, "Second block this week.");
 });
 
 test('static fusion: Beat 3 in full with the count at its final value', () => {
@@ -186,30 +186,30 @@ test('static fusion: Beat 3 in full with the count at its final value', () => {
   const state = derive(sessions, '2026-09-23');
   const copy = fusionCopy({ state, weekId: 'week:2026-09-14', unit: 'kg', builtBefore: 1, category: (item) => pieceCategory(sessions.find((s) => s.id === item.sessionId), item.label) });
   const content = fusionStaticContent(copy);
-  assert.deepEqual(content.sealed, { kicker: '14–20 SEP · SEALED', title: 'One week.\nOne layer.', summary: '1 PIECE · 840 KG MOVED', thickest: null });
-  assert.equal(content.stackLabel, 'YOUR STACK');
-  assert.equal(content.built, '2 weeks built');
-  assert.equal(fusionAnnouncement(copy), 'One week. One layer. 1 PIECE · 840 KG MOVED. 2 weeks built.');
+  assert.deepEqual(content.sealed, { kicker: "14–20 Sep · COMPLETE", title: 'One week.\nOne layer.', summary: "1 BLOCK · 840 kg MOVED", thickest: null });
+  assert.equal(content.stackLabel, 'MY STACK');
+  assert.equal(content.built, "2 layers built");
+  assert.equal(fusionAnnouncement(copy), "one week. one layer. 1 block · 840 kg moved. 2 layers built.");
 });
 
 // ---- Fix 4: Home doesn't spoil the week close
 const home = (options) => { const { kicker, title, detail } = homeModuleCopy(options); return [kicker, title, detail]; };
 
 test('Home pending close: pre-close count and "Last week became a layer."', () => {
-  assert.deepEqual(home({ seen: true, weeksBuilt: 4, piecesThisWeek: 1, pendingClose: { builtBefore: 3, previousWeek: true } }), ['YOUR STACK', '3 weeks built', 'Last week became a layer.']);
-  assert.deepEqual(home({ seen: true, weeksBuilt: 2, piecesThisWeek: 0, pendingClose: { builtBefore: 1, previousWeek: true } }), ['YOUR STACK', '1 week built', 'Last week became a layer.']);
-  assert.equal(homeModuleCopy({ seen: true, weeksBuilt: 4, piecesThisWeek: 0, pendingClose: { builtBefore: 3, previousWeek: true } }).a11y, 'Your Stack. 3 weeks built. Last week became a layer.');
+  assert.deepEqual(home({ seen: true, weeksBuilt: 4, piecesThisWeek: 1, pendingClose: { builtBefore: 3, previousWeek: true } }), ['MY STACK', "3 layers built", 'Last week became a layer.']);
+  assert.deepEqual(home({ seen: true, weeksBuilt: 2, piecesThisWeek: 0, pendingClose: { builtBefore: 1, previousWeek: true } }), ['MY STACK', "1 layer built", 'Last week became a layer.']);
+  assert.equal(homeModuleCopy({ seen: true, weeksBuilt: 4, piecesThisWeek: 0, pendingClose: { builtBefore: 3, previousWeek: true } }).a11y, "My Stack. 3 layers built. Last week became a layer.");
 });
 
 test('Home pending close: an older week reads "Your latest week", and a pre-close count of 0 is omitted', () => {
-  assert.deepEqual(home({ seen: true, weeksBuilt: 5, piecesThisWeek: 0, pendingClose: { builtBefore: 4, previousWeek: false } }), ['YOUR STACK', '4 weeks built', 'Your latest week became a layer.']);
-  assert.deepEqual(home({ seen: true, weeksBuilt: 1, piecesThisWeek: 2, pendingClose: { builtBefore: 0, previousWeek: true } }), ['YOUR STACK', 'Last week became a layer.', null]);
-  assert.deepEqual(home({ seen: true, weeksBuilt: 1, piecesThisWeek: 0, pendingClose: { builtBefore: 0, previousWeek: false } }), ['YOUR STACK', 'Your latest week became a layer.', null]);
+  assert.deepEqual(home({ seen: true, weeksBuilt: 5, piecesThisWeek: 0, pendingClose: { builtBefore: 4, previousWeek: false } }), ['MY STACK', "4 layers built", 'Your latest week became a layer.']);
+  assert.deepEqual(home({ seen: true, weeksBuilt: 1, piecesThisWeek: 2, pendingClose: { builtBefore: 0, previousWeek: true } }), ['MY STACK', 'Last week became a layer.', null]);
+  assert.deepEqual(home({ seen: true, weeksBuilt: 1, piecesThisWeek: 0, pendingClose: { builtBefore: 0, previousWeek: false } }), ['MY STACK', 'Your latest week became a layer.', null]);
 });
 
 test('Home pending close: the not-seen-intro states take priority; no pending keeps the usual copy', () => {
-  assert.deepEqual(home({ seen: false, weeksBuilt: 3, piecesThisWeek: 0, pendingClose: { builtBefore: 2, previousWeek: true } }), ['YOUR STACK', "You've already built 3 weeks.", 'See it']);
-  assert.deepEqual(home({ seen: true, weeksBuilt: 3, piecesThisWeek: 0, pendingClose: null }), ['YOUR STACK', '3 weeks built', 'This week is open']);
+  assert.deepEqual(home({ seen: false, weeksBuilt: 3, piecesThisWeek: 0, pendingClose: { builtBefore: 2, previousWeek: true } }), ['MY STACK', "You’ve already built 3 layers.", 'See it']);
+  assert.deepEqual(home({ seen: true, weeksBuilt: 3, piecesThisWeek: 0, pendingClose: null }), ['MY STACK', "3 layers built", 'This week is open']);
 });
 
 test('pending close from the cheap selector matches fusion claim() on fixtures and edge cases', () => {
@@ -301,7 +301,7 @@ test('unpacked week route: Case grid → week → Close returns to the grid, the
   assert.deepEqual(deepLink.stack, ['/build-case'], 'a deep link closes to the grid');
 });
 
-test('"Start a workout" returns to Home without replacing the stack', () => {
+test("\"Start a workout\" returns to Home without replacing the block", () => {
   const router = fakeRouter(['/', '/build']);
   performBuildIntent(router, buildIntents.startWorkout());
   assert.deepEqual(router.stack, ['/']);

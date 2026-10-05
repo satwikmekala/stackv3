@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "draft": {
+    "step": "welcome",
+    "choice": "stack",
+    "frequency": null,
+    "structure": "full-body"
+  }
+}

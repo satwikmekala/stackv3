@@ -1,0 +1,52 @@
+{
+  "source": "Observed native accessibility controls on the isolated narrow iOS simulator; not a touch-scroll verification.",
+  "frequencies": {
+    "1": [
+      "Full Body A \u00b7 6 exercises"
+    ],
+    "2": [
+      "Full Body A \u00b7 6 exercises",
+      "Full Body B \u00b7 6 exercises"
+    ],
+    "3": [
+      "Full Body A \u00b7 6 exercises",
+      "Full Body B \u00b7 6 exercises",
+      "Full Body C \u00b7 6 exercises"
+    ],
+    "4": [
+      "Upper A \u00b7 6 exercises",
+      "Lower A \u00b7 5 exercises",
+      "Upper B \u00b7 6 exercises",
+      "Lower B \u00b7 5 exercises"
+    ],
+    "5": [
+      "Push A \u00b7 6 exercises",
+      "Pull A \u00b7 5 exercises",
+      "Legs A \u00b7 5 exercises",
+      "Upper A \u00b7 6 exercises",
+      "Lower A \u00b7 5 exercises"
+    ],
+    "6": [
+      "Push A \u00b7 6 exercises",
+      "Pull A \u00b7 5 exercises",
+      "Legs A \u00b7 5 exercises",
+      "Push B \u00b7 6 exercises",
+      "Pull B \u00b7 5 exercises",
+      "Legs B \u00b7 5 exercises"
+    ]
+  },
+  "threeDayAlternative": [
+    "Push A \u00b7 6 exercises",
+    "Pull A \u00b7 5 exercises",
+    "Legs A \u00b7 5 exercises"
+  ],
+  "expandedPushA": [
+    "Bench Press",
+    "Overhead Press",
+    "Incline Dumbbell Press",
+    "Chest Dips",
+    "Lateral Raises",
+    "Face Pulls"
+  ],
+  "acceptancePerformed": false
+}

@@ -1,3 +1,4 @@
+import { isDayColor, type DayColor } from '@/features/custom-split/colors';
 /**
  * Portable, versioned representation of a Stack custom split.
  *
@@ -109,6 +110,7 @@ export interface PortableCustomExercise {
 export type PortableExercise = PortableBuiltinExercise | PortableCustomExercise;
 
 export interface PortableWorkout {
+  color?: DayColor;
   /** May be empty: Stack then derives the label from the exercises. */
   name: string;
   exercises: PortableExercise[];
@@ -141,7 +143,7 @@ export interface SharedSplitWireV1 {
   type: typeof SHARED_SPLIT_TYPE;
   v: 1;
   name: string;
-  workouts: { name: string; exercises: string[] }[];
+  workouts: { name: string; exercises: string[]; color?: DayColor }[];
   custom?: SharedSplitWireCustomExercise[];
 }
 
@@ -409,7 +411,7 @@ const normalizeSplit = (input: unknown): PortableSplit => {
       }
       return exercise;
     });
-    return { name: workoutName, exercises };
+    return { name: workoutName, exercises, ...(isDayColor(own(workout, 'color')) ? { color: own(workout, 'color') as DayColor } : {}) };
   });
 
   if (total === 0) fail('empty_split', 'A split needs at least one exercise.', 'workouts');
@@ -428,6 +430,7 @@ const toWire = (split: PortableSplit): SharedSplitWireV1 => {
   const hoisted = new Set<string>();
   const workouts = split.workouts.map((workout) => ({
     name: workout.name,
+    ...(workout.color ? { color: workout.color } : {}),
     exercises: workout.exercises.map((exercise) => {
       if (exercise.kind === 'custom' && !hoisted.has(exercise.name)) {
         hoisted.add(exercise.name);
@@ -608,6 +611,7 @@ const fromWireV1 = (root: Record<string, unknown>): PortableSplit => {
     }
     return {
       name: own(workout, 'name'),
+      color: own(workout, 'color'),
       exercises: exerciseValues.map((value, exerciseIndex): PortableExercise => {
         const exercisePath = `${path}.exercises[${exerciseIndex}]`;
         const name = readName(value, exercisePath, SHARED_SPLIT_LIMITS.exerciseNameMaxLength);

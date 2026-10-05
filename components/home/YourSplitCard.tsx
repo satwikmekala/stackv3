@@ -1,20 +1,18 @@
-import { useEffect, useRef } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/services/haptics';
 import Animated, {
   FadeInDown,
   FadeOut,
   ReduceMotion,
 } from 'react-native-reanimated';
-import { ChevronRight } from 'lucide-react-native';
+import { CalendarDays, ChevronRight } from 'lucide-react-native';
 
 import { motionDuration, motionEasing } from '@/constants/motion';
-import { redesignColors, redesignFonts, splitColors } from '@/constants/theme';
+import { redesignColors, redesignFonts } from '@/constants/theme';
 import { usePressScale } from '@/hooks/usePressScale';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-const ACCENT = splitColors.chest;
 const CONTENT_ENTER = FadeInDown.duration(motionDuration.transition)
   .easing(motionEasing.decelerate)
   .withInitialValues({
@@ -46,12 +44,6 @@ export function YourSplitCard({
   onPress,
 }: YourSplitCardProps) {
   const pressScale = usePressScale('surface');
-  const hasMountedContent = useRef(false);
-
-  useEffect(() => {
-    hasMountedContent.current = true;
-  }, []);
-
   const handlePress = () => {
     if (Platform.OS !== 'web') void Haptics.selectionAsync();
     onPress();
@@ -59,7 +51,7 @@ export function YourSplitCard({
 
   return (
     <AnimatedPressable
-      accessibilityHint="Choose which split Stack runs with you"
+      accessibilityHint="Choose which routine Stack runs with you"
       accessibilityLabel={accessibilityLabel}
       accessibilityRole="button"
       onPress={handlePress}
@@ -67,21 +59,18 @@ export function YourSplitCard({
       onPressOut={pressScale.onPressOut}
       style={[styles.card, pressScale.animatedStyle]}
     >
+      <CalendarDays color={redesignColors.ash} size={22} />
       <Animated.View
-        entering={hasMountedContent.current ? CONTENT_ENTER : undefined}
+        entering={CONTENT_ENTER}
         exiting={CONTENT_EXIT}
         key={`${name}\u0000${meta}`}
         style={styles.copy}
       >
         <View style={styles.eyebrowRow}>
-          <View style={styles.accentDot} />
-          <Text style={styles.eyebrow}>YOUR SPLIT</Text>
+          <Text style={styles.eyebrow}>Your routine</Text>
         </View>
-        <Text numberOfLines={1} style={styles.name}>
+        <Text style={styles.name}>
           {name}
-        </Text>
-        <Text numberOfLines={1} style={styles.meta}>
-          {meta}
         </Text>
       </Animated.View>
       <ChevronRight
@@ -99,13 +88,12 @@ const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-    padding: 16,
+    gap: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
     borderRadius: 20,
     borderCurve: 'continuous',
-    borderWidth: 1,
-    borderColor: redesignColors.border,
-    backgroundColor: redesignColors.surface,
+    minHeight: 88,
   },
   copy: {
     flex: 1,
@@ -116,23 +104,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 7,
   },
-  accentDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: ACCENT,
-  },
   eyebrow: {
-    fontFamily: redesignFonts.monoBold,
-    fontSize: 11,
-    letterSpacing: 1,
-    color: redesignColors.ash,
+    fontFamily: redesignFonts.uiSemiBold,
+    fontSize: 17,
+    color: redesignColors.bone,
   },
   name: {
-    marginTop: 8,
-    fontFamily: redesignFonts.uiSemiBold,
-    fontSize: 18,
-    color: redesignColors.bone,
+    marginTop: 4,
+    fontFamily: redesignFonts.ui,
+    fontSize: 15,
+    color: redesignColors.ash,
   },
   meta: {
     marginTop: 3,

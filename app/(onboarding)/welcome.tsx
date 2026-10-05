@@ -1,5 +1,5 @@
 import React from 'react';
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { BarChart3, Target, TrendingUp } from 'lucide-react-native';
@@ -7,6 +7,7 @@ import {
   OnboardingNextButton,
   OnboardingProgress,
 } from '@/components/OnboardingControls';
+import { StackLogo } from '@/components/StackLogo';
 import { redesignColors, redesignFonts, splitColors } from '@/constants/theme';
 import '@/global.css';
 
@@ -42,11 +43,9 @@ export default function Welcome() {
         </View>
 
         <View style={styles.brand}>
-          <Image
-            accessibilityLabel="Stack logo"
-            source={require('@/assets/images/stack logo.png')}
-            style={styles.brandMark}
-          />
+          <View accessible accessibilityLabel="Stack logo" accessibilityRole="image">
+            <StackLogo size={42} />
+          </View>
           <Text style={styles.brandName}>Stack</Text>
         </View>
 
@@ -104,10 +103,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-  },
-  brandMark: {
-    width: 42,
-    height: 42,
   },
   brandName: {
     color: redesignColors.bone,

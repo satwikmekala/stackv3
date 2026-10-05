@@ -1,4 +1,5 @@
-import { redesignColors, splitColors } from '@/constants/theme';
+import { getMuscleColor } from '@/constants/muscleColors';
+import { redesignColors } from '@/constants/theme';
 import type { ExerciseCatalogItem } from '@/store/workoutDatabase';
 import type { WorkoutSession } from '@/store/workoutStore';
 import { parseSessionDate, toLocalCalendarDate } from '@/store/workoutCalendar';
@@ -22,14 +23,14 @@ export type PersonalRecord = {
 };
 
 export const MUSCLE_GROUPS = {
-  chest: { label: 'Chest', color: splitColors.chest },
-  back: { label: 'Back', color: splitColors.back },
-  shoulders: { label: 'Shoulders', color: splitColors.shoulders },
-  biceps: { label: 'Biceps', color: splitColors.arms },
-  triceps: { label: 'Triceps', color: splitColors.arms },
-  arms: { label: 'Arms', color: splitColors.arms },
-  legs: { label: 'Legs', color: splitColors.legs },
-  core: { label: 'Core', color: splitColors.core },
+  chest: { label: 'Chest', get color() { return getMuscleColor('chest'); } },
+  back: { label: 'Back', get color() { return getMuscleColor('back'); } },
+  shoulders: { label: 'Shoulders', get color() { return getMuscleColor('shoulders'); } },
+  biceps: { label: 'Biceps', get color() { return getMuscleColor('arms'); } },
+  triceps: { label: 'Triceps', get color() { return getMuscleColor('arms'); } },
+  arms: { label: 'Arms', get color() { return getMuscleColor('arms'); } },
+  legs: { label: 'Legs', get color() { return getMuscleColor('legs'); } },
+  core: { label: 'Core', get color() { return getMuscleColor('core'); } },
   other: { label: 'Other', color: redesignColors.ash },
 } as const;
 export type MuscleGroup = keyof typeof MUSCLE_GROUPS;
@@ -44,7 +45,10 @@ export function getRecordMuscle(exercise?: Pick<ExerciseCatalogItem, 'workoutTyp
   return exercise.workoutType;
 }
 
-export const compareSetPerformance = (a: RecordSet, b: RecordSet) =>
+export const compareSetPerformance = (
+  a: Pick<RecordSet, 'weight' | 'reps'>,
+  b: Pick<RecordSet, 'weight' | 'reps'>
+) =>
   a.weight - b.weight || a.reps - b.reps;
 
 export const compareSetRecency = (a: RecordSet, b: RecordSet) =>
@@ -70,7 +74,7 @@ export function derivePersonalRecords(sessions: readonly WorkoutSession[]): Pers
     session.exercises.forEach((exercise, exerciseIndex) => {
       if (getExerciseMetric(exercise) !== 'reps') return;
       exercise.sets.forEach((set, setIndex) => {
-        if (!set.completed || set.skipped) return;
+        if (!set.completed || set.skipped || set.sourceKind === 'warmup') return;
         const candidate: RecordSet = {
           id: `${session.id}-${exerciseIndex}-${setIndex}`,
           sessionId: session.id, date, exerciseIndex, setIndex,

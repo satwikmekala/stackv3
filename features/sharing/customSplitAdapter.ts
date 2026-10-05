@@ -58,6 +58,7 @@ export const portableSplitFromCustomSplit = (
     .sort((a, b) => a.position - b.position)
     .map((workout) => ({
       name: workout.name,
+      ...(workout.color ? { color: workout.color } : {}),
       exercises: [...workout.exercises]
         .sort((a, b) => a.position - b.position)
         .map((exercise) => toPortableExercise(exercise, builtInExerciseNames)),

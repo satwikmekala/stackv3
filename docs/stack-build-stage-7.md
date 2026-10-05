@@ -6,7 +6,7 @@ Implemented in the isolated `codex/stack-build-prototype` worktree. Stage 8 is n
 
 ### Home: "Your Stack" card
 
-- `BuildHome` sits directly below the **Change workout** button and above `YourSplitCard`, which keeps its bottom-pinning wrapper. The workout hero, Change workout and the split card are otherwise unchanged. The card is shown only with the Build development flag.
+- `BuildHome` sits directly below the **Change workout** button and above `YourSplitCard`, which keeps its bottom-pinning wrapper. The workout hero, Change workout and the split card are otherwise unchanged. The card is available in iOS development sessions, including a regular Expo launch.
 - The whole card is one button with a small vector preview of recent slabs (no GL), the copy, and a chevron icon; there is no "Open" label. It opens `/build`, which shows the introduction first on a first visit.
 - Copy comes from the pure `homeModuleCopy({ seen, weeksBuilt, piecesThisWeek })`. Weeks built are sealed weeks with at least one piece (the Monolith/Case source); pieces this week are the current week's pieces. "0 weeks built" never renders.
 

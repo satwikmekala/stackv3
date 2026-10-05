@@ -79,12 +79,12 @@ export default function BuildSandbox() {
   const evidenceSceneLabel = [
     history.state.sealedWeeks.length ? `${history.state.sealedWeeks.length} ${history.state.sealedWeeks.length === 1 ? 'week' : 'weeks'} built` : null,
     history.state.currentWeek.pieces.length ? `${history.state.currentWeek.pieces.length} current ${history.state.currentWeek.pieces.length === 1 ? 'piece' : 'pieces'}` : null,
-  ].filter((value): value is string => Boolean(value)).join(' and ') || 'No pieces on the tower';
+  ].filter((value): value is string => Boolean(value)).join(' and ') || 'No blocks yet';
 
   return <SafeAreaView style={styles.screen}>
     <View style={styles.header}>
-      <Pressable accessibilityRole="button" accessibilityLabel="Close Your Stack sandbox" onPress={() => router.canGoBack() ? router.back() : router.replace('/')} style={styles.iconButton}><ArrowLeft size={20} color={c.bone} /></Pressable>
-      <Text style={styles.eyebrow}>YOUR STACK</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel="Close My Stack sandbox" onPress={() => router.canGoBack() ? router.back() : router.replace('/')} style={styles.iconButton}><ArrowLeft size={20} color={c.bone} /></Pressable>
+      <Text style={styles.eyebrow}>MY STACK</Text>
       <Pressable accessibilityRole="button" accessibilityLabel="Open object tuning" disabled={running} onPress={() => setTweaks(true)} style={styles.iconButton}><SlidersHorizontal size={19} color={c.bone} /></Pressable>
     </View>
     <View style={styles.intro}>
@@ -92,7 +92,7 @@ export default function BuildSandbox() {
       <Text style={styles.title}>{title}</Text>
       <Text style={styles.caption}>{mode === 'evidence' && !example ? 'Development sandbox · saved history' : 'Development sandbox · illustrative history'}</Text>
     </View>
-    <View style={styles.stage} accessibilityLabel={slabs.length ? `${mode === 'evidence' ? evidenceSceneLabel : mode === 'history' ? weeks > 0 ? `${weeks} sealed ${weeks === 1 ? 'week' : 'weeks'} and two current pieces` : 'Two current pieces' : 'One keyed slab'}. ${slabs.some((slab) => slab.layers.some((layer) => layer.record)) ? 'Gold record treatment.' : ''}` : 'Nothing built yet. No pieces on the tower.'}>
+    <View style={styles.stage} accessibilityLabel={slabs.length ? `${mode === 'evidence' ? evidenceSceneLabel : mode === 'history' ? weeks > 0 ? `${weeks} complete ${weeks === 1 ? 'week' : 'weeks'} and two current blocks` : 'Two current blocks' : 'One block'}. ${slabs.some((slab) => slab.layers.some((layer) => layer.record)) ? 'Gold record treatment.' : ''}` : 'Nothing built yet. No blocks yet.'}>
       <LinearGradient colors={['#13110E', '#281B11', '#13110E']} style={StyleSheet.absoluteFill} />
       {focused && active && !fusionSnapshot && <BuildScene slabs={slabs} tuning={tuning} lamination={lamination} overview={overview} reducedMotion={reducedMotion} benchmark={benchmark} onStats={onStats} />}
       <View style={styles.viewControl}>
@@ -104,8 +104,8 @@ export default function BuildSandbox() {
     </View>
     <View style={styles.controls}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
-        <Choice text="Fusion preview ↗" selected={false} disabled={running} onPress={() => setFusionSnapshot(makeFusionPreview(mode === 'history' && (weeks === 104 || weeks === 260) ? weeks : 12))} />
-        <Choice text="Casting preview ↗" selected={false} disabled={running} onPress={() => router.push({ pathname: '/build-casting', params: { demo: '1' } })} />
+        <Choice text="Week complete ↗" selected={false} disabled={running} onPress={() => setFusionSnapshot(makeFusionPreview(mode === 'history' && (weeks === 104 || weeks === 260) ? weeks : 12))} />
+        <Choice text="Workout complete ↗" selected={false} disabled={running} onPress={() => router.push({ pathname: '/build-casting', params: { demo: '1' } })} />
         <Choice text="The object" selected={mode === 'object'} disabled={running} onPress={() => configure(() => setMode('object'))} />
         <Choice text="Monolith screen ↗" selected={false} disabled={running} onPress={() => router.push('/build')} />
         <Choice text="Tower fixtures" selected={mode === 'history'} disabled={running} onPress={() => configure(() => setMode('history'))} />
@@ -121,8 +121,8 @@ export default function BuildSandbox() {
       </ScrollView>
       {mode === 'evidence' ? <Pressable accessibilityRole="button" disabled={running} onPress={() => setInspect(true)} style={{ minHeight: 36, justifyContent: 'center' }}><Text style={styles.label}>Inspect evidence{history.state.metrics.workouts ? ` · ${history.state.metrics.workouts} ${history.state.metrics.workouts === 1 ? 'piece' : 'pieces'}` : ''} →</Text></Pressable> : mode === 'object' ? <View style={styles.switchRow}>
         <Text style={styles.label}>Record</Text><Switch accessibilityLabel="Gold record treatment" value={record} disabled={running} onValueChange={(value) => configure(() => setRecord(value))} trackColor={{ true: '#8E7131' }} />
-        <View style={{ flex: 1 }} /><Text style={styles.label}>Sealed week</Text><Switch accessibilityLabel="Weekly composite" value={sealed} disabled={running} onValueChange={(value) => configure(() => setSealed(value))} trackColor={{ true: c.hi }} />
-      </View> : <Text style={styles.note}>{weeks ? `${weeks} sealed blocks · 2 loose pieces · no hidden session meshes` : 'Your first session lays the first piece.'}</Text>}
+        <View style={{ flex: 1 }} /><Text style={styles.label}>Completed week</Text><Switch accessibilityLabel="Weekly composite" value={sealed} disabled={running} onValueChange={(value) => configure(() => setSealed(value))} trackColor={{ true: c.hi }} />
+      </View> : <Text style={styles.note}>{weeks ? `${weeks} completed layers · 2 current blocks` : 'Your first workout adds the first block.'}</Text>}
       <View style={styles.measurement}>
         <Text style={styles.stats}>{running ? 'Measuring 10 seconds after warmup…' : stats ? `${stats.fps.toFixed(1)} fps · p95 ${stats.p95Ms.toFixed(1)} ms\n${stats.calls} draws · ${stats.triangles.toLocaleString()} triangles · ${stats.geometries} geometries` : 'Still scenes render on demand.'}</Text>
         <Pressable accessibilityRole="button" disabled={running} onPress={() => { setStats(null); setRunning(true); setBenchmark((value) => value + 1); }} style={styles.measureButton}>

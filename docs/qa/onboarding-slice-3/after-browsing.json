@@ -1,0 +1,15 @@
+{
+  "counts": {
+    "sessions": 0,
+    "session_exercises": 0,
+    "sets": 0,
+    "custom_splits": 0
+  },
+  "profile": {
+    "mode": "none",
+    "activeSplitId": null,
+    "habitGoal": 0,
+    "trainingDays": "[]",
+    "unitsConfirmed": 0
+  }
+}

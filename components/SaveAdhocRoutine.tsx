@@ -1,12 +1,13 @@
 import { useState } from 'react';
-import { KeyboardAvoidingView, Modal, Platform, Pressable, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { BookmarkPlus, Check } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { redesignColors, redesignFonts } from '@/constants/theme';
 import { useWorkoutStore, type WorkoutSession } from '@/store/workoutStore';
 import { readExerciseCatalogSync } from '@/store/workoutDatabase';
 import { defaultAdhocRoutineName } from '@/store/adhocWorkout';
 
-export function SaveAdhocRoutine({ session }: { session: WorkoutSession }) {
+export function SaveAdhocRoutine({ session, stacked = false, secondary = false }: { session: WorkoutSession; stacked?: boolean; secondary?: boolean }) {
   const insets = useSafeAreaInsets();
   const savedId = useWorkoutStore((state) => state.savedAdhocRoutineIds[session.id]);
   const save = useWorkoutStore((state) => state.saveAdhocRoutine);
@@ -15,10 +16,11 @@ export function SaveAdhocRoutine({ session }: { session: WorkoutSession }) {
   const [error, setError] = useState<string | null>(null);
   const label = { color: redesignColors.bone, fontFamily: redesignFonts.uiSemiBold, fontSize: 16 };
   return <>
-    <Pressable accessibilityRole="button" disabled={savedId !== undefined} accessibilityState={{ disabled: savedId !== undefined }}
+    <Pressable cssInterop={false} accessibilityRole="button" disabled={savedId !== undefined} accessibilityState={{ disabled: savedId !== undefined }}
       onPress={() => { setName(defaultAdhocRoutineName(session, readExerciseCatalogSync())); setError(null); setVisible(true); }}
-      style={{ padding: 12, alignItems: 'center' }}>
-      <Text style={label}>{savedId !== undefined ? 'Routine saved' : 'Save as routine'}</Text>
+      style={({ pressed }) => [styles.button, stacked && styles.stackedButton, secondary && styles.secondaryButton, savedId !== undefined && styles.savedButton, pressed && (secondary ? styles.secondaryPressed : styles.pressed)]}>
+      {savedId !== undefined ? <Check size={20} color={secondary ? redesignColors.bone : redesignColors.ink} /> : <BookmarkPlus size={20} color={secondary ? redesignColors.bone : redesignColors.ink} />}
+      <Text style={[styles.buttonText, secondary && styles.secondaryText]}>{savedId !== undefined ? 'Routine saved' : 'Save as routine'}</Text>
     </Pressable>
     <Modal transparent visible={visible} animationType="slide" onRequestClose={() => setVisible(false)}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: '#00000088' }}>
@@ -33,7 +35,7 @@ export function SaveAdhocRoutine({ session }: { session: WorkoutSession }) {
           <Pressable accessibilityRole="button" onPress={() => {
             if (!name.trim()) { setError('Enter a routine name.'); return; }
             if (save(session.id, name) !== undefined) setVisible(false);
-            else setError('Could not save. Please try again.');
+            else setError('Couldn’t save your routine. Try again.');
           }} style={{ padding: 18, alignItems: 'center', borderRadius: 12, backgroundColor: redesignColors.raised }}>
             <Text style={label}>Save routine</Text>
           </Pressable>
@@ -43,3 +45,34 @@ export function SaveAdhocRoutine({ session }: { session: WorkoutSession }) {
     </Modal>
   </>;
 }
+
+const styles = StyleSheet.create({
+  button: {
+    flex: 1.65,
+    minWidth: 0,
+    minHeight: 56,
+    paddingVertical: 15,
+    paddingHorizontal: 16,
+    borderRadius: 18,
+    borderCurve: 'continuous',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: redesignColors.bone,
+  },
+  stackedButton: { flex: 0, width: '100%' },
+  secondaryButton: { backgroundColor: redesignColors.raised },
+  secondaryText: { color: redesignColors.bone },
+  secondaryPressed: { backgroundColor: redesignColors.hi },
+  savedButton: { opacity: 0.65 },
+  pressed: { backgroundColor: '#DCD4C8' },
+  buttonText: {
+    flexShrink: 1,
+    textAlign: 'center',
+    color: redesignColors.ink,
+    fontFamily: redesignFonts.uiBold,
+    fontSize: 16,
+    lineHeight: 22,
+  },
+});

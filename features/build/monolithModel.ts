@@ -28,7 +28,7 @@ export function cameraFrame(top: number, width: number, height: number, overview
 }
 
 /**
- * Your Stack's Overview: the whole tower, as large as the stage allows and set a little low. On screen
+ * My Stack's Overview: the whole tower, as large as the stage allows and set a little low. On screen
  * the tower spans top·0.906 + 1.41 units tall and 3.32 wide (plinth corners included) under
  * the fixed camera angle; the fill leaves a small margin on every side.
  */

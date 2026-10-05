@@ -1,5 +1,10 @@
-import { confirmationEnter, confirmationExit, workoutMotion, workoutTiming } from '@/constants/workoutMotion';
+import { displayExerciseName } from '@/constants/exerciseNames';
+import { hasMuscleColorPreference, getWorkoutLoggingColor } from '@/constants/muscleColors';
+import { useMuscleColors } from '@/store/muscleColors';
+import { confirmationEnter } from '@/constants/workoutMotion';
+import { WorkoutSetGlyph, WorkoutSetRail } from '@/components/WorkoutSetRail';
 import { WorkoutTouchable } from '@/components/WorkoutTouchable';
+import { WorkoutHeaderActions } from '@/components/WorkoutHeaderActions';
 import { BUILD_SANDBOX_ENABLED } from '../features/build/config';
 import { completionDestination } from '../features/build/casting';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -16,7 +21,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WorkoutMinimizeSurface, type WorkoutMinimizeHandle } from '@/components/WorkoutMinimizeSurface';
 import { WorkoutLaunchSection, WorkoutLaunchSurface } from '@/components/WorkoutLaunchSurface';
 import { parseWorkoutLaunchOrigin } from '@/utils/workoutLaunch';
-import { Check, ChevronDown, ChevronRight, Plus, Repeat2, X } from 'lucide-react-native';
+import { Check, ChevronRight, Info } from 'lucide-react-native';
+import { GlassView, isGlassEffectAPIAvailable } from 'expo-glass-effect';
 import Animated, {
   Easing,
   FadeIn,
@@ -29,13 +35,13 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/services/haptics';
 import { ActiveSetCard } from '@/components/ActiveSetCard';
+import { ExerciseNotes } from '@/components/ExerciseNotes';
 import { ExerciseInfo } from '@/components/ExerciseInfo';
 import {
   BONUS_SET_META,
   BonusSet,
-  BonusSetAcknowledgement,
   type BonusSetSelection,
 } from '@/components/BonusSet';
 import { ExerciseFinisher } from '@/components/ExerciseFinisher';
@@ -43,16 +49,15 @@ import { SwapExerciseSheet } from '@/components/SwapExerciseSheet';
 import { UpNextSheet, type RemainingExercise } from '@/components/UpNextSheet';
 import { WorkoutDayLabel } from '@/components/WorkoutDayLabel';
 import { WorkoutIntensityPicker } from '@/components/home/WorkoutIntensityPicker';
-import { ARCHETYPE_COMPOSITIONS } from '@/constants/archetypes';
+import { ARCHETYPE_COMPOSITIONS, getSessionWorkoutDisplay } from '@/constants/archetypes';
 import { getExerciseInfo, type ExerciseInfoData } from '@/constants/exerciseInfo';
 import { motionDuration, motionEasing } from '@/constants/motion';
 import {
   workoutCardEntering,
   workoutCardExiting,
   workoutLayoutTransition,
-  workoutRowEntering,
 } from '@/constants/workoutLayoutTransitions';
-import { redesignColors, redesignFonts, workoutLoggingColors } from '@/constants/theme';
+import { redesignColors, redesignFonts } from '@/constants/theme';
 import { workoutMeta } from '@/constants/workouts';
 import {
   IntensityLevel,
@@ -64,9 +69,18 @@ import {
 } from '@/store/workoutStore';
 import { clampDuration, formatDuration } from '@/store/exerciseMeasurement';
 import { formatWeight, getWeightIncrement, type WeightUnit } from '@/store/weightUnits';
+import { WORKOUT_SCREEN_HORIZONTAL_PADDING } from '@/constants/workoutPicker';
 import { getActiveSetIndex, getCurrentWorkoutExerciseIndex } from '@/utils/workoutResume';
 import { getNextIncompleteExerciseIndex, isExerciseComplete } from '@/store/workoutSetActions';
 import { getSetProgressionSuggestion } from '@/store/workoutProgression';
+import {
+  getAddSetBase,
+  getLastTimeComparison,
+  getPreviousBest,
+  getRecordHint,
+  getRecordSetIndexes,
+  isPerformedSet,
+} from '@/store/exerciseWrapUp';
 import '@/global.css';
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
@@ -96,6 +110,56 @@ const EXERCISE_EXIT = FadeOutLeft.duration(160)
 const STAGE_EXIT = workoutCardExiting;
 const CHECK_ENTER = confirmationEnter;
 const LOG_SUBMISSION_GUARD_MS = motionDuration.transition + motionDuration.feedback;
+
+function ExerciseInfoButton({ onPress }: { onPress: () => void }) {
+  // Liquid Glass is available only on supported iOS versions. Other platforms
+  // retain the same native-sized action with a restrained material fallback.
+  const supportsGlass = Platform.OS === 'ios' && isGlassEffectAPIAvailable();
+
+  const icon = <Info color={redesignColors.bone} size={19} strokeWidth={2.2} />;
+
+  return (
+    <TouchableOpacity
+      accessibilityRole="button"
+      accessibilityLabel="Exercise info"
+      accessibilityHint="Shows how to do this exercise."
+      activeOpacity={supportsGlass ? 0.94 : 0.7}
+      onPress={onPress}
+      style={{
+        width: 44,
+        height: 44,
+        marginLeft: 8,
+        borderRadius: 22,
+        overflow: 'hidden',
+      }}
+    >
+      {supportsGlass ? (
+        <GlassView
+          glassEffectStyle="regular"
+          colorScheme="dark"
+          isInteractive
+          style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}
+        >
+          {icon}
+        </GlassView>
+      ) : (
+        <View
+          style={{
+            flex: 1,
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: 22,
+            borderWidth: 1,
+            borderColor: redesignColors.border,
+            backgroundColor: redesignColors.raised,
+          }}
+        >
+          {icon}
+        </View>
+      )}
+    </TouchableOpacity>
+  );
+}
 
 function ExerciseProgressSegment({
   state,
@@ -127,9 +191,8 @@ function ExerciseProgressSegment({
       [redesignColors.hi, accent]
     ),
     shadowColor: accent,
-    shadowOpacity: focus.value * 0.55,
-    shadowRadius: focus.value * 8,
-    transform: [{ scaleY: 1 + focus.value * 0.08 }],
+    shadowOpacity: focus.value * 0.18,
+    shadowRadius: 3,
   }));
 
   return (
@@ -138,8 +201,8 @@ function ExerciseProgressSegment({
         {
           // The layout wrapper owns the row's flex; flex here would collapse the height.
           width: '100%',
-          height: 8,
-          borderRadius: 4,
+          height: 3,
+          borderRadius: 1.5,
           shadowOffset: { width: 0, height: 0 },
         },
         animatedStyle,
@@ -159,7 +222,9 @@ function SetPip({
   accent,
   currentLabel = 'NOW',
   setNumber,
+  selected,
   onEdit,
+  onReturnToCurrent,
 }: {
   state: 'completed' | 'current' | 'upcoming';
   weight: number;
@@ -171,120 +236,75 @@ function SetPip({
   accent: string;
   currentLabel?: string;
   setNumber: number;
+  selected: boolean;
   onEdit?: () => void;
+  onReturnToCurrent?: () => void;
 }) {
-  const glowOpacity = useSharedValue(0);
-  const activeFill = useSharedValue(state === 'upcoming' ? 0 : 1);
+  const valueLabel = metric === 'duration'
+    ? loadType === 'bodyweight'
+      ? formatDuration(durationS)
+      : `${formatWeight(weight, weightUnit)} · ${formatDuration(durationS)}`
+    : loadType === 'bodyweight'
+      ? `${reps} reps`
+      : `${formatWeight(weight, weightUnit)} × ${reps}`;
+  const loggedMeasurement = metric === 'duration' ? formatDuration(durationS) : `${reps} reps`;
+  const loggedLoad = loadType === 'bodyweight' ? '' : `${formatWeight(weight, weightUnit)} ${weightUnit}, `;
+  const currentDescription = currentLabel === 'NOW' ? 'current' : `current, ${currentLabel}`;
+  const accessibilityLabel = state === 'completed'
+    ? `${onEdit ? 'Edit completed' : 'Completed'} set ${setNumber}, ${loggedLoad}${loggedMeasurement}`
+    : `Set ${setNumber}, ${state === 'current' ? currentDescription : 'upcoming'}`;
 
-  useEffect(() => {
-    glowOpacity.value = withTiming(state === 'current' ? 1 : 0, workoutTiming(workoutMotion.confirm));
-    activeFill.value = withTiming(state === 'upcoming' ? 0 : 1, {
-      duration: 240,
-      easing: Easing.out(Easing.cubic),
-      reduceMotion: ReduceMotion.System,
-    });
-  }, [activeFill, glowOpacity, state]);
-
-  const glowStyle = useAnimatedStyle(() => ({ opacity: glowOpacity.value }));
-  const circleStyle = useAnimatedStyle(() => ({
-    backgroundColor: interpolateColor(
-      activeFill.value,
-      [0, 1],
-      [redesignColors.surface, accent]
-    ),
-    borderColor: interpolateColor(
-      activeFill.value,
-      [0, 1],
-      [redesignColors.border, accent]
-    ),
-    transform: [{ scale: 0.94 + activeFill.value * 0.06 }],
-  }));
-
+  // Every marker keeps the same geometry while selection changes. Completion
+  // and selection are independent: inspecting a logged set never moves "Now".
   const content = (
-    <>
-      <View style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}>
-        <Animated.View
-            style={[
-              {
-                position: 'absolute',
-                width: 30,
-                height: 30,
-                borderRadius: 15,
-                backgroundColor: accent,
-                shadowColor: accent,
-                shadowOpacity: 0.9,
-                shadowRadius: 18,
-                shadowOffset: { width: 0, height: 0 },
-                elevation: 12,
-              },
-              glowStyle,
-            ]}
-          />
-        <Animated.View
-          style={[
-            {
-              width: 30,
-              height: 30,
-              borderRadius: 15,
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderWidth: 1.5,
-            },
-            circleStyle,
-          ]}
-        >
-          {state === 'completed' ? (
-            <Animated.View entering={CHECK_ENTER} exiting={confirmationExit}>
-              <Check color={redesignColors.ink} size={17} strokeWidth={3.2} />
-            </Animated.View>
-          ) : null}
-        </Animated.View>
-      </View>
-      <Text
-        numberOfLines={1}
-        allowFontScaling={false}
-        style={{
-          marginTop: 3,
-          fontFamily: redesignFonts.monoBold,
-          fontSize: 10,
-          letterSpacing: state === 'current' ? 1.2 : 0,
-          color: state === 'current' ? accent : redesignColors.ash,
-        }}
-      >
-        {state === 'completed'
-          ? metric === 'duration'
-            ? loadType === 'bodyweight'
-              ? formatDuration(durationS)
-              : `${formatWeight(weight, weightUnit)}·${formatDuration(durationS)}`
-            : loadType === 'bodyweight'
-              ? `${reps} reps`
-              : `${formatWeight(weight, weightUnit)}·${reps}`
-          : state === 'current'
-            ? currentLabel
-            : '–'}
-      </Text>
-    </>
+    <View style={{
+      width: '100%',
+      minHeight: 44,
+      paddingHorizontal: 4,
+      paddingVertical: 6,
+      borderRadius: 999,
+      borderCurve: 'continuous',
+      borderWidth: 1,
+      borderColor: 'transparent',
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 5,
+    }}>
+      <WorkoutSetGlyph completed={state === 'completed'} selected={selected} setNumber={setNumber} accent={accent} />
+      {state !== 'upcoming' && (
+        <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} maxFontSizeMultiplier={1.2}
+          style={{ flexShrink: 1, fontFamily: redesignFonts.uiSemiBold, fontSize: 14, fontVariant: ['tabular-nums'], color: selected ? redesignColors.bone : redesignColors.ash }}>
+          {state === 'completed' ? valueLabel : currentLabel === 'NOW' ? 'Now' : currentLabel}
+        </Text>
+      )}
+    </View>
   );
 
-  return state === 'completed' && onEdit ? (
+  const onPress = state === 'completed' ? onEdit : state === 'current' ? onReturnToCurrent : undefined;
+  const targetStyle = { minHeight: 56, minWidth: 44, width: '100%' as const, paddingVertical: 6, justifyContent: 'center' as const, alignItems: 'center' as const };
+  return onPress ? (
     <WorkoutTouchable
       accessibilityRole="button"
-      accessibilityLabel={`Edit completed set ${setNumber}`}
-      accessibilityHint="Shows logged values without changing workout progress"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={{ selected }}
+      accessibilityHint={state === 'completed' ? 'Shows logged values without changing workout progress' : 'Returns to the current unfinished set'}
       activeOpacity={0.72}
-      onPress={onEdit}
-      style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}
+      onPress={onPress}
+      style={targetStyle}
     >
       {content}
     </WorkoutTouchable>
   ) : (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>{content}</View>
+    <View accessible accessibilityLabel={accessibilityLabel} accessibilityState={{ selected }} style={targetStyle}>{content}</View>
   );
 }
 
 function SetProgress({
   sets,
   currentSetIndex,
+  selectedSetIndex = currentSetIndex,
+  onReturnToCurrent,
   weightUnit,
   loadType,
   metric,
@@ -296,6 +316,8 @@ function SetProgress({
 }: {
   sets: ExerciseSet[];
   currentSetIndex: number;
+  selectedSetIndex?: number;
+  onReturnToCurrent?: () => void;
   weightUnit: WeightUnit;
   loadType: ExerciseLoadType;
   metric: ExerciseMetric;
@@ -306,19 +328,10 @@ function SetProgress({
   enteringSetIndex?: number;
 }) {
   return (
-    <Animated.View
-      layout={workoutLayoutTransition}
-      style={{
-        flexDirection: 'row',
-        alignItems: 'stretch',
-        height: 96,
-        borderRadius: 22,
-        paddingHorizontal: 14,
-        paddingVertical: 12,
-        backgroundColor: redesignColors.surface,
-        borderWidth: 1,
-        borderColor: redesignColors.border,
-      }}
+    <WorkoutSetRail
+      selectedIndex={selectedSetIndex}
+      accent={selectedSetIndex === currentSetIndex ? currentAccent : accent}
+      enteringIndex={enteringSetIndex}
     >
       {sets.map((set, index) => {
         const state = set.completed
@@ -327,29 +340,25 @@ function SetProgress({
             ? 'current'
             : 'upcoming';
         return (
-          <Animated.View
+          <SetPip
             key={`${set.type ?? 'working'}-${index}`}
-            layout={workoutLayoutTransition}
-            entering={index === enteringSetIndex ? workoutRowEntering : undefined}
-            style={{ flex: 1 }}
-          >
-            <SetPip
-              state={state}
-              weight={set.weight}
-              reps={set.reps}
-              durationS={set.durationS}
-              weightUnit={weightUnit}
-              loadType={loadType}
-              metric={metric}
-              accent={index === currentSetIndex ? currentAccent : accent}
-              currentLabel={currentLabel}
-              setNumber={index + 1}
-              onEdit={state === 'completed' ? () => onEditCompletedSet?.(index) : undefined}
-            />
-          </Animated.View>
+            state={state}
+            weight={set.weight}
+            reps={set.reps}
+            durationS={set.durationS}
+            weightUnit={weightUnit}
+            loadType={loadType}
+            metric={metric}
+            accent={index === currentSetIndex ? currentAccent : accent}
+            currentLabel={currentLabel}
+            setNumber={index + 1}
+            selected={index === selectedSetIndex}
+            onReturnToCurrent={onReturnToCurrent}
+            onEdit={state === 'completed' && onEditCompletedSet ? () => onEditCompletedSet(index) : undefined}
+          />
         );
       })}
-    </Animated.View>
+    </WorkoutSetRail>
   );
 }
 
@@ -369,6 +378,7 @@ const getRemainingExercises = (
 };
 
 export default function Workout() {
+  useMuscleColors(state => state.preferences);
   const router = useRouter();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
@@ -405,7 +415,6 @@ export default function Workout() {
   const activityFeedbackVisible = Boolean(currentSession && currentSession.origin !== 'adhoc' && finishFromActivity === currentSession.id &&
     currentSession.exercises.every(isExerciseComplete));
   const [bonusSelection, setBonusSelection] = useState<BonusSetSelection | null>(null);
-  const [loggedBonusSet, setLoggedBonusSet] = useState<BonusSetSelection | null>(null);
   const [recentBonusSetIndex, setRecentBonusSetIndex] = useState<number | null>(null);
   const [stageDirection, setStageDirection] = useState<1 | -1>(1);
   const [exerciseMotion, setExerciseMotion] = useState<'forward' | 'backward' | 'replace'>(
@@ -467,7 +476,6 @@ export default function Workout() {
 
   useEffect(() => {
     setBonusSelection(null);
-    setLoggedBonusSet(null);
     setShowFeedbackModal(false);
   }, [exerciseIndex]);
 
@@ -475,34 +483,52 @@ export default function Workout() {
     hasRenderedRef.current = true;
   }, []);
 
+  // Rest runs from the most recent logged set of this exercise. Sets already
+  // logged before the screen mounted have no known time, so no clock shows.
+  const performedSetCount = currentSession?.exercises[exerciseIndex]?.sets.filter(isPerformedSet).length ?? 0;
+  const restCountRef = useRef<{ identity: string; count: number } | null>(null);
+  const [restStart, setRestStart] = useState<{ identity: string; at: number } | null>(null);
+  useEffect(() => {
+    const previous = restCountRef.current;
+    restCountRef.current = { identity: exerciseIdentity, count: performedSetCount };
+    if (previous?.identity === exerciseIdentity && performedSetCount > previous.count) {
+      setRestStart({ identity: exerciseIdentity, at: Date.now() });
+    }
+  }, [exerciseIdentity, performedSetCount]);
+
   useEffect(() => {
     renderedExerciseIdentityRef.current = exerciseIdentity;
   }, [exerciseIdentity]);
+
+  const minimizeWorkout = () => {
+    navigation.setOptions({ animation: 'none' });
+    minimizeRef.current?.minimize();
+  };
+  const leaveMinimizedWorkout = () => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/(tabs)');
+  };
 
   if (!currentSession || !profile) return null;
   const workoutType = currentSession.workoutTypes[0];
   if (currentSession.exercises.length === 0) return (
     <WorkoutLaunchSurface origin={launchOrigin}>
       <WorkoutMinimizeSurface ref={minimizeRef} expandFromCard={fromActivityCard === '1'} session={currentSession}
-        onMinimize={() => { if (router.canGoBack()) router.back(); else router.replace('/(tabs)'); }}>
+        onMinimize={leaveMinimizedWorkout}>
         <View style={{ flex: 1, backgroundColor: redesignColors.ink, paddingTop: insets.top + 16, paddingBottom: insets.bottom + 20, paddingHorizontal: 24 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <WorkoutDayLabel label="Workout" accent={redesignColors.ash} />
-            <WorkoutTouchable accessibilityRole="button" accessibilityLabel="Minimize workout" onPress={() => minimizeRef.current?.minimize()} style={{ padding: 12 }}>
-              <Text style={{ color: redesignColors.bone }}>Minimize</Text>
-            </WorkoutTouchable>
-            <WorkoutTouchable accessibilityRole="button" onPress={confirmDiscardWorkout} style={{ padding: 12 }}>
-              <Text style={{ color: redesignColors.ash }}>Cancel</Text>
-            </WorkoutTouchable>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+            <WorkoutDayLabel label="Workout" accent={redesignColors.accent} />
+            <WorkoutHeaderActions addMode onChange={() => setShowSwapSheet(true)}
+              onMinimize={minimizeWorkout} onExit={confirmDiscardWorkout} />
           </View>
           <View style={{ flex: 1, justifyContent: 'center', gap: 16 }}>
             <Text style={{ fontFamily: redesignFonts.display, fontSize: 36, color: redesignColors.bone }}>Empty workout</Text>
             <Text style={{ fontFamily: redesignFonts.ui, fontSize: 18, color: redesignColors.ash }}>Add your first exercise</Text>
-            <WorkoutTouchable accessibilityRole="button" onPress={() => setShowSwapSheet(true)} style={{ padding: 20, borderRadius: 18, backgroundColor: redesignColors.raised }}>
-              <Text style={{ fontFamily: redesignFonts.uiSemiBold, fontSize: 18, color: redesignColors.bone }}>Add Exercise</Text>
+            <WorkoutTouchable accessibilityRole="button" onPress={() => setShowSwapSheet(true)} style={{ padding: 20, borderRadius: 18, backgroundColor: redesignColors.accent }}>
+              <Text style={{ fontFamily: redesignFonts.uiSemiBold, fontSize: 18, color: redesignColors.ink }}>Add exercise</Text>
             </WorkoutTouchable>
           </View>
-          <SwapExerciseSheet mode="add" sessionId={currentSession.id} visible={showSwapSheet} dayLabel="Workout" accent={redesignColors.ash}
+          <SwapExerciseSheet mode="add" sessionId={currentSession.id} visible={showSwapSheet} dayLabel="Workout" accent={redesignColors.accent}
             sessionExercises={currentSession.exercises} onNavigate={setExerciseIndex} onClose={() => setShowSwapSheet(false)} />
         </View>
       </WorkoutMinimizeSurface>
@@ -510,6 +536,7 @@ export default function Workout() {
   );
 
   const legacyMeta = workoutMeta[workoutType];
+  const feedbackWorkout = getSessionWorkoutDisplay(currentSession);
   const primaryArchetype = currentSession.archetype;
   const secondaryArchetype = currentSession.secondaryArchetype;
   const archetypeComposition = primaryArchetype
@@ -520,11 +547,20 @@ export default function Workout() {
       ? `${archetypeComposition.shortLabel} + ${ARCHETYPE_COMPOSITIONS[secondaryArchetype].shortLabel}`
       : archetypeComposition.shortLabel
     : legacyMeta.label;
-  const accent = currentSession.origin === 'adhoc' ? redesignColors.ash : archetypeComposition?.color ?? workoutLoggingColors[workoutType];
   const exercise = currentSession.exercises[exerciseIndex];
+  const exerciseType = useWorkoutStore.getState().getExerciseWorkoutType(exercise.name);
+  const accent = exerciseType && hasMuscleColorPreference(exerciseType)
+    ? getWorkoutLoggingColor(exerciseType)
+    : currentSession.origin === 'adhoc' ? redesignColors.accent : archetypeComposition?.color ?? getWorkoutLoggingColor(workoutType);
   const weightUnit = exercise.entryUnit;
   const weightIncrement = getWeightIncrement(profile, weightUnit);
   const availableExerciseInfo = getExerciseInfo(exercise.name);
+  const handleOpenExerciseInfo = () => {
+    if (!availableExerciseInfo || infoOpeningRef.current) return;
+    infoOpeningRef.current = true;
+    setInfoExercise(availableExerciseInfo);
+    setInfoVisible(true);
+  };
   const activeSetIndex = getActiveSetIndex(exercise);
   const editTarget = useWorkoutStore.getState().getSetEditTarget();
   const inspectingSet = Boolean(selectedSet && editTarget?.completed && editTarget.exerciseIndex === exerciseIndex);
@@ -543,6 +579,14 @@ export default function Workout() {
     exerciseIndex
   );
   const exerciseComplete = isExerciseComplete(exercise);
+  const previousBest = getPreviousBest(sessions, exercise.name);
+  const recordSetIndexes = getRecordSetIndexes(previousBest, exercise);
+  const addSetBase = getAddSetBase(exercise);
+  // A logged set that beats the record gets a success haptic instead of the usual tap.
+  const loggedRecord = (loggedSetIndex: number) => {
+    const updated = useWorkoutStore.getState().currentSession?.exercises[exerciseIndex];
+    return Boolean(updated && getRecordSetIndexes(previousBest, updated).includes(loggedSetIndex));
+  };
 
   // Each render captures a row identity and completion lease. Keypad drafts
   // retain this callback from editing start, even if Live Activity advances.
@@ -566,14 +610,18 @@ export default function Workout() {
     loggingSetRef.current = true;
     setStageDirection(1);
     setExerciseMotion('forward');
-    const result = applyActiveSetAction(target, 'completeSet');
+    // Stay on a finished exercise so its wrap-up can show the sets and offer another one;
+    // "Next exercise" there advances. (Live Activity taps still advance on their own.)
+    const result = applyActiveSetAction(target, 'completeSet', undefined, { advanceFocus: false });
     if (result.status !== 'applied') {
       loggingSetRef.current = false;
       return;
     }
     setTimeout(() => { loggingSetRef.current = false; }, LOG_SUBMISSION_GUARD_MS);
     if (Platform.OS !== 'web') {
-      if (result.completedExercise) void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      if (result.completedExercise && loggedRecord(target.setIndex)) {
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } else if (result.completedExercise) void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       else void Haptics.selectionAsync();
     }
     if (result.completedExercise) setRecentBonusSetIndex(null);
@@ -655,6 +703,12 @@ export default function Workout() {
     const percentage = Math.round(((activeSet.weight - previousWeight) / previousWeight) * 100);
     return `${percentage >= 0 ? '+' : ''}${percentage}%`;
   })();
+  const previousReps = setIndex > 0 ? exercise.sets[setIndex - 1].reps : null;
+  const repsDeltaLabel = (() => {
+    if (exercise.metric !== 'reps' || previousReps === null || previousReps <= 0) return null;
+    const percentage = Math.round(((activeSet.reps - previousReps) / previousReps) * 100);
+    return `${percentage >= 0 ? '+' : ''}${percentage}%`;
+  })();
   // Derived only: the set keeps last time's weight until the user accepts.
   const progressionSuggestion = inspectingSet
     ? null
@@ -670,15 +724,11 @@ export default function Workout() {
       }
     },
   } : null;
-  const stageKey = loggedBonusSet
-    ? `logged-${loggedBonusSet.type}`
-    : bonusSelection
-      ? `bonus-${bonusSelection.type}`
-      : inspectingSet
-        ? `inspect-${editTarget!.setId}`
-        : exerciseComplete
-        ? 'finisher'
-        : 'active';
+  const stageKey = bonusSelection
+    ? 'bonus'
+    : exerciseComplete && !inspectingSet
+      ? 'finisher'
+      : 'active';
   const exerciseEntering =
     exerciseMotion === 'replace'
       ? REPLACE_ENTER
@@ -696,10 +746,7 @@ export default function Workout() {
       ref={minimizeRef}
       expandFromCard={fromActivityCard === '1'}
       session={currentSession}
-      onMinimize={() => {
-        if (router.canGoBack()) router.back();
-        else router.replace('/(tabs)');
-      }}
+      onMinimize={leaveMinimizedWorkout}
     >
     {/* Keep padding tied to the screen, not the moving surface's native bounds.
         Native SafeAreaView recalculates its insets during the morph. */}
@@ -714,7 +761,7 @@ export default function Workout() {
       <View
         style={{
           flex: 1,
-          paddingHorizontal: 24,
+          paddingHorizontal: WORKOUT_SCREEN_HORIZONTAL_PADDING,
           paddingTop: 16,
           paddingBottom: 20,
         }}
@@ -725,6 +772,8 @@ export default function Workout() {
             flexDirection: 'row',
             alignItems: 'center',
             justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: 12,
           }}
         >
           <WorkoutDayLabel
@@ -733,134 +782,19 @@ export default function Workout() {
             numberOfLines={archetypeComposition ? 2 : 1}
           />
 
-          <View style={{ flexShrink: 0, flexDirection: 'row', alignItems: 'center' }}>
-            <WorkoutTouchable
-              accessibilityRole="button"
-              accessibilityLabel={currentSession.origin === 'adhoc' ? 'Add Exercise or navigate' : 'Change exercise'}
-              onPress={() => setShowSwapSheet(true)}
-              activeOpacity={0.7}
-              style={{
-                height: 42,
-                marginLeft: 10,
-                paddingHorizontal: 14,
-                borderRadius: 21,
-                flexDirection: 'row',
-                alignItems: 'center',
-                borderWidth: 1,
-                borderColor: redesignColors.border,
-                backgroundColor: redesignColors.surface,
-              }}
-            >
-              {currentSession.origin === 'adhoc' ? <Plus color={redesignColors.ash} size={18} strokeWidth={2.2} /> : <Repeat2 color={redesignColors.ash} size={18} strokeWidth={2.2} />}
-              <Text
-                allowFontScaling={false}
-                style={{
-                  marginLeft: 8,
-                  fontFamily: redesignFonts.uiSemiBold,
-                  fontSize: 15,
-                  color: redesignColors.ash,
-                }}
-              >
-                {currentSession.origin === 'adhoc' ? 'Add' : 'Change'}
-              </Text>
-            </WorkoutTouchable>
-
-            <WorkoutTouchable
-              accessibilityRole="button"
-              accessibilityLabel="Minimize workout"
-              accessibilityHint="Keep your workout active and return to the previous screen"
-              onPress={() => {
-                navigation.setOptions({ animation: 'none' });
-                minimizeRef.current?.minimize();
-              }}
-              activeOpacity={0.7}
-              style={{
-                width: 42,
-                height: 42,
-                marginLeft: 10,
-                borderRadius: 21,
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderWidth: 1,
-                borderColor: redesignColors.border,
-                backgroundColor: redesignColors.surface,
-              }}
-            >
-              <ChevronDown color={redesignColors.ash} size={20} strokeWidth={2.4} />
-            </WorkoutTouchable>
-
-            <WorkoutTouchable
-              accessibilityRole="button"
-              accessibilityLabel="Close workout"
-              onPress={confirmDiscardWorkout}
-              activeOpacity={0.7}
-              style={{
-                width: 42,
-                height: 42,
-                marginLeft: 10,
-                borderRadius: 21,
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderWidth: 1,
-                borderColor: redesignColors.border,
-                backgroundColor: redesignColors.surface,
-              }}
-            >
-              <X color={redesignColors.ash} size={20} strokeWidth={2.4} />
-            </WorkoutTouchable>
-          </View>
+          <WorkoutHeaderActions
+            addMode={currentSession.origin === 'adhoc'}
+            onChange={() => setShowSwapSheet(true)}
+            onMinimize={minimizeWorkout}
+            onExit={confirmDiscardWorkout}
+          />
         </View>
         </WorkoutLaunchSection>
 
         <WorkoutLaunchSection order={1}>
         <Animated.View
-          key={`title-${exerciseIdentity}`}
-          entering={animateExercise ? exerciseEntering : undefined}
-          exiting={EXERCISE_EXIT}
-          style={{ flexDirection: 'row', alignItems: 'center', marginTop: 18 }}
-        >
-          <Text
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.72}
-            allowFontScaling={false}
-            style={{
-              flex: 1,
-              minWidth: 0,
-              fontFamily: redesignFonts.display,
-              fontSize: 38,
-              lineHeight: 44,
-              letterSpacing: -1.1,
-              color: redesignColors.bone,
-            }}
-          >
-            {exercise.name}
-          </Text>
-          {exerciseComplete && !bonusSelection ? (
-            <Animated.View
-              entering={CHECK_ENTER}
-              style={{
-                width: 42,
-                height: 42,
-                marginLeft: 12,
-                borderRadius: 21,
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: accent,
-                shadowColor: accent,
-                shadowOpacity: 0.35,
-                shadowRadius: 10,
-                shadowOffset: { width: 0, height: 0 },
-              }}
-            >
-              <Check color={redesignColors.ink} size={23} strokeWidth={3.2} />
-            </Animated.View>
-          ) : null}
-        </Animated.View>
-
-        <Animated.View
           layout={workoutLayoutTransition}
-          style={{ flexDirection: 'row', gap: 8, marginTop: 20 }}
+          style={{ flexDirection: 'row', gap: 6, marginTop: 24 }}
         >
           {currentSession.exercises.map((item, index) => (
             <Animated.View
@@ -881,19 +815,73 @@ export default function Workout() {
             </Animated.View>
           ))}
         </Animated.View>
+
+        <Animated.View
+          key={`title-${exerciseIdentity}`}
+          entering={animateExercise ? exerciseEntering : undefined}
+          exiting={EXERCISE_EXIT}
+          style={{ flexDirection: 'row', alignItems: 'center', marginTop: 16 }}
+        >
+          <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center' }}>
+            <Text
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.72}
+              allowFontScaling={false}
+              style={{
+                flexShrink: 1,
+                fontFamily: redesignFonts.display,
+                fontSize: 38,
+                lineHeight: 44,
+                letterSpacing: -1.1,
+                color: redesignColors.bone,
+              }}
+            >
+              {displayExerciseName(exercise.name)}
+            </Text>
+            {availableExerciseInfo ? <ExerciseInfoButton onPress={handleOpenExerciseInfo} /> : null}
+          </View>
+          {exerciseComplete && !bonusSelection ? (
+            // Status, not an action: no fill or glow that would read as a button.
+            <Animated.View
+              entering={CHECK_ENTER}
+              accessible
+              accessibilityLabel="Exercise complete"
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginLeft: 12 }}
+            >
+              <Check color={accent} size={16} strokeWidth={3} />
+              <Text
+                allowFontScaling={false}
+                style={{
+                  fontFamily: redesignFonts.monoBold,
+                  fontSize: 11,
+                  letterSpacing: 1.4,
+                  color: redesignColors.ash,
+                }}
+              >
+                DONE
+              </Text>
+            </Animated.View>
+          ) : null}
+        </Animated.View>
+
         </WorkoutLaunchSection>
 
         <WorkoutLaunchSection order={2} fill>
-        <Animated.View
+        <Animated.ScrollView
           key={`body-${exerciseIdentity}`}
           entering={animateExercise ? exerciseEntering : undefined}
           exiting={EXERCISE_EXIT}
           style={{ flex: 1 }}
+          contentContainerStyle={{ paddingBottom: 72 }}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          directionalLockEnabled
         >
           <Animated.View
             layout={workoutLayoutTransition}
             style={{
-              marginTop: 24,
+              marginTop: 8,
               marginBottom: 22,
             }}
           >
@@ -903,19 +891,7 @@ export default function Workout() {
               exiting={STAGE_EXIT}
               layout={workoutLayoutTransition}
             >
-              {loggedBonusSet ? (
-                <BonusSetAcknowledgement
-                  set={loggedBonusSet}
-                  weightUnit={weightUnit}
-                  loadType={exercise.loadType}
-                  metric={exercise.metric}
-                  onAdvance={() => {
-                    setStageDirection(1);
-                    setLoggedBonusSet(null);
-                    handleAdvanceExercise();
-                  }}
-                />
-              ) : bonusSelection ? (
+              {bonusSelection ? (
                 <>
                   <SetProgress
                     sets={[
@@ -928,23 +904,26 @@ export default function Workout() {
                     loadType={exercise.loadType}
                     metric={exercise.metric}
                     accent={accent}
-                    currentAccent={BONUS_SET_META[bonusSelection.type].color}
-                    currentLabel={BONUS_SET_META[bonusSelection.type].shortTitle}
+                    currentAccent={bonusSelection.type === 'dropset' ? BONUS_SET_META.dropset.color : accent}
+                    currentLabel={bonusSelection.type === 'dropset' ? BONUS_SET_META.dropset.shortTitle : undefined}
                   />
                   <View style={{ marginTop: 20 }}>
                     <BonusSet
-                      key={bonusSelection.type}
                       selection={bonusSelection}
+                      setNumber={exercise.sets.length + 1}
+                      accent={accent}
                       weightIncrement={weightIncrement}
                       weightUnit={weightUnit}
                       loadType={exercise.loadType}
                       metric={exercise.metric}
+                      onTypeChange={(type) => setBonusSelection((current) => current && { ...current, type })}
                       onCancel={() => {
                         setStageDirection(-1);
                         setBonusSelection(null);
                       }}
                       onDone={(loggedSet) => {
-                        setStageDirection(1);
+                        const loggedIndex = exercise.sets.length;
+                        setStageDirection(-1);
                         appendBonusSet(
                           exerciseIndex,
                           loggedSet.type,
@@ -952,11 +931,14 @@ export default function Workout() {
                           loggedSet.weight,
                           loggedSet.durationS
                         );
-                        setRecentBonusSetIndex(exercise.sets.length);
+                        // Back to the wrap-up with the new row sliding in; only its
+                        // primary action moves on to the next exercise.
+                        setRecentBonusSetIndex(loggedIndex);
                         setBonusSelection(null);
-                        setLoggedBonusSet(loggedSet);
                         if (Platform.OS !== 'web') {
-                          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                          if (loggedRecord(loggedIndex)) {
+                            void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                          } else void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                         }
                       }}
                     />
@@ -966,7 +948,13 @@ export default function Workout() {
                 <ExerciseFinisher
                   sets={exercise.sets}
                   enteringSetIndex={recentBonusSetIndex}
-                  nextExerciseName={nextExercise?.name}
+                  nextExercise={nextExercise}
+                  accent={accent}
+                  addSetBase={addSetBase}
+                  recordSetIndexes={recordSetIndexes}
+                  recordHint={addSetBase ? getRecordHint(previousBest, exercise, addSetBase) : null}
+                  comparison={getLastTimeComparison(sessions, exercise)}
+                  restStartedAt={restStart?.identity === exerciseIdentity ? restStart.at : null}
                   weightUnit={weightUnit}
                   loadType={exercise.loadType}
                   metric={exercise.metric}
@@ -979,7 +967,7 @@ export default function Workout() {
                     setStageDirection(-1);
                     selectWorkoutSet(exerciseIndex, completedSetIndex);
                   }}
-                  onSelectBonus={(selection) => {
+                  onAddSet={(selection) => {
                     setRecentBonusSetIndex(null);
                     setStageDirection(1);
                     setBonusSelection(selection);
@@ -991,6 +979,8 @@ export default function Workout() {
                   <SetProgress
                     sets={exercise.sets}
                     currentSetIndex={activeSetIndex}
+                    selectedSetIndex={setIndex}
+                    onReturnToCurrent={inspectingSet ? clearSelectedSet : undefined}
                     weightUnit={weightUnit}
                     loadType={exercise.loadType}
                     metric={exercise.metric}
@@ -1002,32 +992,25 @@ export default function Workout() {
                     }}
                   />
                   <Animated.View
-                    key={`active-card-${editTarget?.setId ?? setIndex}-${inspectingSet}`}
-                    entering={animateStage ? FORWARD_ENTER : undefined}
-                    exiting={STAGE_EXIT}
                     layout={workoutLayoutTransition}
-                    style={{ marginTop: 24 }}
+                    style={{ marginTop: 18 }}
                   >
                     <ActiveSetCard
+                      valueIdentity={`${exerciseIdentity}-${editTarget?.setId ?? setIndex}`}
                       setNumber={setIndex + 1}
-                      heading={inspectingSet ? `Set ${setIndex + 1} · logged` : undefined}
-                      primaryLabel={inspectingSet ? 'Done editing' : 'Log it'}
+                      primaryLabel={inspectingSet ? 'Done editing' : 'Log'}
                       secondaryLabel={inspectingSet ? 'Back' : 'Skip'}
                       reps={activeSet.reps}
                       weight={activeSet.weight}
                       loadType={exercise.loadType}
                       metric={exercise.metric}
                       durationS={activeSet.durationS}
+                      timerTarget={exercise.metric === 'duration' && !inspectingSet ? editTarget : null}
                       weightIncrement={weightIncrement}
                       weightUnit={weightUnit}
                       onWeightUnitChange={(unit) => { if (editTarget) setExerciseEntryUnit(editTarget, unit); }}
-                      onInfoPress={availableExerciseInfo ? () => {
-                        if (infoOpeningRef.current) return;
-                        infoOpeningRef.current = true;
-                        setInfoExercise(availableExerciseInfo);
-                        setInfoVisible(true);
-                      } : undefined}
                       weightDeltaLabel={weightDeltaLabel}
+                      repsDeltaLabel={repsDeltaLabel}
                       suggestion={suggestionCard}
                       accent={accent}
                       onRepsChange={handleRepsChange}
@@ -1051,7 +1034,7 @@ export default function Workout() {
             </Animated.View>
           </Animated.View>
 
-          {nextExercise && !exerciseComplete && !bonusSelection && !loggedBonusSet ? (
+          {nextExercise && !exerciseComplete && !bonusSelection ? (
           <AnimatedTouchableOpacity
             accessibilityRole="button"
             accessibilityLabel={`Up next, ${remainingExercises.length} ${
@@ -1111,7 +1094,7 @@ export default function Workout() {
                       color: redesignColors.bone,
                     }}
                   >
-                    {nextExercise.name}
+                    {displayExerciseName(nextExercise.name)}
                   </Text>
                 </View>
               </View>
@@ -1132,9 +1115,18 @@ export default function Workout() {
             </View>
           </AnimatedTouchableOpacity>
           ) : null}
-        </Animated.View>
+        </Animated.ScrollView>
         </WorkoutLaunchSection>
       </View>
+
+      {exercise.exerciseId !== undefined ? (
+        <ExerciseNotes
+          key={`${currentSession.id}:${exercise.exerciseId}`}
+          workoutId={currentSession.id}
+          exerciseId={exercise.exerciseId}
+          exerciseName={exercise.name}
+        />
+      ) : null}
 
       <SwapExerciseSheet
         mode={currentSession.origin === 'adhoc' ? 'add' : 'manage'}
@@ -1162,10 +1154,11 @@ export default function Workout() {
 
       <WorkoutIntensityPicker
         visible={showFeedbackModal || activityFeedbackVisible}
-        type={currentSession.origin === 'adhoc' ? undefined : workoutType}
+        workoutLabel={feedbackWorkout.label}
+        accent={feedbackWorkout.color}
         levels={FEEDBACK_LEVELS}
         prompt="How did it feel?"
-        subtext="This helps us adjust your next workout to keep you progressing"
+        subtext="Saved with this workout."
         footerText="SLIDE TO FINISH"
         onChoose={(value) => {
           const intensity: IntensityLevel =

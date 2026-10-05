@@ -26,10 +26,50 @@ const {
 } = load('features/report/workoutReport.ts');
 const { lift, bodyweight, hold, reportSession, REPORT_FIXTURES } = load('features/report/reportFixtures.ts');
 const { deriveWorkoutSummary } = load('store/workoutSummary.ts');
+const { workoutReportHtml, workoutReportFilename } = load('features/report/workoutReportHtml.ts');
 
 const kg = (session, extra = {}) => buildWorkoutReport(session, { unit: 'kg', ...extra });
 const texts = (exercise) => exercise.sets.map((set) => set.text);
 const fixture = (key) => REPORT_FIXTURES.find((item) => item.key === key);
+
+test('PDF markup escapes user text, preserves multiline notes, and contains all long-workout sets', () => {
+  const session = structuredClone(fixture('long').session);
+  session.exercises[0].name = 'Squat <script>alert("x")</script> & lift';
+  session.exercises[0].notes = [{ text: 'First line\nSecond line <img src=x onerror=alert(1)>' }];
+  const report = kg(session, { titleOverride: 'Coach <Sam> & "team"' });
+  const html = workoutReportHtml(report);
+  assert.ok(html.startsWith('<!DOCTYPE html>'));
+  assert.ok(!html.includes('<script>'));
+  assert.ok(!html.includes('<img'));
+  assert.ok(html.includes('Coach &lt;Sam&gt; &amp; &quot;team&quot;'));
+  assert.ok(html.includes('First line\nSecond line &lt;img'));
+  for (const exercise of report.exercises) {
+    for (const set of exercise.sets) assert.ok(html.includes(`<td>${set.text}</td>`));
+  }
+  assert.equal((html.match(/<section class="exercise">/g) ?? []).length, 10);
+  assert.ok(html.includes('table-header-group'));
+});
+
+test('PDF includes timed readings, converted units, set types, records, and unlogged notes', () => {
+  const mixed = workoutReportHtml(kg(fixture('mixed').session));
+  assert.ok(mixed.includes('<td>1:00</td>'));
+  assert.ok(mixed.includes('<td>32 kg · 0:45</td>'));
+  const recordFixture = fixture('records');
+  const report = buildWorkoutReport(recordFixture.session, { unit: 'lbs', history: recordFixture.history });
+  const html = workoutReportHtml(report);
+  assert.ok(html.includes('lb × 8'));
+  assert.ok(html.includes('PR attempt · PR'));
+  assert.ok(html.includes('<td>Drop set</td>'));
+  const untouched = lift('Cable Fly', 10, [10]);
+  untouched.sets[0].completed = false;
+  untouched.notes = [{ text: 'Check setup' }];
+  assert.ok(workoutReportHtml(kg(reportSession([untouched]))).includes('Not logged'));
+});
+
+test('PDF filenames retain useful names while removing path characters', () => {
+  assert.equal(workoutReportFilename({ title: 'Push / Pull: <Day>', id: '../42' }), 'Push  Pull Day - 42 - Workout report.pdf');
+  assert.equal(workoutReportFilename({ title: '💪', id: '/' }), 'Workout - session - Workout report.pdf');
+});
 
 test('weight + reps reads "80 kg × 10" per set, with traditional volume', () => {
   const report = kg(reportSession([lift('Bench Press', 80, [10, 10])]));
@@ -68,7 +108,7 @@ test('weight + duration reads "30 kg · 0:45" and never invents weight × time v
 
 test('bodyweight reps read "20 reps" with no zero weight, and zero-volume workouts omit the stat', () => {
   const report = kg(reportSession([bodyweight('Push-Up', [20, 1])]));
-  assert.deepEqual(texts(report.exercises[0]), ['20 reps', '1 rep']);
+  assert.deepEqual(texts(report.exercises[0]), ["Bodyweight × 20", "Bodyweight × 1"]);
   assert.equal(report.exercises[0].volume, null);
   assert.deepEqual(report.stats.map((stat) => stat.key), ['duration', 'exercises', 'sets']);
   assert.ok(!workoutReportText(report).includes('0 kg'));
@@ -76,14 +116,14 @@ test('bodyweight reps read "20 reps" with no zero weight, and zero-volume workou
 
 test('an unloaded set of a weighted lift reads as reps, not "0 kg"', () => {
   const [dip] = kg(reportSession([lift('Weighted Dip', 20, [10, { reps: 14, weight: 0, type: 'dropset' }])])).exercises;
-  assert.deepEqual(texts(dip), ['20 kg × 10', '14 reps']);
+  assert.deepEqual(texts(dip), ['20 kg × 10', "Bodyweight × 14"]);
 });
 
 test('lbs display converts canonical kg; entry unit never decides the report', () => {
   const session = reportSession([lift('Leg Curl', 90 / 2.20462, [12], 'lbs'), lift('Squat', 100, [5], 'kg')]);
   const inLbs = buildWorkoutReport(session, { unit: 'lbs' });
-  assert.deepEqual(inLbs.exercises.map((exercise) => exercise.sets[0].text), ['90 lbs × 12', '220.5 lbs × 5']);
-  assert.equal(inLbs.exercises[0].unitHint, 'lbs × reps');
+  assert.deepEqual(inLbs.exercises.map((exercise) => exercise.sets[0].text), ["90 lb × 12", "220.5 lb × 5"]);
+  assert.equal(inLbs.exercises[0].unitHint, "lb × reps");
   const inKg = kg(session);
   assert.deepEqual(inKg.exercises.map((exercise) => exercise.sets[0].text), ['40.8 kg × 12', '100 kg × 5']);
   // Canonical weights are untouched by building a report.
@@ -95,7 +135,7 @@ test('volume stat agrees with the completion summary in either unit', () => {
   const summary = deriveWorkoutSummary(session);
   assert.equal(kg(session).stats.find((stat) => stat.key === 'volume').value, summary.volumeKg.toLocaleString('en-US'));
   const lbs = buildWorkoutReport(session, { unit: 'lbs' }).stats.find((stat) => stat.key === 'volume');
-  assert.deepEqual([lbs.value, lbs.unit], [Math.round(summary.volumeKg * 2.20462).toLocaleString('en-US'), 'lbs']);
+  assert.deepEqual([lbs.value, lbs.unit], [Math.round(summary.volumeKg * 2.20462).toLocaleString('en-US'), "lb"]);
 });
 
 test('PR, drop and extra sets are tagged; a top set beating history is a new best', () => {
@@ -109,7 +149,7 @@ test('PR, drop and extra sets are tagged; a top set beating history is a new bes
   // Repeated equal top sets: only the first is marked.
   assert.deepEqual(ohp.sets.map((set) => set.record), [true, false, false]);
   assert.equal(dip.sets[2].kind, 'dropset');
-  assert.deepEqual(report.highlights.slice(0, 4), ['2 new bests', '1 PR attempt', '1 drop set', '1 extra set']);
+  assert.deepEqual(report.highlights.slice(0, 4), ["2 PRs", '1 PR attempt', '1 drop set', '1 extra set']);
 });
 
 test('first-ever session of a lift is not a new best, and timed sets never are', () => {
@@ -152,7 +192,7 @@ test('missing completion timestamp omits duration rather than inventing one', ()
   assert.equal(report.timeLabel, null);
   assert.equal(report.stats.find((stat) => stat.key === 'duration'), undefined);
   // Date-only history is its calendar day, not shifted by UTC parsing.
-  assert.equal(report.dateLabel, 'Sunday, Sep 27, 2026');
+  assert.equal(report.dateLabel, "Sunday, 27 Sep 2026");
 });
 
 test('duration is only trusted between real timestamps within a plausible span', () => {
@@ -168,6 +208,32 @@ test('custom split title override and plain-text twin', () => {
   assert.equal(report.title, 'Heavy Day');
   const text = workoutReportText(report);
   assert.match(text, /^Heavy Day\n/);
-  assert.match(text, /1\. Bench Press — 800 kg\n {3}1 {2}80 kg × 10/);
+  assert.match(text, /1\. Bench Press — 800 kg moved\n {3}1 {2}80 kg × 10/);
   assert.match(text, /2\. Plank\n {3}1 {2}1:00/);
+});
+
+
+test('reports preserve exercise notes and newlines in comfortable, compact and skipped exercises', () => {
+  for (const count of [1, 24]) {
+    const exercise = lift('Bench Press', 80, Array(count).fill(8));
+    exercise.notes = [{ text: 'Seat at 3.\nShoulders felt good.' }, { text: 'Ask coach about grip.' }];
+    const report = kg(reportSession([exercise]));
+    assert.deepEqual(report.exercises[0].notes, ['Seat at 3.\nShoulders felt good.', 'Ask coach about grip.']);
+    assert.match(workoutReportText(report), /Note: Seat at 3\.\nShoulders felt good\./);
+  }
+  const skipped = lift('Cable Fly', 10, [{ reps: 10, skipped: true, completed: false }]);
+  skipped.notes = [{ text: 'Skipped because cable was busy.' }];
+  assert.match(workoutReportText(kg(reportSession([skipped]))), /Note: Skipped because cable was busy/);
+});
+
+test('a note on an unlogged exercise appears without fabricating completed sets or a skipped label', () => {
+  const untouched = lift('Cable Fly', 10, [{ reps: 10, completed: false }]);
+  untouched.sets[0].completed = false;
+  untouched.notes = [{ text: 'Discuss setup next time.' }];
+  const report = kg(reportSession([lift('Bench Press', 80, [8]), untouched]));
+  assert.equal(report.exercises.length, 2);
+  assert.equal(report.exercises[1].notLogged, true);
+  assert.equal(report.exercises[1].position, null);
+  assert.deepEqual(report.exercises[1].sets, []);
+  assert.match(workoutReportText(report), /Not logged\n   Note: Discuss setup next time/);
 });

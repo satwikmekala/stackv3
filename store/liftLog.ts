@@ -1,3 +1,4 @@
+import { displayExerciseName } from '@/constants/exerciseNames';
 import type { WorkoutSession } from '@/store/workoutStore';
 import { getVerifiedSessions } from '@/store/verifiedSessions';
 import { formatWeight, type WeightUnit } from '@/store/weightUnits';
@@ -66,9 +67,9 @@ export function deriveLiftLog(session: WorkoutSession, history: readonly Workout
       const weighted = exercise.loadType === 'external_weight' && heaviest > 0;
       // No duration records yet, so a timed line is never marked as a PR.
       return [{
-        name: exercise.name,
+        name: displayExerciseName(exercise.name),
         value: weighted ? formatWeight(heaviest, unit) : formatDuration(Math.max(...durations)),
-        unit: weighted ? (unit === 'lbs' ? 'lbs' : 'kg') : '',
+        unit: weighted ? (unit === 'lbs' ? 'lb' : 'kg') : '',
         scheme: formatDurationScheme(durations, 'range'),
         record: false,
       }];
@@ -79,9 +80,9 @@ export function deriveLiftLog(session: WorkoutSession, history: readonly Workout
     const bodyweight = exercise.loadType === 'bodyweight' || best.weight <= 0;
     const previous = previousBest.get(exercise.name);
     return [{
-      name: exercise.name,
+      name: displayExerciseName(exercise.name),
       value: bodyweight ? String(best.reps) : formatWeight(best.weight, unit),
-      unit: bodyweight ? 'reps' : unit === 'lbs' ? 'lbs' : 'kg',
+      unit: bodyweight ? 'reps' : unit === 'lbs' ? 'lb' : 'kg',
       scheme: formatRepScheme(reps, 'range'),
       record: Boolean(previous && beats(best, previous) > 0),
     }];

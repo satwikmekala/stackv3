@@ -13,7 +13,6 @@ import type {
 } from '@/store/workoutStore';
 import { getVerifiedSessions } from '@/store/verifiedSessions';
 import {
-  getWeightIncrement,
   kgToLbs,
   lbsToKg,
   type WeightUnit,
@@ -49,7 +48,8 @@ const compatibleHistory = (
 
 /** Regular working sets only; bonus/special rows never seed working-set defaults. */
 export const getRegularSets = (exercise: Exercise | undefined): ExerciseSet[] =>
-  exercise?.sets.filter((set) => !set.type) ?? [];
+  exercise?.sets.filter((set) => !set.type && set.sourceKind !== 'warmup' &&
+    (set.sourceKind === undefined || set.completed && !set.skipped)) ?? [];
 
 // A set counts as performed only when it was logged, not skipped.
 const wasPerformed = (set: ExerciseSet) => Boolean(set.completed) && !set.skipped;
@@ -155,13 +155,14 @@ const roundUnitValue = (value: number) => Math.round(value * 1e6) / 1e6;
 export const getProgressionSuggestion = (
   previousSet: ExerciseSet | undefined,
   loadType: ExerciseLoadType,
-  profile: Pick<UserProfile, 'weightUnit' | 'weightIncrement' | 'weightIncrementLbs'>,
+  _profile: Pick<UserProfile, 'weightUnit' | 'weightIncrement' | 'weightIncrementLbs'>,
   unit: WeightUnit
 ): ProgressionSuggestion | null => {
   if (!previousSet || previousSet.type || loadType === 'bodyweight' || !wasPerformed(previousSet)) return null;
   const targetReps = previousSet.targetReps ?? previousSet.reps;
   if (!Number.isFinite(previousSet.weight) || previousSet.reps < targetReps) return null;
-  const increment = getWeightIncrement(profile, unit);
+  // A manual button preference must not change the optional training suggestion.
+  const increment = unit === 'lbs' ? 5 : 0.5;
   if (!Number.isFinite(increment) || increment <= 0) return null;
   const toUnit = (kg: number) => (unit === 'lbs' ? kgToLbs(kg) : kg);
   const suggested = roundUnitValue(roundUnitValue(toUnit(previousSet.weight)) + increment);
@@ -184,6 +185,7 @@ export const findLastExercisePerformance = (
   let latest: WorkoutSession | undefined;
   for (const session of getVerifiedSessions(sessions)) {
     if (!session.exercises.some((exercise) => exercise.name === name)) continue;
+    if (session.imported && !session.exercises.find(exercise => exercise.name === name)?.sets.some(set => set.completed && !set.skipped && set.sourceKind !== 'warmup' && !set.type)) continue;
     if (!latest || session.date > latest.date ||
         (session.date === latest.date && Number(session.id) < Number(latest.id))) latest = session;
   }

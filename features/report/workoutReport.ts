@@ -1,3 +1,6 @@
+import { longContentDate } from '@/utils/content';
+import { displayExerciseName } from '@/constants/exerciseNames';
+import { spokenTrainingCopy } from '@/utils/content';
 import type { BonusSetType, ExerciseSet, IntensityLevel, WorkoutSession } from '@/store/workoutStore';
 import { getVerifiedSessions } from '@/store/verifiedSessions';
 import { formatDuration, getExerciseMetric } from '@/store/exerciseMeasurement';
@@ -48,9 +51,11 @@ export type ReportExercise = {
   skippedCount: number;
   /** Traditional weight × reps volume; null whenever it would be meaningless. */
   volume: string | null;
-  /** Every set was skipped; shown as a single quiet line. */
+  /** No sets were performed; shown as a single quiet status line. */
   skipped: boolean;
   hasRecord: boolean;
+  notes: string[];
+  notLogged: boolean;
 };
 
 export type ReportStat = { key: 'duration' | 'exercises' | 'sets' | 'volume'; label: string; value: string; unit?: string };
@@ -143,7 +148,7 @@ function readSet(set: ExerciseSet, measure: ReportMeasure, unit: WeightUnit): { 
   }
   return weight
     ? { text: `${weight} ${unitLabel(unit)} × ${set.reps}`, compactText: `${weight} × ${set.reps}` }
-    : { text: `${set.reps} ${set.reps === 1 ? 'rep' : 'reps'}`, compactText: String(set.reps) };
+    : { text: `Bodyweight × ${set.reps}`, compactText: String(set.reps) };
 }
 
 /** Elapsed time only when both ends are real timestamps and the span is plausible. */
@@ -186,7 +191,8 @@ export function buildWorkoutReport(session: WorkoutSession, options: WorkoutRepo
     // Unfinished sets (neither performed nor skipped) were never reached; they
     // are not part of what happened and are left out entirely.
     const logged = exercise.sets.filter((set) => set.completed || set.skipped);
-    if (logged.length === 0) return [];
+    const notes = (exercise.notes ?? []).map((note) => note.text.trim()).filter(Boolean);
+    if (logged.length === 0 && notes.length === 0) return [];
     const performed = logged.filter(isPerformed);
     const measure = measureOf(exercise, performed);
 
@@ -214,7 +220,7 @@ export function buildWorkoutReport(session: WorkoutSession, options: WorkoutRepo
 
     return [{
       position: 0,
-      name: exercise.name.trim() || 'Exercise',
+      name: displayExerciseName(exercise.name.trim()) || 'Exercise',
       measure,
       unitHint: MEASURE_HINTS[measure](unit),
       sets,
@@ -223,6 +229,8 @@ export function buildWorkoutReport(session: WorkoutSession, options: WorkoutRepo
       volume: volumeKg > 0 ? `${formatSummaryNumber(displayVolume(volumeKg, unit))} ${unitLabel(unit)}` : null,
       skipped: performed.length === 0,
       hasRecord: recordIndex >= 0,
+      notes,
+      notLogged: logged.length === 0,
     }];
   });
   let performedPosition = 0;
@@ -235,12 +243,12 @@ export function buildWorkoutReport(session: WorkoutSession, options: WorkoutRepo
   if (summary.exerciseCount > 0) stats.push({ key: 'exercises', label: 'Exercises', value: String(summary.exerciseCount) });
   if (summary.setCount > 0) stats.push({ key: 'sets', label: 'Sets', value: String(summary.setCount) });
   if (summary.volumeKg > 0) {
-    stats.push({ key: 'volume', label: 'Volume', value: formatSummaryNumber(Math.round(displayVolume(summary.volumeKg, unit))), unit: unitLabel(unit) });
+    stats.push({ key: 'volume', label: 'Moved', value: formatSummaryNumber(Math.round(displayVolume(summary.volumeKg, unit))), unit: unitLabel(unit) });
   }
 
   const records = exercises.filter((exercise) => exercise.hasRecord).length;
   const highlights: string[] = [];
-  if (records > 0) highlights.push(plural(records, 'new best'));
+  if (records > 0) highlights.push(plural(records, 'PR'));
   if (summary.specialSets.pr > 0) highlights.push(plural(summary.specialSets.pr, 'PR attempt'));
   if (summary.specialSets.dropset > 0) highlights.push(plural(summary.specialSets.dropset, 'drop set'));
   if (summary.specialSets.extra > 0) highlights.push(plural(summary.specialSets.extra, 'extra set'));
@@ -255,7 +263,7 @@ export function buildWorkoutReport(session: WorkoutSession, options: WorkoutRepo
     title: summary.title,
     accent: summary.accent,
     unit,
-    dateLabel: new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' }).format(date),
+    dateLabel: `${longContentDate(date)} ${date.getFullYear()}`,
     timeLabel: session.date.includes('T')
       ? new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(date)
       : null,
@@ -269,24 +277,28 @@ export function buildWorkoutReport(session: WorkoutSession, options: WorkoutRepo
 }
 
 /** Plain-text twin of the image, for accessibility and as the share message fallback. */
-export function workoutReportText(report: WorkoutReport): string {
+export function workoutReportText(report: WorkoutReport, accessible = false): string {
   const lines = [report.title, [report.dateLabel, report.durationLabel].filter(Boolean).join(' · ')];
   const stats = report.stats.filter((stat) => stat.key !== 'duration')
     .map((stat) => `${stat.value}${stat.unit ? ` ${stat.unit}` : ''} ${stat.label.toLowerCase()}`);
   if (stats.length) lines.push(stats.join(' · '));
   for (const exercise of report.exercises) {
-    lines.push('', `${exercise.position ?? '–'}. ${exercise.name}${exercise.volume ? ` — ${exercise.volume}` : ''}`);
-    if (exercise.skipped) { lines.push('   Skipped'); continue; }
-    for (const set of exercise.sets) {
-      const tags = [set.kind !== 'working' ? REPORT_SET_TAGS[set.kind] : null, set.record ? 'NEW BEST' : null].filter(Boolean);
-      lines.push(`   ${set.ordinal}  ${set.text}${tags.length ? `  (${tags.join(', ')})` : ''}`);
+    lines.push('', `${exercise.position ?? '–'}. ${exercise.name}${exercise.volume ? ` — ${exercise.volume} moved` : ''}`);
+    if (exercise.skipped) lines.push(exercise.notLogged ? '   Not logged' : '   Skipped');
+    if (!exercise.skipped) {
+      for (const set of exercise.sets) {
+        const tags = [set.kind !== 'working' ? REPORT_SET_TAGS[set.kind] : null, set.record ? 'PR' : null].filter(Boolean);
+        lines.push(`   ${set.ordinal}  ${set.text}${tags.length ? `  (${tags.join(', ')})` : ''}`);
+      }
     }
+    for (const note of exercise.notes) lines.push(`   Note: ${note}`);
   }
-  return lines.join('\n');
+  const text = lines.join('\n');
+  return accessible ? spokenTrainingCopy(text) : text;
 }
 
 export const REPORT_SET_TAGS: Record<BonusSetType, string> = {
-  extra: 'EXTRA',
-  dropset: 'DROP',
-  pr: 'PR ATTEMPT',
+  extra: 'Extra set',
+  dropset: 'Drop set',
+  pr: 'PR attempt',
 };

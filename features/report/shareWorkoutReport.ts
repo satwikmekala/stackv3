@@ -1,36 +1,34 @@
-import type { View } from 'react-native';
+import { Platform } from 'react-native';
+import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import { captureRef } from 'react-native-view-shot';
+import type { WorkoutReport } from '@/features/report/workoutReport';
+import { workoutReportFilename, workoutReportHtml } from '@/features/report/workoutReportHtml';
 
-import { REPORT_WIDTH } from '@/features/report/WorkoutReportView';
-
-/** 1080 px wide, matching the social cards' export width; height follows the content. */
-export const REPORT_EXPORT_WIDTH = 1080;
-
-/**
- * Captures a laid-out report at a fixed 3× width. The report's height varies
- * with the workout, so it is passed from the view's own layout rather than
- * forced into a story-shaped canvas.
- */
-export async function captureWorkoutReport(target: View, layoutHeight: number): Promise<string> {
-  const scale = REPORT_EXPORT_WIDTH / REPORT_WIDTH;
-  return captureRef(target, {
-    format: 'png',
-    quality: 1,
-    result: 'tmpfile',
-    width: REPORT_EXPORT_WIDTH,
-    height: Math.round(layoutHeight * scale),
-  });
-}
-
-/** Hands a captured report to the native share sheet (Messages, Mail, Files, …). */
-export async function shareWorkoutReportImage(uri: string, title: string): Promise<void> {
+/** Export a real document and hand it directly to the device's app picker. */
+export async function shareWorkoutReportPdf(report: WorkoutReport): Promise<void> {
+  if (Platform.OS === 'web') {
+    throw new Error('PDF file sharing requires the mobile app.');
+  }
   if (!(await Sharing.isAvailableAsync())) {
     throw new Error('Sharing is not available on this device.');
   }
-  await Sharing.shareAsync(uri, {
-    mimeType: 'image/png',
-    UTI: 'public.png',
-    dialogTitle: title,
+  // Defer loading the native printer until Share is tapped.
+  const Print = await import('expo-print');
+  const { uri } = await Print.printToFileAsync({
+    html: workoutReportHtml(report),
+    width: 595.28,
+    height: 841.89,
+    margins: { top: 32, bottom: 32, left: 32, right: 32 },
+  });
+  const generated = new File(uri);
+  const document = new File(Paths.cache, workoutReportFilename(report));
+  // The generated cache URI has a random name. Give the attachment a readable one.
+  if (document.exists) document.delete();
+  generated.move(document);
+  // Keep the document in cache: Android recipients may read it after the picker closes.
+  await Sharing.shareAsync(document.uri, {
+    mimeType: 'application/pdf',
+    UTI: 'com.adobe.pdf',
+    dialogTitle: `${report.title} - workout report`,
   });
 }

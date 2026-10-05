@@ -1,3 +1,4 @@
+import { displayExerciseName } from '@/constants/exerciseNames';
 import type { ExerciseMetric, UserProfile, WorkoutFocus, WorkoutSession } from '@/store/workoutStore';
 import { formatWeight, unitLabel } from '@/store/weightUnits';
 import { formatDuration, getExerciseMetric } from '@/store/exerciseMeasurement';
@@ -64,8 +65,8 @@ export function deriveWorkoutLiveActivityState(source: WorkoutLiveActivitySource
   return {
     workoutId: session.id,
     exerciseId: exercise.name,
-    exerciseName: exercise.name,
-    compactName: compactExerciseName(exercise.name),
+    exerciseName: displayExerciseName(exercise.name),
+    compactName: compactExerciseName(displayExerciseName(exercise.name)),
     setNumber: setIndex + 1,
     totalSets: exercise.sets.length,
     metric,

@@ -21,13 +21,31 @@ function load(file) {
   });
   return exports;
 }
-const { deriveWorkoutSummary, formatExerciseRecap, specialSetSummaryLabel } = load('store/workoutSummary.ts');
+const { deriveWorkoutSummary, formatExerciseRecap, formatExercisePerformance, specialSetSummaryLabel } = load('store/workoutSummary.ts');
 const { deriveLiftLog } = load('store/liftLog.ts');
 const set = (reps, extra = {}) => ({ reps, weight: 50, completed: true, ...extra });
 const lift = (name, sets) => ({ name, sets, loadType: 'external_weight' });
 const session = (exercises) => ({ id: '1', date: '2026-10-02', exercises, completed: true, retroactive: false,
   archetype: 'push', secondaryArchetype: null, workoutTypes: ['chest'] });
 const summarize = (sets) => deriveWorkoutSummary(session([lift('Bench press', sets)]));
+
+test('performance preview shows actual uniform load and converts global units', () => {
+  const exercise = summarize([set(8), set(8), set(8)]).exercises[0];
+  assert.deepEqual(formatExercisePerformance(exercise, 'kg'), { value: '3 × 8 at 50 kg', context: 'Sets × reps' });
+  assert.equal(formatExercisePerformance(exercise, 'lbs').value, "3 × 8 at 110.2 lb");
+});
+
+test('varied preview pairs the heaviest load with its actual reps, breaking ties by reps', () => {
+  const exercise = summarize([set(12, { weight: 40 }), set(6, { weight: 60 }), set(8, { weight: 60 }), set(99, { weight: 100, skipped: true })]).exercises[0];
+  assert.deepEqual(formatExercisePerformance(exercise, 'kg'), { value: '60 kg × 8', context: 'Top set · 3 sets' });
+});
+
+test('bodyweight performance ignores stale weights and identifies sets and reps', () => {
+  const result = deriveWorkoutSummary(session([{ ...lift('Pull-ups', [set(8), set(8)]), loadType: 'bodyweight' }]));
+  assert.deepEqual(formatExercisePerformance(result.exercises[0], 'kg'), { value: '2 × 8', context: 'Bodyweight · sets × reps' });
+  result.exercises[0].repsBySet = [8, 10];
+  assert.deepEqual(formatExercisePerformance(result.exercises[0], 'kg'), { value: "Bodyweight × 10", context: 'Top set · 2 sets' });
+});
 
 test('exact regression: 12/12/12 renders 3 × 12 while total reps remains 36', () => {
   const result = summarize([set(12), set(12), set(12)]);
@@ -60,7 +78,7 @@ test('exercise volume renders canonical kg with visible unit', () => {
 
 test('exercise volume converts to lb display with visible unit', () => {
   const result = summarize([set(12), set(12), set(12)]);
-  assert.deepEqual(formatExerciseRecap(result.exercises[0], 'lbs'), { scheme: '3 × 12', volume: '3,968.3 lbs' });
+  assert.deepEqual(formatExerciseRecap(result.exercises[0], 'lbs'), { scheme: '3 × 12', volume: "3,968.3 lb" });
   assert.equal(result.volumeKg, 1800);
 });
 
@@ -83,7 +101,7 @@ test('all performed bonus types remain counted, skipped bonus excluded, using Li
   const result = deriveWorkoutSummary(source);
   assert.deepEqual([result.setCount, result.repCount, result.volumeKg], [6, 59, 2950]);
   assert.deepEqual(result.specialSets, { pr: 1, dropset: 1, extra: 1 });
-  assert.equal(specialSetSummaryLabel(result.specialSets), '3 SPECIAL SETS LOGGED');
+  assert.equal(specialSetSummaryLabel(result.specialSets), '3 bonus sets logged');
   assert.equal(formatExerciseRecap(result.exercises[0], 'kg').scheme, '12 · 12 · 12 · 5 · 10 · 8 reps');
   assert.equal(deriveLiftLog(source, [], 'kg').lines[0].scheme, '6 × 5–12');
 });
@@ -95,6 +113,15 @@ const measurement = load('store/exerciseMeasurement.ts');
 const hold = (name, durations, weights = [], loadType = weights.length ? 'external_weight' : 'bodyweight') => ({
   name, loadType, metric: 'duration',
   sets: durations.map((durationS, index) => ({ reps: 0, durationS, weight: weights[index] ?? 0, completed: true })),
+});
+
+test('timed performance keeps load paired with duration and never invents volume or reps', () => {
+  const weighted = deriveWorkoutSummary(session([hold('Farmer Carry', [60, 30, 45], [20, 40, 40])]));
+  assert.deepEqual(formatExercisePerformance(weighted.exercises[0], 'kg'), { value: '40 kg · 0:45', context: 'Top set · 3 sets' });
+  const unweighted = deriveWorkoutSummary(session([hold('Plank', [30, 60])]));
+  assert.deepEqual(formatExercisePerformance(unweighted.exercises[0], 'kg'), { value: '1:00', context: 'Longest hold · 2 sets' });
+  const uniform = deriveWorkoutSummary(session([hold('Carry', [45, 45], [30, 30])]));
+  assert.deepEqual(formatExercisePerformance(uniform.exercises[0], 'kg'), { value: '2 × 0:45 at 30 kg', context: 'Time per set' });
 });
 
 test('duration formatting and typed entry are exact', () => {

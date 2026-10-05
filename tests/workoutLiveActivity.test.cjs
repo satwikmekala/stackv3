@@ -1,3 +1,4 @@
+/* global __dirname */
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const fs = require('node:fs');
@@ -92,7 +93,7 @@ test('payload uses current committed set values, identity, and shared weight for
   assert.equal(derive(state).unit, 'kg');
   state.currentSession.exercises[0].entryUnit = 'lbs';
   assert.equal(derive(state).weight, formatWeight(80, 'lbs'));
-  assert.equal(derive(state).unit, 'lbs');
+  assert.equal(derive(state).unit, "lb");
   state.currentSession.exercises[0].sets[1].weight = 0;
   assert.equal(derive(state).weight, '0');
 });
@@ -267,6 +268,7 @@ test('root observer waits for successful hydration and recovers on app foregroun
     'react-native': { AppState, Platform: { Version: '26.3' } },
     expo: { requireOptionalNativeModule: () => ({}) },
     '@/store/workoutStore': { useWorkoutStore: store },
+    '@/store/appPreferences': { useAppPreferences: createStore(() => ({ ready: true, liveActivities: true })) },
     '@/store/workoutDatabase': {},
     './factories.ios': { workoutActivity: factory, testActivity: fake },
   })('@/services/liveActivity/sync.ios');
@@ -431,4 +433,25 @@ test('Adhoc: empty has no activity; first exercise starts once; append updates s
   await h.coordinator.sync(derive(state), true);
   assert.equal(h.factory.instances.length, 0);
   assert.equal(h.factory.events.at(-1)[0], 'end');
+});
+
+test('Settings: unread Live Activity preference waits; turning off ends visibility and on resumes the same workout', async () => {
+  const { createStore } = require('zustand/vanilla');
+  const store = createStore(() => ({ ...source(), isHydrated: true, hydrationError: null }));
+  const preferences = createStore(() => ({ ready: false, liveActivities: true }));
+  const factory = fakeFactory();
+  const runtime = loader({
+    'react-native': { AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) }, Platform: { Version: '26.3' } },
+    expo: { requireOptionalNativeModule: () => ({}) },
+    '@/store/workoutStore': { useWorkoutStore: store }, '@/store/appPreferences': { useAppPreferences: preferences },
+    '@/store/workoutDatabase': {}, './factories.ios': { workoutActivity: factory, testActivity: fakeFactory() },
+  })('@/services/liveActivity/sync.ios');
+  const stop = runtime.startWorkoutLiveActivitySync(); await tick(); assert.equal(factory.events.length, 0);
+  preferences.setState({ ready: true }); await tick(); assert.equal(factory.instances.length, 1);
+  const session = store.getState().currentSession;
+  preferences.setState({ liveActivities: false }); await tick(); assert.equal(factory.instances.length, 0);
+  assert.equal(store.getState().currentSession, session);
+  preferences.setState({ liveActivities: true }); await tick(); assert.equal(factory.instances.length, 1);
+  assert.equal(factory.events.at(-1)[2].workoutId, session.id);
+  stop();
 });

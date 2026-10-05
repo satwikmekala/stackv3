@@ -1,4 +1,3 @@
-import { getWeightIncrementKg } from '@/store/weightUnits';
 import { isDurationExercise } from '@/store/exerciseMeasurement';
 import type { Exercise, ExerciseLoadType, ExerciseMetric, SessionExercise, ExerciseSet, UserProfile } from '@/store/workoutStore';
 
@@ -59,7 +58,7 @@ export function getNextIncompleteExerciseIndex(exercises: Exercise[], currentInd
 }
 
 // One projection is used by persistence and by the next-set presentation preview.
-export function projectSetToggle(source: SessionExercise[], exerciseIndex: number, setIndex: number, profile: UserProfile | null) {
+export function projectSetToggle(source: SessionExercise[], exerciseIndex: number, setIndex: number, _profile: UserProfile | null) {
   const exercises = source.map((exercise) => ({ ...exercise, sets: exercise.sets.map((set) => ({ ...set })) }));
   const exercise = exercises[exerciseIndex];
   const target = exercise.sets[setIndex];
@@ -87,17 +86,15 @@ export function projectSetToggle(source: SessionExercise[], exerciseIndex: numbe
     exercise.sets[setIndex + 1] = propagated;
     updates.push({ setIndex: setIndex + 1, set: propagated });
   } else if (next && canPropagateToSet(next)) {
-    if (!profile) throw new Error('A profile is required to progress a set');
-    const offset = profile.autoIncreaseWeight ? getWeightIncrementKg(profile, exercise.entryUnit) : 0;
-    const weight = exercise.loadType === 'bodyweight' ? 0 : target.weight + offset;
+    const weight = exercise.loadType === 'bodyweight' ? 0 : target.weight;
     propagation = { setIndex: setIndex + 1,
-      weightOffsetKg: exercise.loadType === 'bodyweight' ? undefined : offset,
-      repsFromCurrent: !profile.autoIncreaseWeight,
+      weightOffsetKg: exercise.loadType === 'bodyweight' ? undefined : 0,
+      repsFromCurrent: true,
     };
     const propagated = { ...next, valueOrigin: 'propagated' as const,
-      reps: profile.autoIncreaseWeight ? next.reps : target.reps,
+      reps: target.reps,
       weight,
-      targetReps: profile.autoIncreaseWeight ? next.targetReps : target.reps,
+      targetReps: target.reps,
       targetWeight: weight,
     };
     exercise.sets[setIndex + 1] = propagated;
