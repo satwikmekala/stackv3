@@ -272,7 +272,11 @@ test('onboarding routing connects own workouts to import choices; placeholder ha
   assert.match(read('app/onboarding-preview/starting-point.tsx'), /onTrack=\{flow.bringWorkouts\}/);
   assert.match(read('features/onboarding/useCoreOnboarding.ts'), /router.push\('\/bring-workouts'\)/);
   assert.match(read('app/bring-workouts.tsx'), /router.push\('\/hevy-import'\)/);
-  assert.match(read('app/bring-workouts.tsx'), /Coming soon/);
+  // Paste my routine is live: it routes to its own screen, which only calls the backend parser.
+  assert.match(read('app/bring-workouts.tsx'), /router.push\('\/paste-routine'\)/);
+  assert.doesNotMatch(read('app/bring-workouts.tsx'), /Coming soon/);
+  assert.match(read('app/paste-routine.tsx'), /parsePastedRoutine\(/);
+  assert.doesNotMatch(read('app/paste-routine.tsx') + read('features/routineImport/client.ts'), /openrouter|OPENROUTER|console\.|AsyncStorage/i);
   assert.match(read('app/hevy-import.tsx'), /setKey\(''\)/); assert.match(read('app/hevy-import.tsx'), /secureTextEntry/);
   const source = read('features/import/hevy/client.ts') + read('features/import/hevy/flow.ts');
   assert.doesNotMatch(source, /console\.|AsyncStorage|analytics|captureException/);

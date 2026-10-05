@@ -44,6 +44,7 @@ export default function ExercisePicker() {
   if (!picker || !day) return <SafeAreaView edges={edges} style={ui.screen}>{header}
     {nativeHeader && expandedTitle ? <View style={{ paddingHorizontal: 20 }}>{title}</View> : null}
     <Text style={[ui.body, { padding: 20 }]}>Open a workout to add exercises.</Text></SafeAreaView>;
+  const pending = picker.pendingKey ? day.pendingImports?.find(item => item.key === picker.pendingKey) : undefined;
   const existing = new Set(day.exercises.map(exercise => exercise.id));
   const selected = new Set(picker.selected.map(exercise => exercise.id));
   const query = picker.query.trim().toLocaleLowerCase();
@@ -54,7 +55,7 @@ export default function ExercisePicker() {
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={{ paddingHorizontal: 20, paddingTop: 4, gap: 12 }}>
         {nativeHeader && expandedTitle ? title : null}
-        <Text style={ui.label}>Choose lifts for {getWorkoutDisplayName(day) || workoutEntryLabel(state.draft!.workouts.indexOf(day))}</Text>
+        <Text style={ui.label}>{pending ? `Choose the exercise for “${pending.rawName}”` : `Choose lifts for ${getWorkoutDisplayName(day) || workoutEntryLabel(state.draft!.workouts.indexOf(day))}`}</Text>
         <ExerciseSearchInput style={{ marginTop: 0 }} value={picker.query} onChangeText={value => { setSelectedOnly(false); state.updatePicker({ query: value }); }} />
       </View>
       <View><ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 20, paddingVertical: 12, gap: 6 }}>
@@ -86,7 +87,12 @@ export default function ExercisePicker() {
           <Action title="Clear" compact icon={<X color={c.ash} size={16} />} onPress={() => { state.updatePicker({ selected: [] }); setSelectedOnly(false); }} />
         </View> : null}
         <Action title={picker.selected.length ? `Add ${picker.selected.length} ${picker.selected.length === 1 ? 'exercise' : 'exercises'}` : 'Select exercises to add'} primary disabled={!picker.selected.length}
-        onPress={() => { picker.selected.forEach(exercise => state.addExercise(day.id, exercise)); close(); }} /></View>
+        onPress={() => {
+          const [first, ...rest] = picker.selected;
+          // Choosing for a pasted exercise puts the first pick in its place; any others are added as usual.
+          if (pending && first) state.resolvePendingImport(day.id, pending.key, first);
+          (pending ? rest : picker.selected).forEach(exercise => state.addExercise(day.id, exercise)); close();
+        }} /></View>
     </KeyboardAvoidingView>
   </SafeAreaView>;
 }

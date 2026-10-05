@@ -4,52 +4,48 @@
     {
       "name": "expo-web",
       "runtimeExecutable": "npx",
-      "runtimeArgs": [
-        "expo",
-        "start",
-        "--web",
-        "--port",
-        "8090"
-      ],
+      "runtimeArgs": ["expo", "start", "--web", "--port", "8090"],
       "port": 8090,
       "autoPort": false
     },
     {
       "name": "expo-ios-metro",
       "runtimeExecutable": "npx",
-      "runtimeArgs": [
-        "expo",
-        "start",
-        "--port",
-        "8081"
-      ],
+      "runtimeArgs": ["expo", "start", "--port", "8081"],
       "port": 8081,
       "autoPort": false
     },
     {
       "name": "stack-film-studio",
       "runtimeExecutable": "npm",
-      "runtimeArgs": [
-        "--prefix",
-        "film",
-        "run",
-        "studio",
-        "--",
-        "--port",
-        "3003",
-        "--no-open"
-      ],
+      "runtimeArgs": ["--prefix", "film", "run", "studio", "--", "--port", "3003", "--no-open"],
       "port": 3003,
       "autoPort": false
     },
     {
       "name": "onboarding-preview",
       "runtimeExecutable": "npm",
-      "runtimeArgs": [
-        "run",
-        "onboarding:preview"
-      ],
+      "runtimeArgs": ["run", "onboarding:preview"],
       "port": 8087,
+      "autoPort": false
+    },
+    {
+      "name": "routine-import-api",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--env-file=server/.env", "server/src/server.mjs"],
+      "port": 8080,
+      "autoPort": false
+    },
+    {
+      "name": "paste-preview-metro",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["expo", "start", "--port", "8095", "--localhost"],
+      "env": {
+        "EXPO_PUBLIC_ONBOARDING_PREVIEW": "1",
+        "EXPO_PUBLIC_ROUTINE_IMPORT_URL": "http://localhost:8080",
+        "EXPO_NO_TELEMETRY": "1"
+      },
+      "port": 8095,
       "autoPort": false
     }
   ]

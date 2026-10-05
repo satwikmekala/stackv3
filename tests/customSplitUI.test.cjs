@@ -37,7 +37,9 @@ function harness(entry, state, { catalog = [], workoutState = {}, params = {}, d
     if (id === '@/store/workoutStore') return { useWorkoutStore: workoutHook };
     if (id === '@/store/workoutDatabase') return { readExerciseCatalogSync: () => catalog, ...db };
     if (id === '@/features/onboarding/config') return { ONBOARDING_PREVIEW_ENABLED: preview };
-    if (id === '@/store/customSplitDraft') return { useCustomSplitDraftStore: hook, getWorkoutDisplayName: day => day.customName || day.exercises.map(e => e.primaryMuscle).filter((v, i, a) => a.indexOf(v) === i).join(', '),
+    if (id === '@/store/onboardingDraft') return { loadOnboardingDraft: async () => {}, clearOnboardingDraft: async () => {}, useOnboardingDraft: { getState: () => ({ draft: { name: 'Sam' } }) } };
+    if (id === '@/store/sharedRoutineHandoff') return { loadSharedRoutineHandoff: async () => {}, onboardingDestination: () => '/(tabs)' };
+    if (id === '@/store/customSplitDraft') return { countPendingImports: draft => draft?.workouts.reduce((n, day) => n + (day.pendingImports?.length ?? 0), 0) ?? 0, useCustomSplitDraftStore: hook, getWorkoutDisplayName: day => day.customName || day.exercises.map(e => e.primaryMuscle).filter((v, i, a) => a.indexOf(v) === i).join(', '),
       getDraftPrefillRecommendation: () => null, getMuscleGroupForExercise: exercise => exercise.primaryMuscle, getWorkoutTypeForMuscleGroup: () => 'chest', splitRevision: split => JSON.stringify(split), splitDraftKey: id => `edit:${id}`, CUSTOM_SPLIT_MUSCLE_GROUPS: ['Chest', 'Back'], MUSCLE_GROUP_COLORS: { Chest: '#ff7a3d', Back: '#4f8bff' } };
     if (id.startsWith('@/components/')) return new Proxy({ ui: {} }, { get: (o, k) => o[k] ?? String(k) });
     if (id === 'lucide-react-native') return new Proxy({}, { get: (_, k) => String(k) });
@@ -398,4 +400,46 @@ test('review updates an edited Stack’s plan in place without offering deletion
   assert.equal(JSON.stringify(nativeHeader(tree).unstable_headerRightItems()).includes('Delete routine'),false);
   action(tree,'Save changes').props.onPress();await flush();
   assert.equal(updates.length,1);assert.equal(updates[0][0],9);assert.equal(updates[0][1],'Stack’s plan');
+});
+
+const pendingItem = (key, rawName, extra = {}) => ({ key, rawName, status: 'uncertain', suggestion: null, alternatives: [], position: 1, ...extra });
+
+test('pasted routine: the editor shows exercises to check and routes their choice through the picker', async () => {
+  const resolved = [];
+  const workout = { ...day('a', [lift(1, 'Bench Press')]), pendingImports: [pendingItem('w1e2', 'shoulder press')] };
+  const other = { ...day('b', [lift(2)]), pendingImports: [pendingItem('w2e1', 'rear cable thing')] };
+  const state = { draft: { name: 'Pasted', workouts: [workout, other] }, activeWorkoutId: 'a', editingSplitId: null, source: 'onboarding', hydrated: true, drafts: {}, closeDraft() {},
+    resolvePendingImport: (...args) => resolved.push(args), openPicker(id, options) { this.picker = { workoutId: id, ...options }; } };
+  const h = harness('@/app/custom-split/index', state);
+  h.render(); await flush(); const tree = h.render();
+  const list = nodes(tree).find(node => node.type === 'PendingImportList');
+  assert.deepEqual(list.props.items.map(item => item.rawName), ['shoulder press']);
+  assert.match(JSON.stringify(tree), /1 exercise.*in other workouts.*needs.*a check/);
+  list.props.onResolve('w1e2', null);
+  assert.deepEqual(resolved, [['a', 'w1e2', null]]);
+  list.props.onSearch(workout.pendingImports[0]);
+  assert.deepEqual(state.picker, { workoutId: 'a', pendingKey: 'w1e2', query: 'shoulder press' });
+  assert.deepEqual(h.events.at(-1), ['push', '/custom-split/exercises']);
+});
+
+test('pasted routine: Save waits for every exercise to check, then first-run setup saves, finishes setup and uses it once', async () => {
+  const calls = [];
+  const workout = { ...day('a', [lift(1)]), pendingImports: [pendingItem('w1e2', 'shoulder burnout', { status: 'unresolved' })] };
+  let discarded = false;
+  const state = { draft: { name: 'Pasted', workouts: [workout] }, source: 'onboarding', editingSplitId: null, drafts: {}, discardDraft() { discarded = true; } };
+  const workoutState = { profile: null,
+    saveCustomSplitDraft: async (...args) => { calls.push(['save', args[2]]); return 41; },
+    completeNoProgramOnboarding: name => { calls.push(['complete', name]); return { onboardingCompleted: true }; },
+    activateSharedRoutine: id => { calls.push(['activate', id]); } };
+  const h = harness('@/app/custom-split/review', state, { workoutState });
+  let tree = h.render();
+  assert.equal(action(tree, 'Save and use').props.disabled, true);
+  assert.match(JSON.stringify(tree), /Check the exercise Stack wasn’t sure about before saving/);
+  assert.match(JSON.stringify(tree), /shoulder burnout.*needs a check/);
+  assert.equal(action(tree, 'Save for later'), undefined);
+  delete workout.pendingImports;
+  tree = h.render(); action(tree, 'Save and use').props.onPress(); await flush(); await flush();
+  assert.deepEqual(calls, [['save', { activate: false }], ['complete', 'Sam'], ['activate', 41]]);
+  assert.equal(discarded, true);
+  assert.deepEqual(h.events.filter(event => event[0] === 'replace'), [['replace', '/(tabs)']]);
 });

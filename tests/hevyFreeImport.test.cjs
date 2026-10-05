@@ -299,11 +299,13 @@ function rendered(hevyPlan, contentState) {
   walk(tree); return { h, nodes, routes, text: text.join(' ') };
 }
 
-test('Import from Hevy opens plan-choice screen; Pro retains its route and Free opens file import; Paste stays Coming soon', () => {
+test('Import from Hevy opens plan-choice screen; Pro retains its route and Free opens file import; Paste opens its own screen', () => {
   const first = rendered(), plan = rendered('choose'); try {
     first.nodes.find(n => n.props.accessibilityLabel === 'Import from Hevy').props.onPress();
     assert.deepEqual(first.routes, [{ pathname: '/bring-workouts', params: { hevyPlan: 'choose' } }]);
-    assert.match(first.text, /Coming soon/); assert.equal(first.nodes.some(n => n.props.accessibilityLabel === 'Paste my routine. Coming soon.' && n.props.onPress), false);
+    assert.doesNotMatch(first.text, /Coming soon/);
+    first.nodes.find(n => n.props.accessibilityLabel === 'Paste my routine' && n.props.onPress).props.onPress();
+    assert.deepEqual(first.routes.at(-1), '/paste-routine');
     assert.match(plan.text, /Which Hevy plan do you use\?/);
     const cards = plan.nodes.filter(n => n.type === 'Pressable'); assert.equal(cards.length, 2);
     cards.find(n => n.props.accessibilityLabel === 'Hevy Pro').props.onPress(); cards.find(n => n.props.accessibilityLabel === 'Hevy Free').props.onPress();
