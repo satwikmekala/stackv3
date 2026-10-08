@@ -751,7 +751,6 @@ export default function Workout() {
           flex: 1,
           paddingHorizontal: WORKOUT_SCREEN_HORIZONTAL_PADDING,
           paddingTop: 16,
-          paddingBottom: 96,
         }}
       >
         <WorkoutLaunchSection>
@@ -862,7 +861,10 @@ export default function Workout() {
           entering={animateExercise ? exerciseEntering : undefined}
           exiting={EXERCISE_EXIT}
           style={{ flex: 1 }}
-          contentContainerStyle={{ paddingBottom: 16 }}
+          // Keep the viewport behind the floating actions. Reserve their 60 pt
+          // height + 20 pt bottom offset + 16 pt gap in scrollable content so
+          // the last card can scroll completely above their touch targets.
+          contentContainerStyle={{ paddingBottom: 96 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           directionalLockEnabled

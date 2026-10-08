@@ -107,7 +107,13 @@ function todayLabel(today: Date) {
 
 export default function Home() {
   const departure = useSharedValue(0);
-  useFocusEffect(useCallback(() => { departure.set(0); }, [departure]));
+  useFocusEffect(useCallback(() => {
+    const reset = () => { cancelAnimation(departure); departure.set(0); };
+    reset();
+    // Train remains mounted beneath the transparent workout modal. Restore it
+    // on blur too, before minimizing exposes it again.
+    return reset;
+  }, [departure]));
   return <HomeDeparture.Provider value={departure}><HomeContent /><HomeTabBarDeparture /></HomeDeparture.Provider>;
 }
 

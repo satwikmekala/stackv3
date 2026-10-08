@@ -40,10 +40,12 @@ export function SlideToStart({ color, workoutName, onStart, hidden = false }: {
   const pressed = useSharedValue(0);
   const launching = useSharedValue(0);
   const locked = useSharedValue(false);
+  const departureActive = useSharedValue(false);
   const travel = Math.max(0, width - THUMB - INSET * 2);
 
-  useAnimatedReaction(() => offset.get() / Math.max(1, travel), value => {
-    departure?.set(value);
+  useAnimatedReaction(() => departureActive.get() ? offset.get() / Math.max(1, travel) : 0, value => {
+    // A retained slider (or a queued reaction) must not hide Home after blur.
+    departure?.set(departureActive.get() ? value : 0);
   }, [departure, travel]);
 
   useEffect(() => {
@@ -62,18 +64,21 @@ export function SlideToStart({ color, workoutName, onStart, hidden = false }: {
     pressed.set(0);
     launching.set(0);
     offset.set(0);
+    departureActive.set(true);
     return () => {
       focused.current = false;
+      departureActive.set(false);
+      departure?.set(0);
       if (retryTimer.current) clearTimeout(retryTimer.current);
       locked.set(true);
       cancelAnimation(offset);
       cancelAnimation(readiness);
       cancelAnimation(pressed);
       cancelAnimation(launching);
-      // Keep the handle at its destination underneath the workout reveal.
-      // Returning Home resets it in the focus callback above.
+      // Keep the handle at its destination underneath the workout reveal, but
+      // relinquish the shared Home fade. Returning Home resets the handle.
     };
-  }, [launching, locked, offset, pressed, readiness, ready]));
+  }, [departure, departureActive, launching, locked, offset, pressed, readiness, ready]));
 
   const thresholdFeedback = () => {
     if (Platform.OS !== 'web') void Haptics.selectionAsync();

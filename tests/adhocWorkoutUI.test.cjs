@@ -13,6 +13,9 @@ function uiHarness(entry, state, params = {}, catalog = [], exerciseInfo = null,
   const hooks = [], setters = [], effects = [], cleanups = [], events = [], cache = new Map();
   let launchApi, launchState={intent:null,unit:'kg',busy:false,error:null};
   const listeners={};
+  const focusEffects=new Map(), focusCleanups=new Map(), reactions=new Map();
+  let focused=true;
+  const focusEffect=fn=>{const i=cursor++;if(focusEffects.get(i)!==fn){focusEffects.set(i,fn);effects.push(()=>{focusCleanups.get(i)?.();if(focused)focusCleanups.set(i,fn());});}};
   const navigation={setOptions:options=>events.push(['navigationOptions',options]),addListener:(name,fn)=>{listeners[name]=fn;return ()=>{delete listeners[name];};}};
   const router={back:()=>events.push(['back']),push:x=>events.push(['push',x]),replace:x=>events.push(['replace',x]),dismissTo:x=>events.push(['dismissTo',x]),setParams:x=>Object.assign(params,x),canGoBack:()=>true};
   const chain = new Proxy(function () { return chain; }, { get: () => chain });
@@ -42,9 +45,9 @@ function uiHarness(entry, state, params = {}, catalog = [], exerciseInfo = null,
     StyleSheet:{create:x=>x}, Animated:{Value:class {setValue(){}},timing:chain,spring:chain,View:'Animated.View'},
     PanResponder:{create:()=>({panHandlers:{}})},
   },{get:(o,k)=>o[k]??String(k)});
-  const reanimated = new Proxy({__esModule:true,default:{View:'Animated.View',createAnimatedComponent:x=>x},
+  const reanimated = new Proxy({__esModule:true,default:{View:'Animated.View',ScrollView:'Animated.ScrollView',createAnimatedComponent:x=>x},
     useSharedValue:x=>{const i=cursor++;return hooks[i]??(hooks[i]={value:x,get(){return this.value;},set(next){this.value=typeof next==='function'?next(this.value):next;}});},
-    useAnimatedStyle:fn=>fn(),cancelAnimation:x=>events.push(['cancelAnimation',x]),interpolate:()=>0,withTiming:x=>x,withDelay:(_delay,x)=>x,withSpring:(x,config)=>{events.push(['spring',x,config]);return x;},useReducedMotion:()=>false,
+    useAnimatedReaction:(prepare,react)=>{reactions.set(cursor++,{prepare,react});},useAnimatedStyle:fn=>fn(),cancelAnimation:x=>events.push(['cancelAnimation',x]),interpolate:()=>0,withTiming:x=>x,withDelay:(_delay,x)=>x,withSpring:(x,config)=>{events.push(['spring',x,config]);return x;},useReducedMotion:()=>false,
   },{get:(o,k)=>o[k]??chain});
   function load(id) {
     if (id==='react') return {...react,default:react,__esModule:true};
@@ -52,7 +55,7 @@ function uiHarness(entry, state, params = {}, catalog = [], exerciseInfo = null,
     if (id==='react-native-reanimated') return reanimated;
     if (id==='react-native-gesture-handler') return {Gesture:{Pan:()=>chain},GestureDetector:'GestureDetector'};
     if ((id==='expo-haptics' || id==='@/services/haptics')) return {selectionAsync:()=>Promise.resolve(),impactAsync:()=>Promise.resolve(),notificationAsync:()=>Promise.resolve(),ImpactFeedbackStyle:{},NotificationFeedbackType:{}};
-    if (id==='expo-router') return {Redirect:'Redirect',Stack:{Screen:'Stack.Screen'},useLocalSearchParams:()=>params,useFocusEffect:fn=>react.useEffect(fn,[fn]),useNavigation:()=>navigation,useRouter:()=>router};
+    if (id==='expo-router') return {Redirect:'Redirect',Stack:{Screen:'Stack.Screen'},useLocalSearchParams:()=>params,useFocusEffect:focusEffect,useNavigation:()=>navigation,useRouter:()=>router};
     if (id==='react-native-safe-area-context') return {useSafeAreaInsets:()=>({top:0,bottom:0,left:0,right:0})};
     if (id==='@/store/muscleColors') return {useMuscleColors: selector => selector({preferences:musclePreferences,hydrated:true,saving:false,error:null})};
     if (id==='@/store/workoutStore') return {useWorkoutStore:store,toLocalCalendarDate:load('@/store/workoutCalendar').toLocalCalendarDate};
@@ -95,7 +98,7 @@ function uiHarness(entry, state, params = {}, catalog = [], exerciseInfo = null,
   load('@/constants/muscleColors').applyMuscleColorPreferences(musclePreferences);
   const module=load(entry);
   const component=display.component ? module[display.component] : module.testHomeContent ?? Object.values(module).find(v=>typeof v==='function');
-  return {events,launch:()=>launchApi,beforeRemove(){let prevented=false;listeners.beforeRemove?.({preventDefault(){prevented=true;}});return prevented;},unmount(){cleanups.forEach(cleanup=>cleanup?.());},render(props={}) {let tree;for(let i=0;i<5;i++){cursor=0;dirty=false;tree=component(props);while(effects.length)effects.shift()();if(!dirty)break;}return tree;}};
+  return {events,reactions,blur(){focused=false;focusCleanups.forEach(fn=>fn?.());focusCleanups.clear();},focus(){focused=true;focusEffects.forEach((fn,i)=>focusCleanups.set(i,fn()));},launch:()=>launchApi,beforeRemove(){let prevented=false;listeners.beforeRemove?.({preventDefault(){prevented=true;}});return prevented;},unmount(){cleanups.forEach(cleanup=>cleanup?.());focusCleanups.forEach(cleanup=>cleanup?.());},render(props={}) {let tree;for(let i=0;i<5;i++){cursor=0;dirty=false;tree=component(props);while(effects.length)effects.shift()();if(!dirty)break;}return tree;}};
 }
 function nodes(tree) { if(!tree || typeof tree!=='object')return [];if(Array.isArray(tree))return tree.flatMap(nodes);return [tree,...nodes(tree.props?.children)]; }
 const find=(tree,type)=>nodes(tree).find(n=>n.type===type || n.type?.name===type);
@@ -298,6 +301,25 @@ test('Weight wheels commit display-unit tenths without rewriting the stored load
   wheel.props.onChange(135.7);assert.equal(edits[1],135.7/2.20462);
 });
 
+test('Weight picker geometry is stable across digit boundaries, fractions and units without mount writes',()=>{
+  const edits=[];
+  const h=uiHarness('@/components/WorkoutWeightPicker',{});
+  let geometry;
+  for(const compact of [true,false])for(const unit of ['KG','LBS'])for(const value of [0,0.1,9,9.9,10,99,99.9,100,100.5,998.9,999]) {
+    const tree=h.render({value,unit,compact,onChange:v=>edits.push(v)});
+    const wheels=nodes(tree).filter(n=>n.type==='WorkoutNumberWheel');
+    const parents=wheels.map(w=>nodes(tree).find(n=>n.props?.children?.includes(w)));
+    const selection=nodes(tree).find(n=>n.props?.pointerEvents==='none');
+    const next=JSON.stringify([parents.map(n=>n.props.style),selection.props.style]);
+    geometry??=next;assert.equal(next,geometry,`${value} ${unit}`);
+    assert.equal(wheels[0].props.value,Math.floor(value));
+    assert.equal(wheels[1].props.value,Math.round(value*10)%10);
+    assert.equal(wheels[0].props.textAlign,'right');assert.equal(wheels[1].props.textAlign,'left');
+    assert.ok(wheels[0].props.label.includes(unit));
+  }
+  assert.deepEqual(edits,[]);
+});
+
 test('Weight and reps pickers stop at 999 and 99 without changing stored values on mount',()=>{
   const edits=[];
   const weights=uiHarness('@/components/WorkoutWeightPicker',{});
@@ -414,6 +436,21 @@ test('Reps ruler snaps at rest, bounds values, and exposes adjustment without a 
   tree.props.onAccessibilityAction({nativeEvent:{actionName:'increment'}});assert.equal(edits.at(-1),7);
   tree=h.render({...props,value:1});tree.props.onAccessibilityAction({nativeEvent:{actionName:'decrement'}});assert.equal(edits.at(-1),7);
   assert.equal(tree.props.accessibilityValue.text,'1 reps');
+});
+
+test('Logger scroll viewport reaches the safe-area bottom with floating-action clearance inside the content',()=>{
+  const first=exercise();first.sets[0].completed=false;
+  const h=uiHarness('@/app/workout',stateFor([first,{...first,name:'Incline Dumbbell Press'}]));
+  const tree=h.render();const scroll=find(tree,'Animated.ScrollView');
+  const card=nodes(scroll).find(n=>n.props?.accessibilityHint==='Shows the remaining exercise queue');
+  assert.ok(card);assert.equal(card.props.style.height,82);assert.equal(card.props.style.borderRadius,22);
+  const ancestors=nodes(tree).filter(n=>n!==scroll && nodes(n.props?.children).includes(scroll));
+  assert.ok(ancestors.every(n=>!n.props?.style?.paddingBottom), 'no reserved strip may shorten the scroll viewport');
+  assert.equal(scroll.props.contentContainerStyle.paddingBottom,60+20+16);
+  assert.equal(scroll.props.keyboardShouldPersistTaps,'handled');
+  assert.equal(find(scroll,'ExerciseActionPill'),undefined,'floating actions remain outside the scroller');
+  assert.ok(find(tree,'ExerciseActionPill'));
+  card.props.onPress();assert.equal(find(h.render(),'UpNextSheet').props.visible,true);
 });
 
 test('Adhoc UI: empty logger safely mounts only empty content and add picker; minimize retains session',()=>{
@@ -790,6 +827,42 @@ function trainState(mode = 'none') {
   };
   return { state, starts };
 }
+
+test('Train departure is restored beneath the modal and a blurred slider cannot publish a stale fade',()=>{
+  const departure={value:0,get(){return this.value;},set(value){this.value=value;}};
+  const slider=uiHarness('@/components/home/SlideToStart',{}, {},[],null,{}, {departure,platform:'ios'});
+  slider.render({color:'#FF7A3D',workoutName:'Push',onStart(){}});
+  const reaction=[...slider.reactions.values()][0];
+  reaction.react(1);assert.equal(departure.value,1,'focused drag fades Home');
+  slider.blur();assert.equal(departure.value,0,'restore before minimize exposes Home');
+  reaction.react(1);assert.equal(departure.value,0,'late offset delivery cannot re-hide Home');
+  slider.focus();assert.equal(reaction.prepare(),0,'return starts at zero');
+  slider.unmount();assert.equal(departure.value,0);
+
+  const home=uiHarness('@/app/(tabs)/index',trainState().state,{},[],null,{}, {component:'default'});
+  const tree=home.render();const progress=tree.props.value;
+  progress.set(1);home.blur();assert.equal(progress.get(),0);
+  progress.set(1);home.focus();assert.equal(progress.get(),0);home.unmount();
+});
+
+for(const mode of ['none','stack','custom']) test(`Train ${mode}: repeated resume/minimize retains content and the existing session`,()=>{
+  const {state,starts}=trainState(mode);
+  state.currentSession=stateFor([exercise(),{...exercise(),name:'Cable Fly'}]).currentSession;
+  state.workoutFocus={workoutId:'7',exerciseIndex:1};
+  const saved=JSON.stringify([state.currentSession,state.workoutFocus]);
+  const h=uiHarness('@/app/(tabs)/index',state);
+  try {
+    for(let cycle=0;cycle<3;cycle++) {
+      const tree=h.render();assert.ok(textOf(tree).includes('greeting:'));
+      if(mode==='none')assert.ok(textOf(tree).includes('Your routines'));
+      else assert.ok(find(tree,'YourSplitCard'));
+      const hero=find(tree,'WorkoutHeroCard');assert.equal(hero.props.actionLabel,'Resume workout');
+      hero.props.onPress();h.blur();h.focus();
+      assert.equal(JSON.stringify([state.currentSession,state.workoutFocus]),saved);
+    }
+    assert.equal(h.events.filter(event=>event[0]==='push').length,3);assert.deepEqual(starts,[]);
+  } finally {h.unmount();}
+});
 
 test('Train without a program: opening and browsing show a ready hero and never launch a session', () => {
   const { state, starts } = trainState();

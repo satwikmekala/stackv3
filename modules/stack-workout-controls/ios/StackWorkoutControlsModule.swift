@@ -143,11 +143,10 @@ final class StackWeightPickerView: ExpoView, UIPickerViewDataSource, UIPickerVie
   let onValueChange = EventDispatcher()
   var value = 0.0
   var hapticsEnabled = true
-  var unit = "kg" { didSet { unitLabel.text = unit } }
+  var unit = "kg" { didSet { unitLabel.text = unit; setNeedsLayout() } }
   var compact = false {
     didSet {
       guard compact != oldValue else { return }
-      picker.reloadAllComponents()
       setNeedsLayout()
     }
   }
@@ -158,38 +157,43 @@ final class StackWeightPickerView: ExpoView, UIPickerViewDataSource, UIPickerVie
   private let wholeNumberMaximum = 999
   private let maximumTenths = 9990
   private var selectedTenths = -1
-  private var wholeDigitCount = 1
-  private var laidOutDigitCount = 0
 
-  private var numberFont: UIFont {
-    UIFontMetrics(forTextStyle: .title1).scaledFont(
+  private var unitWidth: CGFloat {
+    let font = UIFontMetrics(forTextStyle: .body).scaledFont(for: .systemFont(ofSize: 17, weight: .medium), maximumPointSize: 22)
+    // Reserve both supported suffixes so switching units keeps the same frame.
+    return max(28, ["KG", "LBS", unit].map {
+      ceil(($0 as NSString).size(withAttributes: [.font: font]).width)
+    }.max() ?? 28)
+  }
+
+  private var pickerWidth: CGFloat {
+    max(0, min(compact ? 160 : 196, bounds.width - (compact ? 0 : unitWidth + 8)))
+  }
+
+  private func columnWidths(for font: UIFont) -> [CGFloat] {
+    let digit = ceil(("0" as NSString).size(withAttributes: [.font: font]).width)
+    let dot = ceil(("." as NSString).size(withAttributes: [.font: font]).width)
+    return [digit * CGFloat(String(wholeNumberMaximum).count), dot, digit]
+  }
+
+  private var numberFont = UIFont.monospacedDigitSystemFont(ofSize: 40, weight: .medium)
+
+  private func fittedNumberFont() -> UIFont {
+    let preferred = UIFontMetrics(forTextStyle: .title1).scaledFont(
       for: .monospacedDigitSystemFont(ofSize: compact ? 34 : 40, weight: .medium),
       maximumPointSize: compact ? 42 : 48)
+    // Fit the entire supported range to this viewport, never the selected row.
+    // UIKit reserves 32 pt for component gutters. At large text sizes or on a
+    // narrow phone, all rows use the same fitted font throughout the gesture.
+    let available = max(1, pickerWidth - 32)
+    var font = preferred
+    while columnWidths(for: font).reduce(0, +) > available && font.pointSize > 1 {
+      font = preferred.withSize(font.pointSize - 0.5)
+    }
+    return font
   }
 
-  private var numberColumnWidths: [CGFloat] {
-    let digit = ceil(("0" as NSString).size(withAttributes: [.font: numberFont]).width)
-    let dot = ceil(("." as NSString).size(withAttributes: [.font: numberFont]).width)
-    return [digit * CGFloat(wholeDigitCount), dot, digit]
-  }
-
-  private func resizeForSelection(animated: Bool) {
-    let digits = String(max(0, selectedTenths) / 10).count
-    guard digits != wholeDigitCount else { return }
-    wholeDigitCount = digits
-    setNeedsLayout()
-    let changes = {
-      self.layoutIfNeeded()
-      self.picker.layoutIfNeeded()
-    }
-    if animated && window != nil && !UIAccessibility.isReduceMotionEnabled {
-      UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.9,
-                     initialSpringVelocity: 0, options: [.beginFromCurrentState, .allowUserInteraction],
-                     animations: changes)
-    } else {
-      UIView.performWithoutAnimation(changes)
-    }
-  }
+  private var numberColumnWidths: [CGFloat] { columnWidths(for: numberFont) }
 
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
@@ -205,7 +209,6 @@ final class StackWeightPickerView: ExpoView, UIPickerViewDataSource, UIPickerVie
     if #available(iOS 17.0, *) {
       registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) {
         (view: StackWeightPickerView, _: UITraitCollection) in
-        view.picker.reloadAllComponents()
         view.setNeedsLayout()
       }
     }
@@ -216,9 +219,7 @@ final class StackWeightPickerView: ExpoView, UIPickerViewDataSource, UIPickerVie
     let tenths = Int((min(999, max(0, value)) * 10).rounded())
     // Acknowledging a native selection must not interrupt either wheel.
     guard tenths != selectedTenths else { return }
-    let hadSelection = selectedTenths >= 0
     selectedTenths = tenths
-    resizeForSelection(animated: hadSelection)
     let whole = tenths / 10
     picker.selectRow(whole, inComponent: 0, animated: false)
     picker.selectRow(tenths % 10, inComponent: 2, animated: false)
@@ -228,19 +229,16 @@ final class StackWeightPickerView: ExpoView, UIPickerViewDataSource, UIPickerVie
     super.layoutSubviews()
     let unitFont = UIFontMetrics(forTextStyle: .body).scaledFont(for: .systemFont(ofSize: 17, weight: .medium), maximumPointSize: 22)
     unitLabel.font = unitFont
-    let unitWidth = max(28, ceil((unit as NSString).size(withAttributes: [.font: unitFont]).width))
     unitLabel.isHidden = compact
-    // Equal 12-point outer insets around the digits, plus UIKit's 32-point gutters.
-    // Keep the enclosing weight column fixed while the native pill grows inward/outward.
-    let desiredWidth = numberColumnWidths.reduce(0, +) + 56
-    let pickerWidth = max(0, min(desiredWidth, bounds.width - (compact ? 0 : unitWidth + 8)))
-    let left = max(0, (bounds.width - pickerWidth - (compact ? 0 : unitWidth + 8)) / 2)
-    let widthChanged = abs(picker.bounds.width - pickerWidth) > 0.5
-    picker.frame = CGRect(x: left, y: 0, width: pickerWidth, height: bounds.height)
-    if widthChanged || laidOutDigitCount != wholeDigitCount {
-      laidOutDigitCount = wholeDigitCount
-      picker.reloadAllComponents()
-    }
+    // Stable selection pill and three-digit capacity, including while scrolling.
+    let width = pickerWidth
+    let left = max(0, (bounds.width - width - (compact ? 0 : unitWidth + 8)) / 2)
+    let widthChanged = abs(picker.bounds.width - width) > 0.5
+    picker.frame = CGRect(x: left, y: 0, width: width, height: bounds.height)
+    let font = fittedNumberFont()
+    let fontChanged = numberFont.pointSize != font.pointSize
+    numberFont = font
+    if widthChanged || fontChanged { picker.reloadAllComponents() }
     unitLabel.frame = CGRect(x: picker.frame.maxX + 8, y: (bounds.height - 44) / 2, width: unitWidth, height: 44)
   }
 
@@ -251,10 +249,7 @@ final class StackWeightPickerView: ExpoView, UIPickerViewDataSource, UIPickerVie
   }
 
   func pickerView(_ pickerView: UIPickerView, widthForComponent component: Int) -> CGFloat {
-    let widths = numberColumnWidths
-    let available = max(0, pickerView.bounds.width - 56)
-    let scale = min(1, available / widths.reduce(0, +))
-    return widths[component] * scale
+    numberColumnWidths[component]
   }
 
   func pickerView(_ pickerView: UIPickerView, rowHeightForComponent component: Int) -> CGFloat { compact ? 40 : 44 }
@@ -267,8 +262,7 @@ final class StackWeightPickerView: ExpoView, UIPickerViewDataSource, UIPickerVie
     label.textAlignment = component == 0 ? .right : component == 2 ? .left : .center
     label.textColor = UIColor(red: 245/255, green: 240/255, blue: 232/255, alpha: 1)
     label.font = numberFont
-    label.adjustsFontSizeToFitWidth = true
-    label.minimumScaleFactor = 0.4
+    label.adjustsFontSizeToFitWidth = false
     label.isAccessibilityElement = false
     return label
   }
@@ -282,7 +276,6 @@ final class StackWeightPickerView: ExpoView, UIPickerViewDataSource, UIPickerVie
     }
     guard tenths != selectedTenths else { return }
     selectedTenths = tenths
-    resizeForSelection(animated: true)
     if hapticsEnabled { feedback.selectionChanged() }
     onValueChange(["value": Double(tenths) / 10])
   }
