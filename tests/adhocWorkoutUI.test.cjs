@@ -857,10 +857,42 @@ for(const mode of ['none','stack','custom']) test(`Train ${mode}: repeated resum
       if(mode==='none')assert.ok(textOf(tree).includes('Your routines'));
       else assert.ok(find(tree,'YourSplitCard'));
       const hero=find(tree,'WorkoutHeroCard');assert.equal(hero.props.actionLabel,'Resume workout');
-      hero.props.onPress();h.blur();h.focus();
+      hero.props.onPress();
+      let covered=h.render();
+      assert.equal(find(covered,'WorkoutHeroCard').props.actionLabel,'Resume workout','resuming must keep the active hero underneath the modal');
+      h.blur();
+      covered=h.render();
+      assert.equal(find(covered,'WorkoutHeroCard').props.actionLabel,'Resume workout','minimize reveals Home before it regains focus');
+      assert.equal(nodes(covered).some(node=>node.props?.accessibilityLabel==='Start empty workout'),false);
+      h.focus();
       assert.equal(JSON.stringify([state.currentSession,state.workoutFocus]),saved);
     }
     assert.equal(h.events.filter(event=>event[0]==='push').length,3);assert.deepEqual(starts,[]);
+  } finally {h.unmount();}
+});
+
+for(const mode of ['none','stack','custom']) test(`Train ${mode}: a newly launched workout prepares the covered Home before minimize`,()=>{
+  const {state}=trainState(mode);
+  const session=stateFor([exercise()]).currentSession;
+  state.startEmptyWorkout=()=>{state.currentSession=session;};
+  state.startWorkoutFromArchetype=()=>{state.currentSession=session;};
+  const h=uiHarness('@/app/(tabs)/index',state);
+  try {
+    const ready=h.render();
+    // Custom mode can start an empty workout without a loaded routine.
+    const start=mode==='custom'
+      ? nodes(ready).find(node=>node.props?.accessibilityLabel==='Start empty workout')
+      : find(ready,'WorkoutHeroCard');
+    start.props.onPress();
+    const departing=h.render();
+    assert.notEqual(find(departing,'WorkoutHeroCard').props.actionLabel,'Resume workout','retain the source until navigation covers Home');
+    h.blur();
+    const covered=h.render();
+    assert.equal(find(covered,'WorkoutHeroCard').props.actionLabel,'Resume workout','covered Home is ready before any return focus event');
+    assert.equal(nodes(covered).some(node=>node.props?.accessibilityLabel==='Start empty workout'),false);
+    h.focus();
+    assert.equal(textOf(h.render()),textOf(covered),'return focus must not change the revealed layout');
+    assert.equal(state.currentSession,session);
   } finally {h.unmount();}
 });
 

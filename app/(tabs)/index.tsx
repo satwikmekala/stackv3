@@ -142,7 +142,9 @@ function HomeContent() {
   const departure = useContext(HomeDeparture);
   const [launchRevision, setLaunchRevision] = useState(0);
   const launchError = useWorkoutLaunch(state => state.intent ? null : state.error);
-  // Keep the source handle mounted while session creation updates the store.
+  // Keep the source handle mounted until navigation covers Home. Blur releases
+  // this preview so the transparent workout modal has the live layout beneath
+  // it throughout minimize, before Home receives its next focus event.
   const currentSession = departing ? null : liveSession;
   const currentCustomSplit = useWorkoutStore((state) => state.currentCustomSplit);
   const customSplits = useWorkoutStore((state) => state.customSplits);
@@ -186,6 +188,7 @@ function HomeContent() {
     startingWorkoutRef.current = false;
     workoutLaunch.resetAfterNavigation();
     setDeparting(false);
+    return () => { setDeparting(false); };
   }, [setSelectedArchetype, setSelectedCustomWorkoutId]));
 
   // A failed read keeps the selection and offers Retry; a proven missing
@@ -285,7 +288,9 @@ function HomeContent() {
       intent = { kind: 'custom', splitId: activeSplitId, workoutId: selectedCustomWorkout.id, origin };
     else if (!isCustomMode && nextUp.length) intent = { kind: 'stack', archetypes: [...nextUp], variants: nextUp.map(getNextArchetypeVariant), origin };
     else { startingWorkoutRef.current = false; return; }
-    setDeparting(true);
+    // Resume already has the correct active-session layout. Freezing it would
+    // replace that layout with the launch preview underneath the modal.
+    setDeparting(!useWorkoutStore.getState().currentSession);
     const result = workoutLaunch.request(intent);
     if (result.kind !== 'started' && result.kind !== 'resume') {
       startingWorkoutRef.current = false;

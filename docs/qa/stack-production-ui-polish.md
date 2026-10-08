@@ -1,5 +1,11 @@
 # Stack production UI polish
 
+## Follow-up — minimize briefly reveals the launch preview
+
+Reported from TestFlight build 10 on 8 October 2026 with `IMG_7460.PNG`: the shrinking workout exposes the routine hero and “Start empty workout,” then Home changes layout after focus returns. `HomeContent` kept `departing` true until refocus, masking the live session beneath the transparent modal. It also enabled that mask when resuming an existing session.
+
+Home now clears the launch preview on blur, once navigation covers the source, and preserves the active-session layout on resume. Regression checks inspect the covered Home before refocus in no-program, Stack, and custom modes, including repeated resume cycles and new launches. All six lifecycle cases failed before the fix. The final focused UI/slide/launch/persistence suite passed 274 tests; TypeScript, changed-file ESLint, and whitespace checks passed. This verifies render/lifecycle behavior; physical-device transition smoothness remains unverified. Build 10 does not contain this follow-up fix.
+
 Implemented sequentially on 8 October 2026. The changes address logger clipping, Train departure lifecycle, and weight-picker geometry while retaining the current screen hierarchy, colors, interactions, and persisted workout format. No dependencies were added, no production data was modified, and nothing was pushed or deployed. The working tree was clean at the initial inspection.
 
 The supplied attachment contained the request text, but not the referenced device screenshots. Physical iPhone acceptance remains pending; automated checks and the native simulator preview are described separately below.
